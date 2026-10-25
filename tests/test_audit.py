@@ -240,3 +240,14 @@ def test_sweep_device_selection():
     rng = np.random.default_rng(0)
     res = sweep(rng.standard_normal((1000, 16)).astype(np.float32), k=5, n_queries=50, device="cpu")
     assert res.device == "cpu" and all(p.device == "cpu" for p in res.points)
+
+
+def test_mcp_server_exposes_tools():
+    pytest = __import__("pytest")
+    pytest.importorskip("mcp")
+    import asyncio
+
+    from vecscope.mcp_server import mcp as server
+
+    tools = asyncio.run(server.list_tools())
+    assert {t.name for t in tools} >= {"audit_embeddings", "sweep_index"}

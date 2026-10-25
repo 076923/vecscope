@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-26
+
+### Fixed
+
+- MCP server failed to import with `mcp` 2.x, which renamed `FastMCP` to `MCPServer`; both
+  1.x and 2.x are now supported and the server is smoke-tested in CI
+
+### Added
+
+- Python 3.14 classifier and a `.gitattributes` that normalizes line endings
+
 ## [0.1.0] - 2026-10-25
 
 ### Added
