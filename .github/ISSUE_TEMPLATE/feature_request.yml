@@ -1,0 +1,20 @@
+name: Feature request
+description: A new finding, input format, or agent integration
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What retrieval failure would this help an agent see?
+      description: Describe the symptom first ("same chunks for every query"), then the measurement.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Proposed evidence
+      description: The metric, how it is computed, and a reference if one exists.
+  - type: textarea
+    id: verdict
+    attributes:
+      label: What should the agent do when it fails?
