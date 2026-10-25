@@ -52,12 +52,16 @@ class SweepResult:
 
 def gpu_available(faiss) -> bool:
     """True when this faiss build has GPU support and at least one GPU is visible."""
-    if not hasattr(faiss, "StandardGpuResources") or not hasattr(faiss, "get_num_gpus"):
-        return False
+    needed = ("StandardGpuResources", "GpuParameterSpace", "index_cpu_to_gpu", "get_num_gpus")
+    if not all(hasattr(faiss, name) for name in needed):
+        return False  # CPU wheels (notably on macOS) ship partial GPU stubs
     try:
-        return faiss.get_num_gpus() > 0
-    except (RuntimeError, AttributeError):  # GPU probing can fail on a broken driver
+        if faiss.get_num_gpus() <= 0:
+            return False
+        faiss.StandardGpuResources()  # fails on a stub build or a broken driver
+    except (RuntimeError, AttributeError, TypeError):
         return False
+    return True
 
 
 def _resolve_device(faiss, device: str) -> str:
