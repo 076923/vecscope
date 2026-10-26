@@ -286,10 +286,10 @@ reproduces it, no model download needed.
 
 | finding | Cohere v3 (ko wiki) | Cohere v3 (en wiki) | ada-002 (dbpedia) | 3-large (dbpedia) | MiniLM-L6 (wiki) | bge-m3 (wiki) | mxbai-large (wiki) | gte-base (arxiv) |
 |---|---|---|---|---|---|---|---|---|
-| hubness | 1.47 | 1.16 | 1.56 | 1.21 | 1.59 | 1.85 | 1.43 | 2.28 warn |
+| hubness | 1.47 | 1.16 | 1.56 | 1.21 | 1.59 | 1.85 | 1.43 | 2.28<br>warn |
 | antihubs | 0.009 | 0.005 | 0.013 | 0.005 | 0.022 | 0.026 | 0.020 | 0.013 |
-| anisotropy | 0.333 warn | 0.228 | 0.692 **fail** | 0.086 | 0.026 | 0.307 warn | 0.330 warn | 0.210 |
-| effective_rank | 0.158 | 0.178 | 0.090 warn | 0.148 | 0.285 | 0.143 | 0.087 warn | 0.136 |
+| anisotropy | 0.333<br>warn | 0.228 | 0.692<br>**fail** | 0.086 | 0.026 | 0.307<br>warn | 0.330<br>warn | 0.210 |
+| effective_rank | 0.158 | 0.178 | 0.090<br>warn | 0.148 | 0.285 | 0.143 | 0.087<br>warn | 0.136 |
 | collapse | 0.002 | 0.002 | 0.000 | 0.000 | 0.001 | 0.000 | 0.017 | 0.000 |
 | rogue_dimensions | 0.003 | 0.003 | 0.002 | 0.002 | 0.004 | 0.002 | 0.002 | 0.002 |
 | norms | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.007 |
