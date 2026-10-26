@@ -76,9 +76,21 @@ def _resolve_device(faiss, device: str) -> str:
     return "gpu" if (device == "gpu" or (device == "auto" and has_gpu)) else "cpu"
 
 
+def _drop_self(idx: np.ndarray, qids: np.ndarray | None, k: int) -> np.ndarray:
+    """Keep the first k ids per row after removing the query's own id (and faiss -1 fillers)."""
+    out = np.full((idx.shape[0], k), -1, dtype=np.int64)
+    for i, row in enumerate(idx):
+        keep = row[row >= 0]
+        if qids is not None:
+            keep = keep[keep != qids[i]]
+        keep = keep[:k]
+        out[i, : keep.size] = keep
+    return out
+
+
 def _recall(approx: np.ndarray, exact: np.ndarray) -> float:
     k = exact.shape[1]
-    hits = [np.intersect1d(a[:k], e, assume_unique=False).size for a, e in zip(approx, exact)]
+    hits = [np.intersect1d(a[a >= 0], e[e >= 0]).size for a, e in zip(approx, exact)]
     return float(np.mean(hits) / k)
 
 
@@ -98,6 +110,19 @@ def sweep(
         raise ImportError('index sweeps need faiss: pip install "vecscope[index]"') from e
     from vecscope import __version__
 
+    if isinstance(k, bool) or not isinstance(k, (int, np.integer)) or k < 1:
+        raise ValueError(f"k must be a positive integer, got {k!r}")
+    if n_queries < 1:
+        raise ValueError("n_queries must be at least 1")
+    if not (0.0 < target_recall <= 1.0):
+        raise ValueError("target_recall must be in (0, 1]")
+    x = np.asarray(x, dtype=np.float32)
+    if x.ndim != 2 or x.shape[0] <= k:
+        raise ValueError(f"need a 2-D matrix with more than k={k} rows, got shape {x.shape}")
+    if queries is not None:
+        queries = np.asarray(queries, dtype=np.float32)
+        if queries.ndim != 2 or queries.shape[1] != x.shape[1]:
+            raise ValueError(f"queries must be shaped (m, {x.shape[1]}), got {queries.shape}")
     dev = _resolve_device(faiss, device)
     gpu_res = faiss.StandardGpuResources() if dev == "gpu" else None
     gpu_name = None
@@ -115,30 +140,29 @@ def sweep(
     c = normalize(x)
     n, d = c.shape
     rng = np.random.default_rng(seed)
+    qids = None  # row ids of the queries inside the corpus, so self can be removed by id
     if queries is None:
-        q = c[rng.choice(n, min(n_queries, n), replace=False)]
+        qids = rng.choice(n, min(n_queries, n), replace=False)
+        q = c[qids]
     else:
         q = normalize(queries)
         if q.shape[0] > n_queries:
             q = q[rng.choice(q.shape[0], n_queries, replace=False)]
-    kq = k + 1 if queries is None else k
+    kq = min(k + 1, n) if queries is None else min(k, n)
     if dev == "gpu":  # exact baseline on the GPU too
         flat = to_device(faiss.IndexFlatIP(d))
         flat.add(c)
-        _, exact_idx = flat.search(q, kq)
+        _, exact_raw = flat.search(q, kq)
     else:
-        exact_idx, _ = query_knn(c, q, kq)
-    if queries is None:  # drop the query itself from its own neighbor list
-        exact_idx = exact_idx[:, 1:]
+        exact_raw, _ = query_knn(c, q, kq)
+    exact_idx = _drop_self(exact_raw, qids, k)
     points: list[SweepPoint] = []
 
     def measure(index, name, params):
         t = time.perf_counter()
-        _, approx = index.search(q, k + 1 if queries is None else k)
+        _, approx = index.search(q, kq)
         qps = q.shape[0] / max(time.perf_counter() - t, 1e-9)
-        if queries is None:
-            approx = approx[:, 1:]
-        return name, params, _recall(approx, exact_idx), qps
+        return name, params, _recall(_drop_self(approx, qids, k), exact_idx), qps
 
     for m in HNSW_GRID["M"]:
         for efc in HNSW_GRID["ef_construction"]:

@@ -23,6 +23,7 @@ def hubness(x: np.ndarray, k: int = 10, knn: np.ndarray | None = None) -> dict:
     top1pct = max(1, int(np.ceil(n * 0.01)))
     hub_share = float(top[:top1pct].sum() / nk.sum())
     antihub_ratio = float((nk == 0).mean())
+    baseline = float(np.exp(-k))  # share with zero hits if neighbors were assigned at random
     return {
         "k": int(k),
         "skewness": skew,
@@ -30,4 +31,6 @@ def hubness(x: np.ndarray, k: int = 10, knn: np.ndarray | None = None) -> dict:
         "expected_k_occurrence": float(k),
         "hub_share_top1pct": hub_share,
         "antihub_ratio": antihub_ratio,
+        "antihub_baseline": baseline,
+        "antihub_excess": max(0.0, antihub_ratio - baseline),
     }

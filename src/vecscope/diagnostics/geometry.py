@@ -18,15 +18,18 @@ import numpy as np
 def rogue_dimensions(x: np.ndarray, top: int = 3) -> dict:
     var = np.asarray(x, dtype=np.float64).var(axis=0)
     total = var.sum()
+    expected = 1.0 / x.shape[1]
     if total <= 0:  # constant matrix: every dimension is equally (un)informative
-        return {"top1_dim_variance_share": 0.0, "top3_dim_variance_share": 0.0,
-                "expected_share": 1.0 / x.shape[1], "rogue_dims": [0, 1, 2][: x.shape[1]]}
+        return {"top1_dim_variance_share": 0.0, "top1_dim_variance_ratio": 0.0,
+                "top3_dim_variance_share": 0.0, "expected_share": expected,
+                "rogue_dims": [0, 1, 2][: x.shape[1]]}
     share = var / total
     order = np.argsort(share)[::-1]
     return {
         "top1_dim_variance_share": float(share[order[0]]),
+        "top1_dim_variance_ratio": float(share[order[0]] / expected),
         "top3_dim_variance_share": float(share[order[:top]].sum()),
-        "expected_share": 1.0 / x.shape[1],
+        "expected_share": expected,
         "rogue_dims": [int(i) for i in order[:top]],
     }
 
@@ -85,25 +88,39 @@ def outliers(nn_dist: np.ndarray, factor: float = 3.0, sample_ids: int = 10) -> 
     }
 
 
-def connectivity(knn: np.ndarray, min_island_frac: float = 0.005, max_iter: int = 1000) -> dict:
-    """Connected components of the symmetrized k-NN graph via min-label propagation.
+def connected_labels(n: int, src: np.ndarray, dst: np.ndarray) -> np.ndarray:
+    """Component label (the smallest member id) for every node of an undirected graph.
+
+    Min-label propagation alone needs as many rounds as the graph diameter, so each round is
+    followed by pointer jumping (label = label[label]) until nothing changes. This converges
+    for any graph; there is deliberately no iteration cap.
+    """
+    a = np.concatenate([src, dst])
+    b = np.concatenate([dst, src])
+    label = np.arange(n)
+    while True:
+        new = label.copy()
+        np.minimum.at(new, a, label[b])
+        new = np.minimum(new, label)
+        while True:  # pointer jumping: follow labels to their root
+            jumped = new[new]
+            if np.array_equal(jumped, new):
+                break
+            new = jumped
+        if np.array_equal(new, label):
+            return label
+        label = new
+
+
+def connectivity(knn: np.ndarray, min_island_frac: float = 0.005) -> dict:
+    """Connected components of the symmetrized k-NN graph.
 
     Large components are ordinary cluster structure. The retrieval risk is small islands:
     components smaller than max(k + 1, min_island_frac * n), which graph-based ANN tends to
     attach to the wrong region or never reach.
     """
     n, k = knn.shape
-    src = np.repeat(np.arange(n), k)
-    dst = knn.ravel()
-    a = np.concatenate([src, dst])
-    b = np.concatenate([dst, src])
-    label = np.arange(n)
-    for _ in range(max_iter):
-        new = label.copy()
-        np.minimum.at(new, a, label[b])
-        if np.array_equal(new, label):
-            break
-        label = new
+    label = connected_labels(n, np.repeat(np.arange(n), k), knn.ravel())
     labels, counts = np.unique(label, return_counts=True)
     min_size = max(k + 1, int(np.ceil(min_island_frac * n)))
     small = counts < min_size

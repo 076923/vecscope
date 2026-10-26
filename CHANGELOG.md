@@ -6,6 +6,50 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
+### Added
+
+- `thresholds` override (`audit(thresholds=...)`, `--thresholds file.json`, MCP `thresholds`);
+  effective thresholds are echoed in the JSON result
+- Every finding carries `likely_causes`, `suggested_action` and `verify_by`; the text output
+  adds a `try:` line for findings that are not `ok`
+- Scenario test suite (`tests/test_scenarios.py`): 13 synthetic defects, 11 degenerate inputs,
+  determinism
+- README: scope statement (vector search implementation, not relevance), threshold caveats,
+  sampling caveats, performance table
+
+- MCP: server instructions with the diagnose/change/re-verify loop, read-only tool
+  annotations, `sample` and `verbose` parameters, a one-line `summary` first in every response,
+  and a `describe_findings` tool
+
+### Changed
+
+- Agent skill rewritten around a diagnose → smallest change → re-audit → compare loop
+- `antihubs` now reports the excess over the random baseline e^-k (`antihub_excess`), so small
+  k no longer trips it on healthy data; `rogue_dimensions` now reports the top dimension's
+  variance as a multiple of the uniform 1/dim share (`top1_dim_variance_ratio`, warn 10x,
+  fail 50x) instead of an absolute share that always warned on low-dimensional vectors
+- `ann_neighbors` combined with sampling now raises instead of being silently dropped
+
+### Fixed
+
+- `connectivity` capped label propagation at 1000 rounds and reported one long-chain component
+  as thousands of islands; it now converges fully (pointer jumping)
+- `vecscope sweep` removed "self" by position, so duplicate or zero rows capped recall below
+  1.0; self is now removed by id for both exact and approximate lists
+- ANN neighbor files are validated (shape, integer ids, id range); ids that point at the item
+  itself are ignored; ids are loaded as integers so values above 2^24 survive
+- Parquet loader picks a list-of-numbers column by type (no longer grabs `embedding_model`)
+- JSON/JSONL loader skips non-numeric lists (tags), rejects empty files and ragged rows with
+  clear errors; text loaders read UTF-8 with BOM and always return 2-D arrays
+- `audit` validates `k`, `sample`, `clusters`, `near_dup_cos`, `thresholds` (type, finiteness)
+  and rejects complex/object dtypes with clear errors instead of crashing deep inside NumPy
+- `sweep` validates `k < n`, `n_queries >= 1`, `target_recall`, query dimensionality
+- MCP tools raise `ToolError`, so the real message (missing file, bad k) reaches the agent
+  instead of "Error executing tool"
+- CLI prints a one-line error and exits 2 on bad input instead of a traceback
+
 ## [0.1.1] - 2026-10-26
 
 ### Fixed

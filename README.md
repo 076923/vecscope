@@ -31,6 +31,12 @@ turns them into one command and one JSON: measurements, `ok` / `warn` / `fail` v
 an explanation an agent can act on. It runs locally on NumPy, needs no model or network, and
 reports the same numbers every time.
 
+`vecscope` diagnoses the **vector search implementation**: the geometry the model produced,
+the hygiene of the corpus, the distance metric, the index and the query pipeline. It does not
+measure relevance. Whether the right documents come back for a question needs labeled queries,
+and a clean audit is evidence that search is not sabotaging retrieval, not proof that retrieval
+is good.
+
 ## Quick start
 
 ### 1. Install
@@ -65,19 +71,22 @@ vecscope audit embeddings.npy
 ```
 
 ```text
-vecscope 0.1.0  n=3000 dim=128 k=10  verdict=FAIL
+vecscope 0.2.0  n=3000 dim=128 k=10  verdict=FAIL
   [FAIL] hubness          skewness=6.9023  (ok < 2, warn >= 2, fail >= 4)
                          k-occurrence skewness 6.90; top 1% of items take 16.3% of all neighbor slots (max N_k=356, expected 10).
-  [FAIL] antihubs         antihub_ratio=0.2180  (ok < 0.05, warn >= 0.05, fail >= 0.2)
-                         21.8% of items are never anyone's neighbor; they are unreachable through k-NN retrieval.
+                         try: re-rank top-k with mutual k-NN or local scaling; if anisotropy also fails, center first
+  [FAIL] antihubs         antihub_excess=0.2180  (ok < 0.05, warn >= 0.05, fail >= 0.2)
+                         21.8% of items are never anyone's neighbor (random data at k=10 would give 0.0%); the excess is unreachable through k-NN retrieval.
+                         try: inspect a sample of never-retrieved items; drop empty inputs, then apply the hubness fix
   [FAIL] anisotropy       mean_random_cosine=0.9782  (ok < 0.3, warn >= 0.3, fail >= 0.6)
                          random pairs have mean cosine 0.978 (isotropic ~0); mean unit vector has norm 0.99; centering would bring the cosine to -0.000.
+                         try: subtract the corpus mean vector and re-normalize, applying the same transform to queries; details.mean_random_cosine_after_centering shows the expected result
   [ok  ] effective_rank   effective_rank_ratio=0.9521  (ok >= 0.1, warn < 0.1, fail < 0.05)
                          effective rank 121.9 of 128 dims (95.2%); low values mean most dimensions carry nothing.
   [ok  ] collapse         near_duplicate_ratio=0.0000  (ok < 0.02, warn >= 0.02, fail >= 0.1)
                          0.0% of items have a neighbor with cosine >= 0.99 (exact duplicates 0.0%).
-  [ok  ] rogue_dimensions top1_dim_variance_share=0.0084  (ok < 0.05, warn >= 0.05, fail >= 0.2)
-                         dimension 7 alone holds 0.8% of variance (uniform would be 0.78%); top 3 dims hold 2.5%. Rogue dimensions dominate cosine.
+  [ok  ] rogue_dimensions top1_dim_variance_ratio=1.0762  (ok < 10, warn >= 10, fail >= 50)
+                         dimension 7 alone holds 0.8% of variance, 1.1x the uniform share of 0.78%; top 3 dims hold 2.5%. Rogue dimensions dominate cosine.
   [ok  ] norms            norm_cv=0.0000  (ok < 0.1, warn >= 0.1, fail >= 0.3)
                          vector norms vary with CV 0.000 (median 1.000, range 1.000-1.000); 0.00% are zero vectors. Unequal norms bias inner-product search toward long vectors.
   [ok  ] metric_mismatch  topk_overlap=1.0000  (ok >= 0.9, warn < 0.9, fail < 0.7)
@@ -94,7 +103,8 @@ vecscope 0.1.0  n=3000 dim=128 k=10  verdict=FAIL
 
 - The first line gives the overall `verdict`: the worst verdict among the findings.
 - Each finding shows the measured value, the range that would be `ok`, and a sentence saying
-  what the number means for retrieval.
+  what the number means for retrieval. Findings that are not `ok` add a `try:` line with the
+  smallest change to test first.
 - The exit code is `1` on `FAIL`, so the same command works as a CI gate.
 - Add `--json` to get the same evidence as JSON for an agent or a script.
 
@@ -103,12 +113,12 @@ vecscope 0.1.0  n=3000 dim=128 k=10  verdict=FAIL
 | Finding | Metric | ok | warn | fail | What it means when it fails |
 | --- | --- | --- | --- | --- | --- |
 | `hubness` | skewness of the k-occurrence distribution | < 2.0 | 2.0 to 4.0 | ≥ 4.0 | a few items appear in everyone's k-NN list and will top every query |
-| `antihubs` | share of items never retrieved as a neighbor | < 5% | 5 to 20% | ≥ 20% | part of the corpus is unreachable through k-NN |
+| `antihubs` | share of items never retrieved as a neighbor, above the random baseline e^-k | < 5% | 5 to 20% | ≥ 20% | part of the corpus is unreachable through k-NN |
 | `anisotropy` | mean cosine of random pairs | < 0.30 | 0.30 to 0.60 | ≥ 0.60 | vectors crowd into a narrow cone, so every pair looks similar |
 | `effective_rank` | participation ratio / dim | ≥ 0.10 | 0.05 to 0.10 | < 0.05 | most dimensions carry nothing |
 | `collapse` | near-duplicate ratio at cosine ≥ 0.99 | < 2% | 2 to 10% | ≥ 10% | top-k is spent on copies of the same item |
 | `ann_recall` | recall@k of ANN neighbors vs exact k-NN | ≥ 0.95 | 0.85 to 0.95 | < 0.85 | the index, not the model, is losing results |
-| `rogue_dimensions` | variance share of the single largest dimension | < 5% | 5 to 20% | ≥ 20% | a few coordinates decide every cosine score |
+| `rogue_dimensions` | variance of the largest dimension as a multiple of the uniform 1/dim share | < 10x | 10 to 50x | ≥ 50x | a few coordinates decide every cosine score |
 | `norms` | coefficient of variation of vector norms | < 0.10 | 0.10 to 0.30 | ≥ 0.30 | inner-product search favors long vectors; zero vectors are reported too |
 | `metric_mismatch` | top-k overlap between cosine and inner product | ≥ 0.90 | 0.70 to 0.90 | < 0.70 | the index metric changes which results come back |
 | `distance_concentration` | random distance / nearest-neighbor distance | ≥ 1.2 | 1.05 to 1.2 | < 1.05 | the nearest neighbor is barely closer than a random item |
@@ -123,8 +133,23 @@ would have after centering, so the agent can see whether centering alone fixes t
 `ann_recall` appears only when you pass an ANN neighbor file with `--ann`; `ood_queries` and
 `query_hubness` only when you pass query embeddings with `--queries`.
 
-Thresholds live in `src/vecscope/evidence.py` (`THRESHOLDS`) and were calibrated on
-[real embeddings](#real-embeddings).
+Each finding also carries `likely_causes`, `suggested_action` and `verify_by`. They are
+hypotheses, not prescriptions: apply the smallest change, re-audit, and compare retrieval on
+real queries before adopting it. The [agent skill](.agents/skills/vecscope/SKILL.md) spells out
+that loop.
+
+Thresholds are defaults calibrated on [eight public models](#real-embeddings); they are a
+starting point for diagnosis, not a universal quality bar. Embedding spaces differ by model,
+language, domain and dimensionality, so a `warn` on a good model is normal and a clean audit
+does not guarantee good search. Override any pair per run:
+
+```bash
+vecscope audit vectors.npy --thresholds my_thresholds.json
+# my_thresholds.json: {"anisotropy.mean_random_cosine": [0.4, 0.7], "hubness.skewness": [2.5, 5]}
+```
+
+The keys are listed in `src/vecscope/evidence.py` (`THRESHOLDS`) and echoed in every JSON
+result under `thresholds`.
 
 ## Queries and clusters
 
@@ -178,8 +203,8 @@ implementation in faiss and stays on the CPU. Force a device with `--device cpu|
 
 ## Use with an agent
 
-`vecscope` ships an MCP server with a single tool, `audit_embeddings`. Register it with any MCP
-client (Claude Code, Cursor, Codex, ...):
+`vecscope` ships an MCP server with three read-only tools: `audit_embeddings`, `sweep_index`
+and `describe_findings`. Register it with any MCP client (Claude Code, Cursor, Codex, ...):
 
 ```bash
 pip install "vecscope[mcp]"
@@ -198,9 +223,12 @@ which finding to fix first.
 
 The agent skill in [`.agents/skills/vecscope/SKILL.md`](.agents/skills/vecscope/SKILL.md) tells
 the agent when to run the audit and what to do about each verdict: center or swap the model,
-deduplicate, re-rank, or rebuild the index. A second tool, `sweep_index`, runs the
-[index sweep](#index-sweep). Agents without MCP can run the CLI with `--json` and read the
-same evidence.
+deduplicate, re-rank, or rebuild the index. The server also carries those instructions, so an
+agent that only has the MCP connection follows the same loop. `sweep_index` runs the
+[index sweep](#index-sweep); `describe_findings` lists every finding with its thresholds,
+causes and actions. Responses start with a one-line `summary`; pass `verbose=false` to drop
+details for findings that are ok. Agents without MCP can run the CLI with `--json` and read
+the same evidence.
 
 ## Use as a library
 
@@ -224,6 +252,7 @@ vecscope audit vectors.parquet --json                  # JSON evidence
 vecscope audit vectors.npy --ann hnsw_neighbors.npy    # score ANN recall against exact k-NN
 vecscope audit vectors.npy --queries queries.npy       # add query-side findings
 vecscope audit vectors.npy --clusters 10               # append a per-cluster report
+vecscope audit vectors.npy --thresholds th.json         # override (warn, fail) pairs
 vecscope audit vectors.npy --fail-on warn              # exit 1 on WARN as well
 vecscope audit vectors.npy --near-dup 0.98             # cosine threshold for near-duplicates
 vecscope audit vectors.npy --sample 0                  # audit every row (default samples 100k)
@@ -255,11 +284,31 @@ embeddings[0]                           # the vector of the first item
 The optional `--ann` file (or `ann_path` in MCP) is an integer array of shape `(n, k)`: row `i`
 holds the ids of the `k` neighbors an ANN index returned for item `i`, in the same row order as
 the embedding file. Any of the formats above works. Ids refer to row positions, so the file
-must come from an index built on exactly these rows; with `--sample` in effect the ANN file is
-ignored because the row ids no longer line up.
+must come from an index built on exactly these rows, so `--ann` requires `--sample 0` (the audit
+refuses to combine the two). Ids that point at the item itself are ignored, so an index that
+returns self first should be queried with k + 1.
 
 The optional `--queries` file (`queries_path` in MCP) holds query embeddings in any of the
 same formats, with the same `dim` as the corpus.
+
+## Performance
+
+Exact k-NN is quadratic in the number of rows, so the full audit (`--sample 0`) costs this
+on a 6-core laptop (Intel i7-8750H, NumPy only, single process). Memory is the peak tracked by
+Python for the audit itself; the process needs the input matrix on top of that.
+
+| rows | dim | time | peak memory |
+|---|---|---|---|
+| 10,000 | 384 | 16 s | 0.4 GiB |
+| 10,000 | 1,536 | 53 s | 0.4 GiB |
+| 50,000 | 384 | 87 s | 2.0 GiB |
+| 50,000 | 1,536 | 109 s | 2.2 GiB |
+| 100,000 | 768 | 191 s | 4.1 GiB |
+
+The default 100k-row sample keeps any corpus inside the last row. Doubling the rows roughly
+quadruples the time; `--queries` adds one more pass over the corpus per query batch, and
+`metric_mismatch` adds a second k-NN pass only when vector norms vary. A sampled audit is a
+statement about the sample: use `--sample 0` when you need every island and outlier counted.
 
 ## How vecscope works
 
@@ -287,11 +336,11 @@ reproduces it, no model download needed.
 | finding | Cohere v3 (ko wiki) | Cohere v3 (en wiki) | ada-002 (dbpedia) | 3-large (dbpedia) | MiniLM-L6 (wiki) | bge-m3 (wiki) | mxbai-large (wiki) | gte-base (arxiv) |
 |---|---|---|---|---|---|---|---|---|
 | hubness | 1.47 | 1.16 | 1.56 | 1.21 | 1.59 | 1.85 | 1.43 | 2.28<br>warn |
-| antihubs | 0.009 | 0.005 | 0.013 | 0.005 | 0.022 | 0.026 | 0.020 | 0.013 |
+| antihubs | 0.009 | 0.005 | 0.013 | 0.005 | 0.022 | 0.026 | 0.019 | 0.013 |
 | anisotropy | 0.333<br>warn | 0.228 | 0.692<br>**fail** | 0.086 | 0.026 | 0.307<br>warn | 0.330<br>warn | 0.210 |
 | effective_rank | 0.158 | 0.178 | 0.090<br>warn | 0.148 | 0.285 | 0.143 | 0.087<br>warn | 0.136 |
 | collapse | 0.002 | 0.002 | 0.000 | 0.000 | 0.001 | 0.000 | 0.017 | 0.000 |
-| rogue_dimensions | 0.003 | 0.003 | 0.002 | 0.002 | 0.004 | 0.002 | 0.002 | 0.002 |
+| rogue_dimensions | 3.2 | 3.2 | 3.0 | 2.5 | 1.7 | 1.8 | 2.0 | 1.8 |
 | norms | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.007 |
 | metric_mismatch | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 0.952 |
 | distance_concentration | 3.00 | 3.00 | 2.53 | 1.86 | 2.93 | 2.77 | 3.99 | 2.30 |
@@ -320,8 +369,10 @@ a network connection.
 <summary><strong>How large a matrix can it handle?</strong></summary>
 
 Exact k-NN is quadratic in the number of rows. By default `vecscope` audits a seeded random
-sample of 100,000 rows when the input is larger, and says so in the output. Use `--sample 0`
-to audit everything.
+sample of 100,000 rows when the input is larger, and says so in the output (`sampled: true`,
+`n_total`). A sampled result describes the sample, not the whole corpus: rare clusters, small
+islands and a handful of outliers can be missed. Use `--sample 0` to audit everything; see
+[performance](#performance) for what that costs.
 
 </details>
 

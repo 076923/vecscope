@@ -8,7 +8,7 @@ import sys
 
 from vecscope import __version__
 from vecscope.evidence import audit
-from vecscope.io import load_vectors
+from vecscope.io import load_neighbors, load_vectors
 from vecscope.sweep import render_sweep, sweep
 
 
@@ -25,6 +25,8 @@ def _render_text(ev) -> str:
             f"  [{mark[f.verdict]}] {f.name:<16} {f.metric}={f.value:.4f}  ({f.healthy_range})"
         )
         lines.append(f"{'':25}{f.explanation}")
+        if f.verdict != "ok":
+            lines.append(f"{'':25}try: {f.suggested_action}")
     if ev.clusters:
         lines.append(f"  clusters ({len(ev.clusters)}):")
         lines.append(f"{'':4}{'id':>3}{'size':>7}{'share':>7}{'cos2ctr':>9}{'neardup':>9}"
@@ -43,10 +45,12 @@ def main(argv: list[str] | None = None) -> int:
     a = sub.add_parser("audit", help="audit an embedding matrix")
     a.add_argument("path", help=".npy/.npz/.parquet/.jsonl/.csv with one vector per row")
     a.add_argument("-k", type=int, default=10, help="neighbors per item (default 10)")
-    a.add_argument("--ann", help="optional .npy of ANN neighbor indices (n x k) to score recall")
+    a.add_argument("--ann", help="optional (n x k) neighbor ids from an ANN index, one row per "
+                                 "embedding row; needs --sample 0; self ids are ignored")
     a.add_argument("--queries", help="optional query embeddings (m x dim) for query-side findings")
     a.add_argument("--clusters", type=int, default=0,
                    help="attach a per-cluster report with this many clusters (0 = off)")
+    a.add_argument("--thresholds", help='JSON file of overrides, e.g. {"hubness.skewness": [2.5, 5]}')
     a.add_argument("--near-dup", type=float, default=0.99, help="cosine threshold for near-dups")
     a.add_argument("--sample", type=int, default=100_000,
                    help="audit a seeded random subset when n exceeds this (0 = all rows)")
@@ -65,7 +69,18 @@ def main(argv: list[str] | None = None) -> int:
                         "(default auto); HNSW is CPU-only in faiss")
     s.add_argument("--json", action="store_true", help="emit JSON instead of text")
     args = p.parse_args(argv)
+    try:
+        return _run(args)
+    except (ValueError, TypeError, FileNotFoundError, ImportError, OSError, json.JSONDecodeError) as e:
+        print(f"vecscope: error: {e}", file=sys.stderr)
+        return 2
 
+
+def _run(args) -> int:
+    if args.cmd == "audit" and args.sample < 0:
+        raise ValueError("--sample must be 0 (all rows) or a positive number")
+    if args.cmd == "audit" and args.clusters < 0:
+        raise ValueError("--clusters must be 0 or a positive number")
     x = load_vectors(args.path)
     if args.cmd == "sweep":
         q = load_vectors(args.queries) if args.queries else None
@@ -74,10 +89,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(res.to_dict(), indent=2) if args.json else render_sweep(res))
         return 0
 
-    ann = load_vectors(args.ann).astype(int) if args.ann else None
+    ann = load_neighbors(args.ann) if args.ann else None
     q = load_vectors(args.queries) if args.queries else None
+    th = None
+    if args.thresholds:
+        with open(args.thresholds, encoding="utf-8") as fh:
+            th = json.load(fh)
     ev = audit(x, k=args.k, ann_neighbors=ann, near_dup_cos=args.near_dup,
-               sample=args.sample or None, queries=q, clusters=args.clusters)
+               sample=args.sample or None, queries=q, clusters=args.clusters, thresholds=th)
     print(ev.to_json() if args.json else _render_text(ev))
     level = {"ok": 0, "warn": 1, "fail": 2}
     return 1 if level[ev.verdict] >= level[args.fail_on] else 0

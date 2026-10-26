@@ -44,5 +44,5 @@ def anisotropy(x: np.ndarray, sample: int = 20000, seed: int = 0) -> dict:
         "mean_random_cosine_after_centering": mean_cos_centered,
         "top1_pc_variance_share": float(var[0]) if var.size else 0.0,
         "effective_rank": effective_rank,
-        "effective_rank_ratio": effective_rank / float(min(d, sub.shape[0])),
+        "effective_rank_ratio": effective_rank / float(max(1, min(d, sub.shape[0] - 1))),
     }

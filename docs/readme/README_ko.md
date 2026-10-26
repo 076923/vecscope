@@ -6,7 +6,7 @@
 
 ### 에이전트를 위한 임베딩 공간 진단 도구
 
-**벡터 인덱스를 신뢰하기 전에, 에이전트가 검색 공간부터 점검하게 하세요.**
+**벡터 인덱스를 신뢰하기에 앞서, 에이전트가 검색 공간의 상태부터 점검하세요.**
 
 [![PyPI version](https://img.shields.io/pypi/v/vecscope?style=flat-square&color=3775a9)](https://pypi.org/project/vecscope/)
 [![Python](https://img.shields.io/pypi/pyversions/vecscope?style=flat-square)](https://pypi.org/project/vecscope/)
@@ -21,16 +21,22 @@
 
 ---
 
-에이전트는 검색 증강 생성(RAG), 의미 기반 검색(semantic search), 추천 검색을 매일 만들지만,
-정작 자신이 검색하는 임베딩 공간은 들여다보지 못합니다. 그래서 검색 품질 문제는 버그처럼
+에이전트는 검색 증강 생성(RAG), 의미 기반 검색(semantic search), 추천 검색을 쉽게 만들지만,
+정작 자신이 검색하는 임베딩 공간은 들여다보지 못합니다. 그러므로 검색 품질 문제는 버그처럼
 드러나지 않고 증상으로만 나타납니다. 무엇을 물어도 같은 청크(chunk) 몇 개가 돌아오고, 유사도
-점수는 전부 0.8 언저리에 몰려 있으며, 상위 k개가 중복 항목으로 채워지고, 전수
-탐색(brute-force)으로는 찾히는 항목이 HNSW에서는 빠집니다.
+점수는 전부 0.8 근처에 몰려 있으며, 상위 k개가 중복 항목으로 채워지고, 전수
+탐색(brute-force)으로는 검색되는 항목이 HNSW에서는 빠집니다.
 
-이런 증상은 저마다 학계에서 정립된 진단 지표로 측정할 수 있습니다. `vecscope`는 그 지표들을
+이런 증상은 정립된 진단 지표로 측정할 수 있습니다. `vecscope`는 그 지표들을
 명령 하나, JSON 하나로 묶었습니다. 결과에는 측정값과 `ok` / `warn` / `fail` 판정, 그리고
-에이전트가 다음 조치를 정할 때 참고할 설명이 함께 들어 있습니다. NumPy만으로 로컬에서
-동작하고, 모델이나 네트워크 연결이 필요 없으며, 같은 입력에는 언제나 같은 결과를 냅니다.
+에이전트가 다음 조치를 정할 때 참고할 설명이 함께 들어 있습니다. NumPy만 활용하여 로컬에서
+동작하고, 모델이나 네트워크 연결이 필요 없으며, 같은 입력에는 언제나 같은 결과를 출력합니다.
+
+`vecscope`가 진단하는 대상은 **벡터 검색 구현**입니다. 모델이 만든 공간의 기하, 코퍼스의
+상태, 거리 척도, 인덱스, 질의 파이프라인이 여기에 해당합니다. 검색 결과의 관련성은 측정하지
+않습니다. 질문에 맞는 문서가 실제로 검색되는지는 정답이 있는 질의로 따로 평가해야 하며, 감사
+결과가 모두 `ok`라는 것은 검색을 방해하는 요인이 없다는 근거이지 검색 품질이 좋다는 증명은
+아닙니다.
 
 ## 빠른 시작
 
@@ -42,7 +48,7 @@ pip install vecscope
 
 ### 2. 임베딩 파일 준비
 
-`vecscope`는 행마다 임베딩 벡터가 하나씩 담긴 파일을 읽습니다. 모델의 `encode`가 돌려주는
+`vecscope`는 행마다 임베딩 벡터가 하나씩 담긴 파일을 읽습니다. 모델의 `encode`가 반환하는
 `(n, dim)` 배열을 `.npy`, `.parquet`, `.jsonl`, `.json`, `.csv` 중 하나로 저장하면 됩니다
 ([전체 형식](#입력-형식)).
 
@@ -66,19 +72,22 @@ vecscope audit embeddings.npy
 ```
 
 ```text
-vecscope 0.1.0  n=3000 dim=128 k=10  verdict=FAIL
+vecscope 0.2.0  n=3000 dim=128 k=10  verdict=FAIL
   [FAIL] hubness          skewness=6.9023  (ok < 2, warn >= 2, fail >= 4)
                          k-occurrence skewness 6.90; top 1% of items take 16.3% of all neighbor slots (max N_k=356, expected 10).
-  [FAIL] antihubs         antihub_ratio=0.2180  (ok < 0.05, warn >= 0.05, fail >= 0.2)
-                         21.8% of items are never anyone's neighbor; they are unreachable through k-NN retrieval.
+                         try: re-rank top-k with mutual k-NN or local scaling; if anisotropy also fails, center first
+  [FAIL] antihubs         antihub_excess=0.2180  (ok < 0.05, warn >= 0.05, fail >= 0.2)
+                         21.8% of items are never anyone's neighbor (random data at k=10 would give 0.0%); the excess is unreachable through k-NN retrieval.
+                         try: inspect a sample of never-retrieved items; drop empty inputs, then apply the hubness fix
   [FAIL] anisotropy       mean_random_cosine=0.9782  (ok < 0.3, warn >= 0.3, fail >= 0.6)
                          random pairs have mean cosine 0.978 (isotropic ~0); mean unit vector has norm 0.99; centering would bring the cosine to -0.000.
+                         try: subtract the corpus mean vector and re-normalize, applying the same transform to queries; details.mean_random_cosine_after_centering shows the expected result
   [ok  ] effective_rank   effective_rank_ratio=0.9521  (ok >= 0.1, warn < 0.1, fail < 0.05)
                          effective rank 121.9 of 128 dims (95.2%); low values mean most dimensions carry nothing.
   [ok  ] collapse         near_duplicate_ratio=0.0000  (ok < 0.02, warn >= 0.02, fail >= 0.1)
                          0.0% of items have a neighbor with cosine >= 0.99 (exact duplicates 0.0%).
-  [ok  ] rogue_dimensions top1_dim_variance_share=0.0084  (ok < 0.05, warn >= 0.05, fail >= 0.2)
-                         dimension 7 alone holds 0.8% of variance (uniform would be 0.78%); top 3 dims hold 2.5%. Rogue dimensions dominate cosine.
+  [ok  ] rogue_dimensions top1_dim_variance_ratio=1.0762  (ok < 10, warn >= 10, fail >= 50)
+                         dimension 7 alone holds 0.8% of variance, 1.1x the uniform share of 0.78%; top 3 dims hold 2.5%. Rogue dimensions dominate cosine.
   [ok  ] norms            norm_cv=0.0000  (ok < 0.1, warn >= 0.1, fail >= 0.3)
                          vector norms vary with CV 0.000 (median 1.000, range 1.000-1.000); 0.00% are zero vectors. Unequal norms bias inner-product search toward long vectors.
   [ok  ] metric_mismatch  topk_overlap=1.0000  (ok >= 0.9, warn < 0.9, fail < 0.7)
@@ -95,28 +104,28 @@ vecscope 0.1.0  n=3000 dim=128 k=10  verdict=FAIL
 
 - 첫 줄의 `verdict`가 전체 판정입니다. 항목별 판정 가운데 가장 낮은 등급을 따릅니다.
 - 항목마다 측정값, `ok`로 판정되는 범위, 그 수치가 검색에서 무엇을 뜻하는지 설명하는 문장이
-  차례로 나옵니다.
+  차례대로 출력됩니다. `ok`가 아닌 항목에는 먼저 시도할 변경을 적은 `try:` 줄이 붙습니다.
 - 판정이 `FAIL`이면 종료 코드가 1이므로 같은 명령을 CI 게이트로 쓸 수 있습니다.
-- `--json`을 붙이면 같은 내용을 에이전트나 스크립트가 읽기 좋은 JSON으로 출력합니다.
+- `--json`을 붙이면 같은 내용을 에이전트나 스크립트가 읽기 쉬운 JSON으로 출력합니다.
 
 ## 진단 항목
 
 | 항목 | 지표 | ok | warn | fail | fail 판정의 의미 |
 | --- | --- | --- | --- | --- | --- |
-| `hubness` | k-출현 빈도(k-occurrence) 분포의 왜도(skewness) | < 2.0 | 2.0~4.0 | ≥ 4.0 | 소수의 항목이 대부분의 질의에서 k-최근접 이웃(k-NN)에 포함되어 검색 결과 상위를 독점한다 |
-| `antihubs` | 어떤 질의에서도 이웃으로 선택되지 않는 항목의 비율 | < 5% | 5~20% | ≥ 20% | 코퍼스(corpus)의 일부에 k-NN 검색으로 도달할 수 없다 |
-| `anisotropy` | 무작위 쌍의 평균 코사인 유사도 | < 0.30 | 0.30~0.60 | ≥ 0.60 | 벡터가 좁은 원뿔 영역에 집중되어 모든 쌍이 유사하게 보인다 |
-| `effective_rank` | 참여 비율(participation ratio)을 차원 수로 나눈 값 | ≥ 0.10 | 0.05~0.10 | < 0.05 | 대부분의 차원이 정보를 담고 있지 않다 |
-| `collapse` | 코사인 유사도 0.99 이상인 근접 중복(near-duplicate) 비율 | < 2% | 2~10% | ≥ 10% | 상위 k개가 동일 항목의 복사본으로 채워진다 |
-| `ann_recall` | 정확한 k-NN 대비 근사 최근접 이웃(ANN) 인덱스의 재현율(recall@k) | ≥ 0.95 | 0.85~0.95 | < 0.85 | 모델이 아니라 인덱스에서 결과가 누락되고 있다 |
-| `rogue_dimensions` | 분산이 가장 큰 단일 차원의 분산 비율 | < 5% | 5~20% | ≥ 20% | 소수의 좌표가 모든 코사인 점수를 결정한다 |
-| `norms` | 벡터 길이(norm)의 변동 계수(coefficient of variation) | < 0.10 | 0.10~0.30 | ≥ 0.30 | 내적(inner product) 검색이 긴 벡터를 우대한다. 길이가 0인 벡터의 비율도 함께 보고한다 |
-| `metric_mismatch` | 코사인과 내적의 상위 k개 겹침 비율 | ≥ 0.90 | 0.70~0.90 | < 0.70 | 인덱스의 거리 척도(metric)에 따라 반환 결과가 달라진다 |
-| `distance_concentration` | 무작위 거리 / 최근접 이웃 거리 | ≥ 1.2 | 1.05~1.2 | < 1.05 | 최근접 이웃이 무작위 항목과 거의 같은 거리에 있다 |
-| `outliers` | 최근접 이웃이 비정상적으로 먼 이상치(outlier) 항목의 비율 | < 1% | 1~5% | ≥ 5% | 불량 항목, 빈 문서, 다른 언어로 된 항목. id를 `details`에 나열한다 |
-| `connectivity` | k-NN 그래프의 작은 섬에 속한 항목 비율 | < 1% | 1~10% | ≥ 10% | 군집(cluster)으로 보기에는 너무 작은 고립 집단. HNSW가 잘못 연결하거나 도달하지 못한다 |
-| `ood_queries` | 코퍼스 항목 간 거리의 99% 지점보다 코퍼스에서 더 먼 질의의 비율 | < 5% | 5~20% | ≥ 20% | 질의와 코퍼스가 같은 공간에 있지 않다. 다른 모델, 질의 접두어 누락, 코퍼스가 다루지 않는 주제 |
-| `query_hubness` | 질의 결과에서 코퍼스 항목의 k-출현 빈도 왜도 | < 2.0 | 2.0~4.0 | ≥ 4.0 | 소수의 항목이 대부분의 질의에 답한다 |
+| `hubness` | k-출현 빈도(k-occurrence) 분포의 왜도(skewness) | < 2.0 | 2.0~4.0 | ≥ 4.0 | 소수의 항목이 대부분의 질의에서 k-최근접 이웃(k-NN)에 포함되어 검색 결과 상위를 독점한다. |
+| `antihubs` | 어떤 질의에서도 이웃으로 선택되지 않는 항목의 비율에서 무작위 기준선 e^-k를 뺀 값 | < 5% | 5~20% | ≥ 20% | 코퍼스(corpus)의 일부에 k-NN 검색으로 도달할 수 없다. |
+| `anisotropy` | 무작위 쌍의 평균 코사인 유사도 | < 0.30 | 0.30~0.60 | ≥ 0.60 | 벡터가 좁은 원뿔 영역에 집중되어 모든 쌍이 유사하게 보인다. |
+| `effective_rank` | 참여 비율(participation ratio)을 차원 수로 나눈 값 | ≥ 0.10 | 0.05~0.10 | < 0.05 | 대부분의 차원이 정보를 담고 있지 않다. |
+| `collapse` | 코사인 유사도 0.99 이상인 근접 중복(near-duplicate) 비율 | < 2% | 2~10% | ≥ 10% | 상위 k개가 동일 항목의 복사본으로 채워진다. |
+| `ann_recall` | 정확한 k-NN 대비 근사 최근접 이웃(ANN) 인덱스의 재현율(recall@k) | ≥ 0.95 | 0.85~0.95 | < 0.85 | 모델이 아니라 인덱스에서 결과가 누락되고 있다. |
+| `rogue_dimensions` | 분산이 가장 큰 차원의 분산이 균등 분배(1/dim) 대비 몇 배인지 | < 10배 | 10~50배 | ≥ 50배 | 소수의 좌표가 모든 코사인 점수를 결정한다. |
+| `norms` | 벡터 길이(norm)의 변동 계수(coefficient of variation) | < 0.10 | 0.10~0.30 | ≥ 0.30 | 내적(inner product) 검색이 긴 벡터를 우대한다. 길이가 0인 벡터의 비율도 함께 보고한다. |
+| `metric_mismatch` | 코사인과 내적의 상위 k개 겹침 비율 | ≥ 0.90 | 0.70~0.90 | < 0.70 | 인덱스의 거리 척도(metric)에 따라 반환 결과가 달라진다. |
+| `distance_concentration` | 무작위 거리 / 최근접 이웃 거리 | ≥ 1.2 | 1.05~1.2 | < 1.05 | 최근접 이웃이 무작위 항목과 거의 같은 거리에 있다. |
+| `outliers` | 최근접 이웃이 비정상적으로 먼 이상치(outlier) 항목의 비율 | < 1% | 1~5% | ≥ 5% | 불량 항목, 빈 문서, 다른 언어로 된 항목으로 id를 `details`에 나열한다. |
+| `connectivity` | k-NN 그래프의 작은 섬에 속한 항목 비율 | < 1% | 1~10% | ≥ 10% | 군집(cluster)으로 보기에는 너무 작은 고립 집단. HNSW가 잘못 연결하거나 도달하지 못한다. |
+| `ood_queries` | 코퍼스 항목 간 거리의 99% 지점보다 코퍼스에서 더 먼 질의의 비율 | < 5% | 5~20% | ≥ 20% | 질의와 코퍼스가 같은 공간에 있지 않다. 원인은 다른 모델, 질의 접두어 누락, 코퍼스가 다루지 않는 주제다. |
+| `query_hubness` | 질의 결과에서 코퍼스 항목의 k-출현 빈도 왜도 | < 2.0 | 2.0~4.0 | ≥ 4.0 | 소수의 항목이 대부분의 질의에 답한다. |
 
 JSON의 각 항목에는 `healthy_range`, `warn_at`, `fail_at`과 세부 수치를 담은 `details`가
 들어 있습니다. `anisotropy`의 `details`에는 같은 벡터를 중심화했을 때의 코사인 값까지 있어서,
@@ -124,8 +133,23 @@ JSON의 각 항목에는 `healthy_range`, `warn_at`, `fail_at`과 세부 수치�
 ANN 이웃 파일을 넘겼을 때, `ood_queries`와 `query_hubness`는 `--queries`로 질의 임베딩을
 넘겼을 때만 나타납니다.
 
-임곗값은 `src/vecscope/evidence.py`의 `THRESHOLDS`에 모여 있으며
-[실제 임베딩](#실제-임베딩-검증)으로 보정했습니다.
+각 항목에는 `likely_causes`(가능한 원인), `suggested_action`(먼저 시도할 조치),
+`verify_by`(확인 방법)도 함께 들어 있습니다. 이는 처방이 아니라 가설입니다. 가장 작은 변경을
+적용하고 다시 감사한 뒤, 실제 질의로 검색 결과를 전후 비교하고 나서 채택해야 합니다.
+[에이전트 스킬](../../.agents/skills/vecscope/SKILL.md)에 이 절차가 정리되어 있습니다.
+
+임곗값은 [공개 모델 8개](#실제-임베딩-검증)로 보정한 기본값이며, 진단의 출발점이지 보편적인
+품질 기준은 아닙니다. 임베딩 공간은 모델, 언어, 도메인, 차원 수에 따라 달라지므로 좋은
+모델에서도 `warn`은 흔하고, 감사 결과가 모두 `ok`라고 해서 검색 품질이 보장되지는 않습니다.
+실행할 때마다 원하는 쌍을 덮어쓸 수 있습니다.
+
+```bash
+vecscope audit vectors.npy --thresholds my_thresholds.json
+# my_thresholds.json: {"anisotropy.mean_random_cosine": [0.4, 0.7], "hubness.skewness": [2.5, 5]}
+```
+
+키 목록은 `src/vecscope/evidence.py`의 `THRESHOLDS`에 있고, 모든 JSON 결과의 `thresholds`
+필드에도 그대로 실립니다.
 
 ## 질의와 군집
 
@@ -180,8 +204,9 @@ HNSW는 faiss에 GPU 구현이 없어 항상 CPU에서 실행됩니다. `--devic
 
 ## 에이전트와 함께 사용
 
-`vecscope`에는 `audit_embeddings` 도구를 제공하는 MCP 서버가 들어 있습니다. Claude Code,
-Cursor, Codex처럼 MCP를 지원하는 클라이언트라면 어디에든 등록할 수 있습니다.
+`vecscope`에는 읽기 전용 도구 세 개(`audit_embeddings`, `sweep_index`, `describe_findings`)를
+제공하는 MCP 서버가 들어 있습니다. Claude Code, Cursor, Codex처럼 MCP를 지원하는 클라이언트라면
+어디에든 등록할 수 있습니다.
 
 ```bash
 pip install "vecscope[mcp]"
@@ -191,7 +216,7 @@ pip install "vecscope[mcp]"
 { "mcpServers": { "vecscope": { "command": "vecscope-mcp" } } }
 ```
 
-등록한 뒤에는 에이전트에게 이렇게 요청하면 됩니다.
+등록한 뒤에는 에이전트에게 다음과 같이 요청합니다.
 
 ```text
 검색기를 튜닝하기 전에 data/chunks.npy 임베딩을 감사하고, 먼저 조치할 항목을 알려줘.
@@ -199,9 +224,12 @@ pip install "vecscope[mcp]"
 
 [`.agents/skills/vecscope/SKILL.md`](../../.agents/skills/vecscope/SKILL.md)의 에이전트
 스킬에는 감사를 실행할 시점과 판정별 조치(벡터 중심화(centering) 또는 모델 교체, 중복 제거,
-재순위화(re-ranking), 인덱스 재구축)가 정리되어 있습니다. 두 번째 도구 `sweep_index`는
-[인덱스 스윕](#인덱스-스윕)을 실행합니다. MCP를 지원하지 않는 에이전트라면 CLI를 `--json`으로
-실행해 같은 결과를 읽으면 됩니다.
+재순위화(re-ranking), 인덱스 재구축)가 정리되어 있습니다. 같은 절차가 서버 instructions에도
+들어 있어 MCP 연결만 있는 에이전트도 동일하게 동작합니다. `sweep_index`는
+[인덱스 스윕](#인덱스-스윕)을 실행하고, `describe_findings`는 모든 항목의 임곗값, 원인, 조치를
+나열합니다. 응답은 한 줄짜리 `summary`로 시작하며, `verbose=false`를 주면 `ok` 항목의 세부
+내용을 생략합니다. MCP를 지원하지 않는 에이전트라면 CLI를 `--json`으로 실행해 같은 결과를
+읽으면 됩니다.
 
 ## 라이브러리로 사용
 
@@ -225,6 +253,7 @@ vecscope audit vectors.parquet --json                  # JSON 형식 출력
 vecscope audit vectors.npy --ann hnsw_neighbors.npy    # ANN 인덱스의 재현율을 정확한 k-NN과 비교
 vecscope audit vectors.npy --queries queries.npy       # 질의 측 진단 추가
 vecscope audit vectors.npy --clusters 10               # 군집별 요약 추가
+vecscope audit vectors.npy --thresholds th.json         # (warn, fail) 임곗값 덮어쓰기
 vecscope audit vectors.npy --fail-on warn              # warn 판정도 종료 코드 1로 처리
 vecscope audit vectors.npy --near-dup 0.98             # 근접 중복으로 간주할 코사인 임곗값
 vecscope audit vectors.npy --sample 0                  # 샘플링 없이 전체 행을 감사 (기본값은 10만 행)
@@ -236,7 +265,7 @@ vecscope sweep vectors.npy --device gpu                # IVF를 GPU에서 실행
 
 임베딩 파일에는 행마다 벡터가 하나씩 들어갑니다. 어떤 형식이든 감사 전에 `(n, dim)` 형태의
 2차원 `float32` 배열로 바뀝니다. 아래 예시의 `embeddings`가 바로 이 배열이며, 모델의 `encode`
-출력이 대표적인 예입니다.
+출력이 대표적인 예시입니다.
 
 ```python
 embeddings = model.encode(texts)        # 형태 (n, dim), 예: (3000, 128)
@@ -256,11 +285,31 @@ embeddings[0]                           # 첫 번째 항목의 벡터
 `--ann` 파일(MCP에서는 `ann_path`)은 선택 입력으로, `(n, k)` 형태의 정수 배열입니다. `i`번째
 행에는 ANN 인덱스가 `i`번째 항목의 이웃으로 돌려준 `k`개의 id가 들어가며, 행 순서는 임베딩
 파일과 같아야 합니다. 위 형식 중 어느 것이든 쓸 수 있습니다. id가 행 위치를 가리키므로 바로 이
-행들로 만든 인덱스에서 나온 파일이어야 하고, `--sample`이 적용되면 행 id가 어긋나므로 ANN
-파일은 무시됩니다.
+행들로 만든 인덱스에서 나온 파일이어야 하며, 따라서 `--ann`은 `--sample 0`과 함께 써야
+합니다(둘을 같이 쓰면 감사가 거부합니다). 항목 자기 자신을 가리키는 id는 무시되므로, 자기 자신을
+먼저 돌려주는 인덱스라면 k + 1개를 질의하십시오.
 
 `--queries` 파일(MCP에서는 `queries_path`)도 선택 입력으로, 같은 형식 중 하나로 저장한 질의
 임베딩입니다. 코퍼스와 `dim`이 같아야 합니다.
+
+## 성능
+
+정확한 k-NN은 행 수의 제곱에 비례하므로, 전체 행 감사(`--sample 0`)에 드는 비용은 6코어
+노트북(Intel i7-8750H, NumPy 단일 프로세스) 기준으로 다음과 같습니다. 메모리는 감사 과정에서
+Python이 추적한 최대치이며, 입력 행렬 자체는 별도로 더 필요합니다.
+
+| 행 수 | 차원 | 시간 | 최대 메모리 |
+|---|---|---|---|
+| 10,000 | 384 | 16초 | 0.4 GiB |
+| 10,000 | 1,536 | 53초 | 0.4 GiB |
+| 50,000 | 384 | 87초 | 2.0 GiB |
+| 50,000 | 1,536 | 109초 | 2.2 GiB |
+| 100,000 | 768 | 191초 | 4.1 GiB |
+
+기본값인 10만 행 표본은 어떤 코퍼스든 마지막 행 수준의 비용에 묶어 둡니다. 행 수가 두 배가
+되면 시간은 대략 네 배가 됩니다. `--queries`는 질의 묶음마다 코퍼스를 한 번 더 훑고,
+`metric_mismatch`는 벡터 길이가 다를 때만 k-NN을 한 번 더 계산합니다. 표본 감사는 표본에 대한
+설명이므로, 섬과 이상치를 하나도 빠뜨리지 않아야 한다면 `--sample 0`을 지정하십시오.
 
 ## 동작 원리
 
@@ -273,7 +322,7 @@ metric_mismatch는 내적 기준 k-NN을 한 번 더 계산해 비교하되, 벡
 코퍼스를 대상으로 정확 검색을 한 번 더 수행해 질의 측 항목을 구합니다.
 
 같은 입력에는 언제나 같은 결과가 나옵니다. 시드가 고정되어 있고, 이웃은 근사 없이 정확하게
-계산하며, 학습된 모델이나 네트워크 통신도 쓰지 않습니다. 같은 파일을 두 번 감사하면 JSON이
+계산하며, 학습된 모델이나 네트워크 통신도 수행하지 않습니다. 같은 파일을 두 번 감사하면 JSON이
 완전히 일치합니다.
 
 정확한 k-NN은 행 수의 제곱에 비례하는 비용이 들기 때문에, 10만 행을 넘는 입력은 `--sample 0`을
@@ -290,11 +339,11 @@ gte-base-en-v1.5의 8개 모델입니다. 아래 표는 각 데이터셋의 앞 
 | finding | Cohere v3 (한국어 위키) | Cohere v3 (영어 위키) | ada-002 (dbpedia) | 3-large (dbpedia) | MiniLM-L6 (위키) | bge-m3 (위키) | mxbai-large (위키) | gte-base (arXiv) |
 |---|---|---|---|---|---|---|---|---|
 | hubness | 1.47 | 1.16 | 1.56 | 1.21 | 1.59 | 1.85 | 1.43 | 2.28<br>warn |
-| antihubs | 0.009 | 0.005 | 0.013 | 0.005 | 0.022 | 0.026 | 0.020 | 0.013 |
+| antihubs | 0.009 | 0.005 | 0.013 | 0.005 | 0.022 | 0.026 | 0.019 | 0.013 |
 | anisotropy | 0.333<br>warn | 0.228 | 0.692<br>**fail** | 0.086 | 0.026 | 0.307<br>warn | 0.330<br>warn | 0.210 |
 | effective_rank | 0.158 | 0.178 | 0.090<br>warn | 0.148 | 0.285 | 0.143 | 0.087<br>warn | 0.136 |
 | collapse | 0.002 | 0.002 | 0.000 | 0.000 | 0.001 | 0.000 | 0.017 | 0.000 |
-| rogue_dimensions | 0.003 | 0.003 | 0.002 | 0.002 | 0.004 | 0.002 | 0.002 | 0.002 |
+| rogue_dimensions | 3.2 | 3.2 | 3.0 | 2.5 | 1.7 | 1.8 | 2.0 | 1.8 |
 | norms | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.007 |
 | metric_mismatch | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 0.952 |
 | distance_concentration | 3.00 | 3.00 | 2.53 | 1.86 | 2.93 | 2.77 | 3.99 | 2.30 |
@@ -302,7 +351,7 @@ gte-base-en-v1.5의 8개 모델입니다. 아래 표는 각 데이터셋의 앞 
 | connectivity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
 
 `fail`은 ada-002의 anisotropy 하나뿐이며, 이 모델의 비등방성은 널리 알려진 특성입니다. 평균
-단위 벡터의 길이가 0.83이라 무관한 문서끼리도 코사인 유사도가 0.7 언저리에서 시작합니다.
+단위 벡터의 길이가 0.83이라 무관한 문서끼리도 코사인 유사도가 0.7 근처에서 시작합니다.
 후속 모델인 3-large는 같은 코퍼스에서 등방성을 보입니다(길이 0.29). 세 모델 모두 중심화하면
 무작위 쌍의 코사인 유사도가 0.00으로 떨어지므로, 이 값을 세부 수치로 함께 보고합니다. 텍스트
 임베딩에서 hubness 왜도 1.2~1.9는 정상 범위라 `warn` 임곗값을 2.0으로 잡았고, arXiv 초록을
@@ -316,7 +365,7 @@ gte-base-en-v1.5의 8개 모델입니다. 아래 표는 각 데이터셋의 앞 
 <summary><strong>벡터가 외부로 전송됩니까?</strong></summary>
 
 아니요. NumPy만 사용하고 모든 계산이 로컬에서 이루어집니다. 모델을 내려받거나 네트워크
-연결을 열지 않습니다.
+연결을 하지 않습니다.
 
 </details>
 
@@ -324,8 +373,10 @@ gte-base-en-v1.5의 8개 모델입니다. 아래 표는 각 데이터셋의 앞 
 <summary><strong>얼마나 큰 행렬까지 처리할 수 있습니까?</strong></summary>
 
 정확한 k-NN은 행 수의 제곱에 비례하는 비용이 듭니다. 그래서 기본 설정에서는 입력이 10만 행을
-넘으면 고정 시드로 뽑은 표본만 감사하고, 그 사실을 출력에 표시합니다. 전체 행을 감사하려면
-`--sample 0`을 지정하십시오.
+넘으면 고정 시드로 뽑은 표본만 감사하고, 그 사실을 출력에 표시합니다(`sampled: true`,
+`n_total`). 표본 결과는 표본에 대한 설명이지 전체 코퍼스에 대한 확정 판정이 아니므로, 드문
+군집이나 작은 섬, 소수의 이상치는 놓칠 수 있습니다. 전체 행을 감사하려면 `--sample 0`을
+지정하십시오. 비용은 [성능](#성능) 절을 참고하십시오.
 
 </details>
 
