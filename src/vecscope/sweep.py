@@ -5,7 +5,12 @@ build of faiss (`faiss-gpu-cu12`), in which case the IVF index and the exact bas
 the GPU automatically. HNSW has no GPU implementation in faiss and always runs on the CPU.
 Recall is measured against exact k-NN for a seeded sample of queries drawn from the corpus
 (or a supplied query file). Timings are wall-clock on this machine and only meaningful
-relative to each other.
+relative to each other; each setting is timed ``timing_repeats`` times and the median kept.
+
+The recommendation is the fastest setting that reaches ``target_recall``. When its margin
+over the target is below ``margin`` the result also names the next safer setting, because
+recall at fixed parameters falls as the corpus grows: a setting that just clears the target
+on a sample usually misses it on the full corpus.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from vecscope.diagnostics.queries import query_knn
 
 HNSW_GRID = {"M": (8, 16, 32), "ef_construction": (100,), "ef_search": (16, 32, 64, 128, 256)}
 IVF_NPROBE = (1, 2, 4, 8, 16, 32, 64)
+RECALL_MARGIN = 0.02  # below this margin over target_recall the recommendation is marked tight
 
 
 @dataclass
@@ -45,6 +51,7 @@ class SweepResult:
     recommendation: dict = field(default_factory=dict)
     device: str = "cpu"
     gpu_name: str | None = None
+    caveats: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -102,8 +109,15 @@ def sweep(
     target_recall: float = 0.95,
     seed: int = 0,
     device: str = "auto",
+    timing_repeats: int = 3,
+    margin: float = RECALL_MARGIN,
 ) -> SweepResult:
-    """Sweep HNSW and IVF settings. ``device`` is 'auto' (GPU when available), 'cpu' or 'gpu'."""
+    """Sweep HNSW and IVF settings. ``device`` is 'auto' (GPU when available), 'cpu' or 'gpu'.
+
+    ``timing_repeats`` searches are timed per setting and the median qps is reported.
+    ``margin`` is the recall headroom over ``target_recall`` below which the recommendation
+    is marked tight and a safer alternative is named.
+    """
     try:
         import faiss
     except ImportError as e:  # pragma: no cover
@@ -116,6 +130,10 @@ def sweep(
         raise ValueError("n_queries must be at least 1")
     if not (0.0 < target_recall <= 1.0):
         raise ValueError("target_recall must be in (0, 1]")
+    if timing_repeats < 1:
+        raise ValueError("timing_repeats must be at least 1")
+    if not (0.0 <= margin < 1.0):
+        raise ValueError("margin must be in [0, 1)")
     x = np.asarray(x, dtype=np.float32)
     if x.ndim != 2 or x.shape[0] <= k:
         raise ValueError(f"need a 2-D matrix with more than k={k} rows, got shape {x.shape}")
@@ -159,9 +177,12 @@ def sweep(
     points: list[SweepPoint] = []
 
     def measure(index, name, params):
-        t = time.perf_counter()
-        _, approx = index.search(q, kq)
-        qps = q.shape[0] / max(time.perf_counter() - t, 1e-9)
+        times = []
+        for _ in range(timing_repeats):
+            t = time.perf_counter()
+            _, approx = index.search(q, kq)
+            times.append(time.perf_counter() - t)
+        qps = q.shape[0] / max(float(np.median(times)), 1e-9)
         return name, params, _recall(_drop_self(approx, qids, k), exact_idx), qps
 
     for m in HNSW_GRID["M"]:
@@ -195,21 +216,55 @@ def sweep(
         name, params, rec, qps = measure(index, "ivf", {"nlist": nlist, "nprobe": nprobe})
         points.append(SweepPoint(name, params, rec, build, qps, dev))
 
-    ok = [p for p in points if p.recall_at_k >= target_recall]
-    rec = {}
-    if ok:
-        best = max(ok, key=lambda p: p.queries_per_second)
-        rec = {"index": best.index, "params": best.params, "recall_at_k": best.recall_at_k,
-               "queries_per_second": best.queries_per_second,
-               "reason": f"fastest configuration with recall@{k} >= {target_recall}"}
-    else:
-        best = max(points, key=lambda p: p.recall_at_k)
-        rec = {"index": best.index, "params": best.params, "recall_at_k": best.recall_at_k,
-               "queries_per_second": best.queries_per_second,
-               "reason": f"no configuration reached recall@{k} >= {target_recall}; "
-                         "this is the best one. Expect a hard corpus (see audit findings)."}
+    rec = _recommend(points, k, target_recall, margin)
+    caveats = [
+        (f"recall is measured on {q.shape[0]} queries drawn from the corpus itself"
+         if queries is None else
+         f"recall is measured on {q.shape[0]} supplied queries") + "; real query traffic "
+        "can differ, pass it as queries when available",
+        ("recall at fixed parameters falls as the corpus grows; a sweep on a sample is "
+         "optimistic for the full corpus, re-run at production size before fixing parameters"),
+        (f"queries_per_second is the median of {timing_repeats} runs on this machine with one "
+         "query batch; it ranks settings against each other and is not a serving throughput"),
+    ]
     return SweepResult("vecscope", __version__, int(n), int(d), int(k), int(q.shape[0]),
-                       target_recall, points, rec, device=dev, gpu_name=gpu_name)
+                       target_recall, points, rec, device=dev, gpu_name=gpu_name,
+                       caveats=caveats)
+
+
+def _recommend(points: list[SweepPoint], k: int, target_recall: float, margin: float) -> dict:
+    """Fastest point reaching the target; marked tight (with a safer alternative when one
+    exists) if its headroom over the target is below ``margin``."""
+
+    def as_rec(p):
+        return {"index": p.index, "params": p.params, "recall_at_k": p.recall_at_k,
+                "queries_per_second": p.queries_per_second}
+
+    ok = [p for p in points if p.recall_at_k >= target_recall]
+    if not ok:
+        best = max(points, key=lambda p: p.recall_at_k)
+        return {**as_rec(best), "margin": best.recall_at_k - target_recall, "tight": True,
+                "reason": f"no configuration reached recall@{k} >= {target_recall}; "
+                          "this is the best one. Expect a hard corpus (see audit findings)."}
+    best = max(ok, key=lambda p: p.queries_per_second)
+    rec = {**as_rec(best), "margin": best.recall_at_k - target_recall, "tight": False,
+           "reason": f"fastest configuration with recall@{k} >= {target_recall}"}
+    if rec["margin"] >= margin:
+        return rec
+    rec["tight"] = True
+    safer = [p for p in ok if p.recall_at_k - target_recall >= margin]
+    if safer:
+        alt = max(safer, key=lambda p: p.queries_per_second)
+        rec["safer_alternative"] = as_rec(alt)
+        rec["reason"] += (f"; margin {rec['margin']:.3f} over the target is below {margin}, so a "
+                          "corpus larger than this one will likely miss the target. The fastest "
+                          f"setting with margin >= {margin} is {alt.index} "
+                          f"({', '.join(f'{a}={b}' for a, b in alt.params.items())}) at recall "
+                          f"{alt.recall_at_k:.3f}, {alt.queries_per_second:.0f} qps.")
+    else:
+        rec["reason"] += (f"; margin {rec['margin']:.3f} over the target is below {margin} and "
+                          "no setting in the grid has more headroom.")
+    return rec
 
 
 def render_sweep(res: SweepResult) -> str:
@@ -227,5 +282,8 @@ def render_sweep(res: SweepResult) -> str:
     r = res.recommendation
     params = ", ".join(f"{a}={b}" for a, b in r["params"].items())
     lines.append(f"  recommendation: {r['index']} ({params})  recall={r['recall_at_k']:.3f}  "
-                 f"qps={r['queries_per_second']:.0f}  ({r['reason']})")
+                 f"qps={r['queries_per_second']:.0f}  margin={r['margin']:+.3f}"
+                 f"{'  TIGHT' if r.get('tight') else ''}  ({r['reason']})")
+    for c in res.caveats:
+        lines.append(f"  note: {c}")
     return "\n".join(lines)

@@ -16,6 +16,7 @@ from vecscope.diagnostics import (
     collapse,
     connectivity,
     distance_concentration,
+    duplicate_cutoff,
     hubness,
     metric_mismatch,
     norms,
@@ -30,14 +31,14 @@ from vecscope.diagnostics import (
 THRESHOLDS = {
     "hubness.skewness": (2.0, 4.0),  # real 1k-1.5k-dim text models sit at 1.1-1.6
     "hubness.antihub_excess": (0.05, 0.20),  # share never retrieved, above the exp(-k) baseline
-    "anisotropy.mean_random_cosine": (0.3, 0.6),  # ada-002 ~0.69, 3-large ~0.09
+    "anisotropy.mean_random_cosine": (0.5, 0.85),  # top BEIR models sit at 0.58-0.81 with no nDCG cost
     "anisotropy.effective_rank_ratio": (0.10, 0.05),  # lower is worse; real models 0.09-0.18
     "collapse.near_duplicate_ratio": (0.02, 0.10),
     "ann_recall.recall_at_k": (0.95, 0.85),  # lower is worse
     "rogue_dimensions.top1_dim_variance_ratio": (10.0, 50.0),  # x the uniform 1/dim share; real 1.5-3
     "norms.norm_cv": (0.10, 0.30),
     "metric_mismatch.topk_overlap": (0.90, 0.70),  # lower is worse
-    "distance_concentration.relative_contrast": (1.2, 1.05),  # lower is worse; real 1.9-3.0, 256-d noise 1.28
+    "distance_concentration.contrast_over_noise": (1.4, 1.1),  # lower is worse; pure noise 1.0, real 1.43-2.9
     "outliers.outlier_ratio": (0.01, 0.05),
     "connectivity.island_ratio": (0.01, 0.10),
     "queries.ood_query_ratio": (0.05, 0.20),
@@ -60,6 +61,8 @@ class Finding:
     likely_causes: list[str] = field(default_factory=list)
     suggested_action: str = ""
     verify_by: str = ""
+    value_range: list[float] | None = None  # [min, max] over sample repeats, when sampled
+    verdict_stable: bool | None = None  # verdict identical on every sample repeat
 
 
 @dataclass
@@ -75,6 +78,8 @@ class Evidence:
     n_queries: int = 0
     clusters: list[dict] = field(default_factory=list)
     thresholds: dict = field(default_factory=dict)
+    sample_repeats: int = 1
+    unstable_findings: list[str] = field(default_factory=list)
 
     @property
     def verdict(self) -> str:
@@ -90,12 +95,23 @@ class Evidence:
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
 
 
+_RENAMED_KEYS = {
+    "distance_concentration.relative_contrast": "distance_concentration.contrast_over_noise",
+}
+
+
 def resolve_thresholds(overrides: dict | None) -> dict:
     """Merge user overrides into the defaults, validating keys and (warn, fail) pairs."""
     th = dict(THRESHOLDS)
     if overrides is not None and not isinstance(overrides, Mapping):
         raise ValueError("thresholds must be a mapping of key -> (warn, fail)")
     for key, pair in (overrides or {}).items():
+        if key in _RENAMED_KEYS:
+            raise ValueError(
+                f"threshold key {key!r} was renamed to {_RENAMED_KEYS[key]!r} and its metric "
+                f"changed (relative contrast divided by the noise baseline, 1.0 = noise); "
+                f"re-derive the override, defaults are {THRESHOLDS[_RENAMED_KEYS[key]]}"
+            )
         if key not in THRESHOLDS:
             raise ValueError(f"unknown threshold key {key!r}; known: {sorted(THRESHOLDS)}")
         try:
@@ -158,7 +174,10 @@ ACTIONS = {
     "collapse": (
         ["duplicate or boilerplate documents", "chunking that repeats headers/footers",
          "embedding failures returning a constant vector"],
-        "deduplicate the corpus using details.sample_ids as a starting point; fix chunking",
+        ("read details.largest_near_duplicate_groups: a few huge groups point at an embedding "
+         "failure or boilerplate (re-embed or fix chunking), many small groups at duplicate "
+         "items (deduplicate or collapse them at serving time); details.sample_pairs lists row "
+         "pairs to inspect"),
         ("near_duplicate_ratio should drop below warn_at; top-k on sample queries should no "
         "longer repeat the same item"),
     ),
@@ -192,7 +211,7 @@ ACTIONS = {
          "for this domain")],
         ("try a different model or dimensionality reduction; add a re-ranker over a larger "
         "candidate set"),
-        "relative_contrast rises above warn_at; expect ann_recall to improve as well",
+        "contrast_over_noise rises above warn_at; expect ann_recall to improve as well",
     ),
     "outliers": (
         ["junk, empty or foreign-language documents", ("chunks of code or tables embedded as "
@@ -234,7 +253,7 @@ _FINDING_KEYS = {
     "rogue_dimensions": "rogue_dimensions.top1_dim_variance_ratio",
     "norms": "norms.norm_cv",
     "metric_mismatch": "metric_mismatch.topk_overlap",
-    "distance_concentration": "distance_concentration.relative_contrast",
+    "distance_concentration": "distance_concentration.contrast_over_noise",
     "outliers": "outliers.outlier_ratio",
     "connectivity": "connectivity.island_ratio",
     "ood_queries": "queries.ood_query_ratio",
@@ -255,80 +274,10 @@ def _attach_thresholds(findings: list[Finding], th: dict) -> list[Finding]:
     return findings
 
 
-def audit(
-    x: np.ndarray,
-    k: int = 10,
-    ann_neighbors: np.ndarray | None = None,
-    near_dup_cos: float = 0.99,
-    sample: int | None = 100_000,
-    seed: int = 0,
-    queries: np.ndarray | None = None,
-    clusters: int = 0,
-    thresholds: dict | None = None,
-) -> Evidence:
-    """Audit an embedding matrix and return deterministic Evidence.
-
-    Exact k-NN is O(n^2); when ``sample`` is set and ``n > sample``, a seeded random
-    subset of rows is audited instead. ``ann_neighbors`` requires every row (its ids index
-    the rows), so combining it with sampling raises. Pass ``sample=None`` (or 0) to audit
-    every row.
-
-    ``queries`` adds query-side findings (out-of-distribution queries, query hubness).
-    ``clusters`` > 0 attaches a per-cluster report with sample ids (no verdicts).
-    ``thresholds`` overrides default (warn, fail) pairs by key, e.g.
-    ``{"anisotropy.mean_random_cosine": (0.4, 0.7)}``.
-    """
-    from vecscope import __version__
-
-    th = resolve_thresholds(thresholds)
-    if isinstance(k, bool) or not isinstance(k, (int, np.integer)) or k < 1:
-        raise ValueError(f"k must be a positive integer, got {k!r}")
-    k = int(k)
-    if sample is not None:
-        if isinstance(sample, bool) or not isinstance(sample, (int, np.integer)) or sample < 0:
-            raise ValueError(f"sample must be None or a non-negative integer, got {sample!r}")
-        sample = None if sample == 0 else int(sample)
-        if sample is not None and sample <= k:
-            raise ValueError(f"sample={sample} must exceed k={k} (0 audits every row)")
-    if isinstance(clusters, bool) or not isinstance(clusters, (int, np.integer)) or clusters < 0:
-        raise ValueError(f"clusters must be a non-negative integer, got {clusters!r}")
-    if not (0.0 < float(near_dup_cos) <= 1.0):
-        raise ValueError(f"near_dup_cos must be in (0, 1], got {near_dup_cos!r}")
-
-    x = np.asarray(x)
-    if x.dtype == object or np.iscomplexobj(x):
-        raise ValueError(f"embeddings must be real numbers, got dtype {x.dtype}")
-    x = np.asarray(x, dtype=np.float32)
-    if x.ndim != 2 or x.shape[0] < 3:
-        raise ValueError(f"expected a 2-D array with at least 3 rows, got shape {x.shape}")
-    if not np.isfinite(x).all():
-        raise ValueError("embeddings contain NaN or Inf")
-    n_total = int(x.shape[0])
-    sampled = sample is not None and n_total > sample
-    if sampled and ann_neighbors is not None:
-        raise ValueError(
-            f"ann_neighbors needs every row audited, but n={n_total} exceeds sample={sample}; "
-            "pass sample=None (CLI: --sample 0) so row ids line up"
-        )
-    if sampled:
-        rows = np.sort(np.random.default_rng(seed).choice(n_total, sample, replace=False))
-        x = x[rows]
-    if k >= x.shape[0]:
-        raise ValueError(f"k={k} must be smaller than the number of rows ({x.shape[0]})")
-    if ann_neighbors is not None:
-        ann_neighbors = np.asarray(ann_neighbors)
-        if ann_neighbors.ndim != 2 or ann_neighbors.shape[0] != x.shape[0]:
-            raise ValueError(
-                f"ann_neighbors must be shaped (n, k) with n={x.shape[0]} rows, got "
-                f"{ann_neighbors.shape}"
-            )
-        if not np.issubdtype(ann_neighbors.dtype, np.integer):
-            raise ValueError("ann_neighbors must hold integer row ids")
-        if ann_neighbors.max() >= x.shape[0]:
-            raise ValueError(
-                f"ann_neighbors contains id {int(ann_neighbors.max())} but there are only "
-                f"{x.shape[0]} rows; ids must index the same rows as the embedding file"
-            )
+def _core_findings(
+    x: np.ndarray, k: int, near_dup_cos: float, queries: np.ndarray | None, th: dict
+) -> tuple[list[Finding], np.ndarray, np.ndarray]:
+    """Compute every finding that depends only on the (sampled) matrix and the queries."""
     knn_idx, knn_dist = exact_knn(x, k)
     findings: list[Finding] = []
 
@@ -374,13 +323,22 @@ def audit(
         )
     )
 
-    c = collapse(x, near_dup_cos, knn_dist=knn_dist)
+    c = collapse(x, near_dup_cos, knn_dist=knn_dist, knn_idx=knn_idx)
+    groups = c["largest_near_duplicate_groups"]
+    if groups:
+        shape = (f"they form {c['near_duplicate_groups']} groups, the largest of "
+                 f"{groups[0]} rows; largest exact-duplicate group "
+                 f"{(c['largest_exact_duplicate_groups'] or [1])[0]} rows. Many small groups "
+                 "mean duplicate items, a few huge groups mean an embedding failure or "
+                 "boilerplate; see details.sample_pairs.")
+    else:
+        shape = "no row has a near-duplicate."
     findings.append(
         Finding(
             "collapse", "near_duplicate_ratio", c["near_duplicate_ratio"],
             _verdict("collapse.near_duplicate_ratio", c["near_duplicate_ratio"], th),
             f"{c['near_duplicate_ratio']:.1%} of items have a neighbor with cosine >= {near_dup_cos} "
-            f"(exact duplicates {c['exact_duplicate_ratio']:.1%}).",
+            f"(exact duplicates {c['exact_duplicate_ratio']:.1%}); {shape}",
             c,
         )
     )
@@ -426,19 +384,22 @@ def audit(
         )
     )
 
-    dc = distance_concentration(knn_dist[:, 0], a["mean_random_cosine"])
+    dc = distance_concentration(knn_dist[:, 0], a["mean_random_cosine"], dim=x.shape[1], x=x)
     findings.append(
         Finding(
-            "distance_concentration", "relative_contrast", dc["relative_contrast"],
-            _verdict("distance_concentration.relative_contrast", dc["relative_contrast"], th),
-            f"a random item is only {dc['relative_contrast']:.2f}x farther than the nearest "
-            f"neighbor (median NN distance {dc['median_nn_distance']:.3f}, random "
-            f"{dc['mean_random_distance']:.3f}). Near 1.0 means distances carry no signal.",
+            "distance_concentration", "contrast_over_noise", dc["contrast_over_noise"],
+            _verdict("distance_concentration.contrast_over_noise", dc["contrast_over_noise"], th),
+            f"a random item is {dc['relative_contrast']:.2f}x farther than the nearest neighbor "
+            f"(median NN distance {dc['median_nn_distance']:.3f}, random "
+            f"{dc['mean_random_distance']:.3f}); isotropic noise at {x.shape[1]}-d and "
+            f"{dc['baseline_rows']} rows would give {dc['noise_relative_contrast']:.2f}x, so "
+            f"the contrast is {dc['contrast_over_noise']:.2f}x that of noise. Near 1.0 means "
+            "distances carry no signal.",
             dc,
         )
     )
 
-    o = outliers(knn_dist[:, 0])
+    o = outliers(knn_dist[:, 0], dup_cutoff=duplicate_cutoff(dc["mean_random_distance"]))
     findings.append(
         Finding(
             "outliers", "outlier_ratio", o["outlier_ratio"],
@@ -463,15 +424,14 @@ def audit(
         )
     )
 
-    n_queries = 0
     if queries is not None:
         qv = np.asarray(queries, dtype=np.float32)
         if qv.ndim != 2 or qv.shape[1] != x.shape[1]:
             raise ValueError(f"queries must be (m, {x.shape[1]}) to match the corpus")
         if not np.isfinite(qv).all():
             raise ValueError("queries contain NaN or Inf")
-        n_queries = int(qv.shape[0])
-        qa = query_audit(x, qv, k, knn_dist[:, 0])
+        qa = query_audit(x, qv, k, knn_dist[:, 0],
+                         dup_cutoff=duplicate_cutoff(dc["mean_random_distance"]))
         findings.append(
             Finding(
                 "ood_queries", "ood_query_ratio", qa["ood_query_ratio"],
@@ -495,6 +455,97 @@ def audit(
             )
         )
 
+    return findings, knn_idx, knn_dist
+
+
+def audit(
+    x: np.ndarray,
+    k: int = 10,
+    ann_neighbors: np.ndarray | None = None,
+    near_dup_cos: float = 0.99,
+    sample: int | None = 100_000,
+    seed: int = 0,
+    queries: np.ndarray | None = None,
+    clusters: int = 0,
+    thresholds: dict | None = None,
+    sample_repeats: int = 1,
+) -> Evidence:
+    """Audit an embedding matrix and return deterministic Evidence.
+
+    Exact k-NN is O(n^2); when ``sample`` is set and ``n > sample``, a seeded random
+    subset of rows is audited instead. ``ann_neighbors`` requires every row (its ids index
+    the rows), so combining it with sampling raises. Pass ``sample=None`` (or 0) to audit
+    every row.
+
+    ``queries`` adds query-side findings (out-of-distribution queries, query hubness).
+    ``clusters`` > 0 attaches a per-cluster report with sample ids (no verdicts).
+    ``thresholds`` overrides default (warn, fail) pairs by key, e.g.
+    ``{"anisotropy.mean_random_cosine": (0.4, 0.7)}``.
+    ``sample_repeats`` > 1 re-audits that many independent samples (seeds ``seed+1`` ...)
+    when sampling applies and attaches ``value_range`` and ``verdict_stable`` to each
+    finding, so a verdict that flips between samples is not mistaken for a property of the
+    corpus. Costs ``sample_repeats`` times the audit time; ignored when nothing is sampled.
+    """
+    from vecscope import __version__
+
+    th = resolve_thresholds(thresholds)
+    if isinstance(k, bool) or not isinstance(k, (int, np.integer)) or k < 1:
+        raise ValueError(f"k must be a positive integer, got {k!r}")
+    k = int(k)
+    if sample is not None:
+        if isinstance(sample, bool) or not isinstance(sample, (int, np.integer)) or sample < 0:
+            raise ValueError(f"sample must be None or a non-negative integer, got {sample!r}")
+        sample = None if sample == 0 else int(sample)
+        if sample is not None and sample <= k:
+            raise ValueError(f"sample={sample} must exceed k={k} (0 audits every row)")
+    if isinstance(clusters, bool) or not isinstance(clusters, (int, np.integer)) or clusters < 0:
+        raise ValueError(f"clusters must be a non-negative integer, got {clusters!r}")
+    if not (0.0 < float(near_dup_cos) <= 1.0):
+        raise ValueError(f"near_dup_cos must be in (0, 1], got {near_dup_cos!r}")
+    if (isinstance(sample_repeats, bool) or not isinstance(sample_repeats, (int, np.integer))
+            or sample_repeats < 1):
+        raise ValueError(f"sample_repeats must be a positive integer, got {sample_repeats!r}")
+    sample_repeats = int(sample_repeats)
+
+    x = np.asarray(x)
+    if x.dtype == object or np.iscomplexobj(x):
+        raise ValueError(f"embeddings must be real numbers, got dtype {x.dtype}")
+    x = np.asarray(x, dtype=np.float32)
+    if x.ndim != 2 or x.shape[0] < 3:
+        raise ValueError(f"expected a 2-D array with at least 3 rows, got shape {x.shape}")
+    if not np.isfinite(x).all():
+        raise ValueError("embeddings contain NaN or Inf")
+    n_total = int(x.shape[0])
+    sampled = sample is not None and n_total > sample
+    if sampled and ann_neighbors is not None:
+        raise ValueError(
+            f"ann_neighbors needs every row audited, but n={n_total} exceeds sample={sample}; "
+            "pass sample=None (CLI: --sample 0) so row ids line up"
+        )
+    x_full = x
+    if sampled:
+        rows = np.sort(np.random.default_rng(seed).choice(n_total, sample, replace=False))
+        x = x[rows]
+    if not sampled:
+        sample_repeats = 1
+    if k >= x.shape[0]:
+        raise ValueError(f"k={k} must be smaller than the number of rows ({x.shape[0]})")
+    if ann_neighbors is not None:
+        ann_neighbors = np.asarray(ann_neighbors)
+        if ann_neighbors.ndim != 2 or ann_neighbors.shape[0] != x.shape[0]:
+            raise ValueError(
+                f"ann_neighbors must be shaped (n, k) with n={x.shape[0]} rows, got "
+                f"{ann_neighbors.shape}"
+            )
+        if not np.issubdtype(ann_neighbors.dtype, np.integer):
+            raise ValueError("ann_neighbors must hold integer row ids")
+        if ann_neighbors.max() >= x.shape[0]:
+            raise ValueError(
+                f"ann_neighbors contains id {int(ann_neighbors.max())} but there are only "
+                f"{x.shape[0]} rows; ids must index the same rows as the embedding file"
+            )
+    findings, knn_idx, knn_dist = _core_findings(x, k, near_dup_cos, queries, th)
+    n_queries = 0 if queries is None else int(np.asarray(queries).shape[0])
     if ann_neighbors is not None:
         own = ann_neighbors == np.arange(x.shape[0])[:, None]
         if own.any():  # the index returned the item itself; it is not a neighbor
@@ -510,10 +561,27 @@ def audit(
             )
         )
 
+    unstable: list[str] = []
+    if sample_repeats > 1:
+        values: dict[str, list[float]] = {f.name: [f.value] for f in findings}
+        verdicts: dict[str, set[str]] = {f.name: {f.verdict} for f in findings}
+        for r in range(1, sample_repeats):
+            rows_r = np.sort(np.random.default_rng(seed + r).choice(n_total, sample, replace=False))
+            rep, _, _ = _core_findings(x_full[rows_r], k, near_dup_cos, queries, th)
+            for f in rep:
+                values[f.name].append(f.value)
+                verdicts[f.name].add(f.verdict)
+        for f in findings:
+            f.value_range = [float(min(values[f.name])), float(max(values[f.name]))]
+            f.verdict_stable = len(verdicts[f.name]) == 1
+            if not f.verdict_stable:
+                unstable.append(f.name)
+
     report = cluster_report(x, clusters, knn_idx, knn_dist, near_dup_cos, seed) if clusters else []
     return Evidence(
         "vecscope", __version__, int(x.shape[0]), int(x.shape[1]), int(k),
         _attach_thresholds(findings, th),
         n_total=n_total, sampled=sampled, n_queries=n_queries, clusters=report,
         thresholds={k: list(v) for k, v in th.items()},
+        sample_repeats=sample_repeats, unstable_findings=unstable,
     )

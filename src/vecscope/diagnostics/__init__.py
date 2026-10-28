@@ -5,6 +5,7 @@ from vecscope.diagnostics.collapse import collapse
 from vecscope.diagnostics.geometry import (
     connectivity,
     distance_concentration,
+    duplicate_cutoff,
     metric_mismatch,
     norms,
     outliers,
@@ -15,6 +16,6 @@ from vecscope.diagnostics.queries import query_audit
 
 __all__ = [
     "anisotropy", "ann_recall", "cluster_report", "collapse", "connectivity",
-    "distance_concentration", "hubness", "metric_mismatch", "norms", "outliers",
+    "distance_concentration", "duplicate_cutoff", "hubness", "metric_mismatch", "norms", "outliers",
     "query_audit", "rogue_dimensions",
 ]

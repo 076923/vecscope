@@ -17,31 +17,39 @@ def unit(x):
     return (x / np.linalg.norm(x, axis=1, keepdims=True)).astype(np.float32)
 
 
+def structured(rng, n=N, d=D, centers=60, spread=0.8):
+    """Clustered base with real neighbor signal; pure noise has none and would fail
+    distance_concentration on its own."""
+    c = rng.standard_normal((centers, d))
+    return c[rng.integers(0, centers, n)] + rng.standard_normal((n, d)) * spread
+
+
 def build(name: str, rng: np.random.Generator) -> tuple[np.ndarray, dict[str, set[str]]]:
     g = rng.standard_normal
-    if name == "healthy_unit":
-        return unit(g((N, D))), {}
+    if name == "pure_noise":  # no neighbor structure at all: only distance_concentration may fail
+        return unit(g((N, D))), {"distance_concentration": {"fail"}}
     if name == "healthy_lowdim":
-        return unit(g((N, 64))), {}
+        c = g((30, 64))
+        return unit(c[rng.integers(0, 30, N)] + g((N, 64)) * 0.6), {"hubness": {"ok", "warn"}, "antihubs": {"ok", "warn"}}
     if name == "healthy_clustered":
         c = g((20, D))
         return unit(c[rng.integers(0, 20, N)] + g((N, D)) * 0.5), {"hubness": {"ok", "warn"}, "antihubs": {"ok", "warn"}}
     if name == "offset_anisotropic":
-        return unit(g((N, D)) * 0.3 + 2.0), {"anisotropy": {"fail"}, "hubness": {"warn", "fail"}, "antihubs": {"warn", "fail"}}
+        return unit(structured(rng) * 0.3 + 2.0), {"anisotropy": {"fail"}, "hubness": {"ok", "warn", "fail"}, "antihubs": {"ok", "warn", "fail"}}
     if name == "low_rank":
         return unit(g((N, 8)) @ g((8, D))), {"effective_rank": {"fail"}}
     if name == "rogue_dim":
         return unit(np.c_[g((N, D - 1)), g((N, 1)) * 15]), {"rogue_dimensions": {"fail"}, "hubness": {"ok", "warn", "fail"}, "effective_rank": {"ok", "warn", "fail"}}
     if name == "duplicates":
-        base = unit(g((int(N * 0.7), D)))
+        base = unit(structured(rng, int(N * 0.7)))
         return np.concatenate([base, base[: N - len(base)]]), {"collapse": {"fail"}}
     if name == "near_dup_clusters":
         c = g((150, D))
         return unit(c[rng.integers(0, 150, N)] + g((N, D)) * 0.02), {"collapse": {"fail"}, "connectivity": {"ok", "warn", "fail"}}
     if name == "norm_spread":
-        return (g((N, D)) * rng.uniform(0.1, 10, (N, 1))).astype(np.float32), {"norms": {"fail"}, "metric_mismatch": {"warn", "fail"}}
+        return (structured(rng) * rng.uniform(0.1, 10, (N, 1))).astype(np.float32), {"norms": {"fail"}, "metric_mismatch": {"warn", "fail"}}
     if name == "zero_vectors":
-        return np.concatenate([unit(g((N - 100, D))), np.zeros((100, D), np.float32)]), {"norms": {"warn", "fail"}, "hubness": {"ok", "warn", "fail"}, "outliers": {"ok", "warn", "fail"}}
+        return np.concatenate([unit(structured(rng, N - 100)), np.zeros((100, D), np.float32)]), {"norms": {"warn", "fail"}, "hubness": {"ok", "warn", "fail"}, "antihubs": {"ok", "warn"}, "outliers": {"ok", "warn", "fail"}}
     if name == "junk_outliers":
         c = g((30, D))
         x = np.concatenate([c[rng.integers(0, 30, N - 120)] + g((N - 120, D)) * 0.15, g((120, D))])
@@ -56,7 +64,7 @@ def build(name: str, rng: np.random.Generator) -> tuple[np.ndarray, dict[str, se
 
 
 SCENARIOS = [
-    "healthy_unit", "healthy_lowdim", "healthy_clustered", "offset_anisotropic", "low_rank",
+    "pure_noise", "healthy_lowdim", "healthy_clustered", "offset_anisotropic", "low_rank",
     "rogue_dim", "duplicates", "near_dup_clusters", "norm_spread", "zero_vectors",
     "junk_outliers", "two_big_islands", "tiny_islands",
 ]

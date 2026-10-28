@@ -6,6 +6,56 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
+### Added
+
+- `sample_repeats` (`audit(sample_repeats=...)`, `--sample-repeats`, MCP `sample_repeats`):
+  when sampling applies, re-audits independent seeded samples and attaches `value_range` and
+  `verdict_stable` to each finding plus a top-level `unstable_findings` list
+- Retrieval-quality study (`docs/retrieval_quality.md`, `examples/retrieval_quality.py`):
+  every finding against nDCG@10 on BEIR SciFact and NFCorpus for eight public models and for
+  controlled defects; README section summarizing what the findings do and do not predict
+- `collapse` details now describe the duplicate structure: `near_duplicate_groups`,
+  `largest_near_duplicate_groups`, `largest_exact_duplicate_groups` and `sample_pairs`
+  (row, row, cosine; one pair per group, largest groups first), so an agent can tell
+  duplicate items (many small groups) from an embedding failure (a few huge groups) without
+  extra scripts. Groups link every neighbor within the cutoff among the k audited, so a
+  jittered boilerplate cluster is one group rather than many nearest-neighbor pairs. The
+  explanation and the suggested action say which is which; the action previously pointed at
+  a `sample_ids` field that collapse never had
+- `vecscope compare A B` / `compare()` / MCP `compare_embeddings`: agreement between two
+  embeddings of the same rows (nearest-neighbor and top-k overlap, near-duplicate share in
+  each space and in both, same duplicate partner, largest disagreements); no verdicts
+- Sweep recommendations carry `margin` (recall minus target) and are marked `tight` with a
+  `safer_alternative` when the margin is under `--margin` (default 0.02); results carry
+  `caveats` (in-corpus queries, recall falls with corpus size, qps is relative) which the CLI
+  prints and the MCP docstring tells the agent to relay. qps is the median of
+  `--timing-repeats` runs (default 3) instead of a single timing
+- Project metadata: description, keywords and Changelog/Documentation URLs on PyPI
+- README: troubleshooting for an MCP server that stops connecting after the Python
+  environment is rebuilt, with a `python -m vecscope.mcp_server` registration
+
+### Changed
+
+- `anisotropy` thresholds (0.3, 0.6) -> (0.5, 0.85): the best models on labeled data sit at
+  0.58 to 0.81 with no ranking cost, and a shared offset up to 0.98 left nDCG@10 unchanged
+- `distance_concentration` now reports `contrast_over_noise`: the relative contrast divided
+  by that of seeded isotropic noise at the same dimension (`details` keep `relative_contrast`
+  and `noise_relative_contrast`). The raw contrast of pure noise falls from 1.43 at 128-d to
+  1.10 at 1536-d, so no fixed threshold worked across models; the ratio is 1.0 for noise at
+  any width. Thresholds (1.4, 1.1): noise that halves nDCG@10 gives 1.05 and noise that
+  costs 4% gives 1.27; sixteen real model/corpus pairs sit at 1.43 to 2.9. Threshold key renamed to `distance_concentration.contrast_over_noise`; an override
+  that still uses the old key gets an error naming the new one. The nearest-neighbor
+  distance also shrinks as rows are added, so the data is measured on a seeded subsample of
+  the same size as the noise baseline (4000 rows; `details.baseline_rows`): pure noise is
+  1.0 at any n instead of drifting to 1.1 at 100k rows
+- `ood_queries` drops duplicate corpus rows with the same relative cutoff as the other
+  findings instead of a fixed 1e-4
+- MCP `sweep_index` exposes `margin` and `timing_repeats`
+- `examples/healthy.npy` and the healthy test scenarios now have cluster structure; pure
+  isotropic noise is reported as having no neighbor signal, which is correct
+
 ## [0.2.0] - 2026-10-27
 
 ### Added

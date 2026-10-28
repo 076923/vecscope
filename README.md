@@ -13,7 +13,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/076923/vecscope/ci.yml?style=flat-square&label=CI)](https://github.com/076923/vecscope/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
 
-[Quick start](#quick-start) · [What it measures](#what-vecscope-measures) · [Queries and clusters](#queries-and-clusters) · [Index sweep](#index-sweep) · [Use with an agent](#use-with-an-agent) · [Input formats](#input-formats) · [Real embeddings](#real-embeddings) · [FAQ](#faq)
+[Quick start](#quick-start) · [What it measures](#what-vecscope-measures) · [Queries and clusters](#queries-and-clusters) · [Index sweep](#index-sweep) · [Compare two embeddings](#compare-two-embeddings) · [Use with an agent](#use-with-an-agent) · [Input formats](#input-formats) · [Real embeddings](#real-embeddings) · [FAQ](#faq)
 
 <code>pip install vecscope</code>
 
@@ -71,32 +71,31 @@ vecscope audit embeddings.npy
 ```
 
 ```text
-vecscope 0.2.0  n=3000 dim=128 k=10  verdict=FAIL
-  [FAIL] hubness          skewness=6.9023  (ok < 2, warn >= 2, fail >= 4)
-                         k-occurrence skewness 6.90; top 1% of items take 16.3% of all neighbor slots (max N_k=356, expected 10).
-                         try: re-rank top-k with mutual k-NN or local scaling; if anisotropy also fails, center first
-  [FAIL] antihubs         antihub_excess=0.2180  (ok < 0.05, warn >= 0.05, fail >= 0.2)
-                         21.8% of items are never anyone's neighbor (random data at k=10 would give 0.0%); the excess is unreachable through k-NN retrieval.
+vecscope 0.3.0  n=3000 dim=128 k=10  verdict=FAIL
+  [ok  ] hubness          skewness=1.1661  (ok < 2, warn >= 2, fail >= 4)
+                         k-occurrence skewness 1.17; top 1% of items take 3.9% of all neighbor slots (max N_k=51, expected 10).
+  [WARN] antihubs         antihub_excess=0.0523  (ok < 0.05, warn >= 0.05, fail >= 0.2)
+                         5.2% of items are never anyone's neighbor (random data at k=10 would give 0.0%); the excess is unreachable through k-NN retrieval.
                          try: inspect a sample of never-retrieved items; drop empty inputs, then apply the hubness fix
-  [FAIL] anisotropy       mean_random_cosine=0.9782  (ok < 0.3, warn >= 0.3, fail >= 0.6)
-                         random pairs have mean cosine 0.978 (isotropic ~0); mean unit vector has norm 0.99; centering would bring the cosine to -0.000.
+  [FAIL] anisotropy       mean_random_cosine=0.8734  (ok < 0.5, warn >= 0.5, fail >= 0.85)
+                         random pairs have mean cosine 0.873 (isotropic ~0); mean unit vector has norm 0.93; centering would bring the cosine to -0.001.
                          try: subtract the corpus mean vector and re-normalize, applying the same transform to queries; details.mean_random_cosine_after_centering shows the expected result
-  [ok  ] effective_rank   effective_rank_ratio=0.9521  (ok >= 0.1, warn < 0.1, fail < 0.05)
-                         effective rank 121.9 of 128 dims (95.2%); low values mean most dimensions carry nothing.
+  [ok  ] effective_rank   effective_rank_ratio=0.5407  (ok >= 0.1, warn < 0.1, fail < 0.05)
+                         effective rank 69.2 of 128 dims (54.1%); low values mean most dimensions carry nothing.
   [ok  ] collapse         near_duplicate_ratio=0.0000  (ok < 0.02, warn >= 0.02, fail >= 0.1)
-                         0.0% of items have a neighbor with cosine >= 0.99 (exact duplicates 0.0%).
-  [ok  ] rogue_dimensions top1_dim_variance_ratio=1.0762  (ok < 10, warn >= 10, fail >= 50)
-                         dimension 7 alone holds 0.8% of variance, 1.1x the uniform share of 0.78%; top 3 dims hold 2.5%. Rogue dimensions dominate cosine.
+                         0.0% of items have a neighbor with cosine >= 0.99 (exact duplicates 0.0%); no row has a near-duplicate.
+  [ok  ] rogue_dimensions top1_dim_variance_ratio=1.3070  (ok < 10, warn >= 10, fail >= 50)
+                         dimension 94 alone holds 1.0% of variance, 1.3x the uniform share of 0.78%; top 3 dims hold 3.0%. Rogue dimensions dominate cosine.
   [ok  ] norms            norm_cv=0.0000  (ok < 0.1, warn >= 0.1, fail >= 0.3)
                          vector norms vary with CV 0.000 (median 1.000, range 1.000-1.000); 0.00% are zero vectors. Unequal norms bias inner-product search toward long vectors.
   [ok  ] metric_mismatch  topk_overlap=1.0000  (ok >= 0.9, warn < 0.9, fail < 0.7)
                          cosine and inner-product top-10 share 100.0% of neighbors; 100.0% of items get identical lists. Low overlap means the index metric changes the results.
-  [ok  ] distance_concentration relative_contrast=1.5260  (ok >= 1.2, warn < 1.2, fail < 1.05)
-                         a random item is only 1.53x farther than the nearest neighbor (median NN distance 0.014, random 0.022). Near 1.0 means distances carry no signal.
-  [ok  ] outliers         outlier_ratio=0.0037  (ok < 0.01, warn >= 0.01, fail >= 0.05)
-                         0.37% of items have no neighbor within cosine distance 0.018 (median 0.014); see details.sample_ids. Typically junk, empty or foreign-language content.
+  [ok  ] distance_concentration contrast_over_noise=2.2753  (ok >= 1.4, warn < 1.4, fail < 1.1)
+                         a random item is 3.27x farther than the nearest neighbor (median NN distance 0.039, random 0.127); isotropic noise at 128-d would give 1.44x, so the contrast is 2.28x that of noise. Near 1.0 means distances carry no signal.
+  [ok  ] outliers         outlier_ratio=0.0030  (ok < 0.01, warn >= 0.01, fail >= 0.05)
+                         0.30% of items have no neighbor within cosine distance 0.050 (median 0.039); see details.sample_ids. Typically junk, empty or foreign-language content.
   [ok  ] connectivity     island_ratio=0.0000  (ok < 0.01, warn >= 0.01, fail >= 0.1)
-                         0.00% of items sit in 0 small island(s) of the k-NN graph (fewer than 15 items; 1 components in total). Graph-based ANN (HNSW) attaches islands to the wrong region or never reaches them.
+                         0.00% of items sit in 0 small island(s) of the k-NN graph (fewer than 15 items; 60 components in total). Graph-based ANN (HNSW) attaches islands to the wrong region or never reaches them.
 ```
 
 ### 4. Read the result
@@ -114,14 +113,14 @@ vecscope 0.2.0  n=3000 dim=128 k=10  verdict=FAIL
 | --- | --- | --- | --- | --- | --- |
 | `hubness` | skewness of the k-occurrence distribution | < 2.0 | 2.0 to 4.0 | ≥ 4.0 | a few items appear in everyone's k-NN list and will top every query |
 | `antihubs` | share of items never retrieved as a neighbor, above the random baseline e^-k | < 5% | 5 to 20% | ≥ 20% | part of the corpus is unreachable through k-NN |
-| `anisotropy` | mean cosine of random pairs | < 0.30 | 0.30 to 0.60 | ≥ 0.60 | vectors crowd into a narrow cone, so every pair looks similar |
+| `anisotropy` | mean cosine of random pairs | < 0.50 | 0.50 to 0.85 | ≥ 0.85 | vectors crowd into a narrow cone, so scores compress into a band |
 | `effective_rank` | participation ratio / dim | ≥ 0.10 | 0.05 to 0.10 | < 0.05 | most dimensions carry nothing |
-| `collapse` | near-duplicate ratio at cosine ≥ 0.99 | < 2% | 2 to 10% | ≥ 10% | top-k is spent on copies of the same item |
+| `collapse` | near-duplicate ratio at cosine ≥ 0.99; details give the duplicate groups and sample pairs | < 2% | 2 to 10% | ≥ 10% | top-k is spent on copies of the same item |
 | `ann_recall` | recall@k of ANN neighbors vs exact k-NN | ≥ 0.95 | 0.85 to 0.95 | < 0.85 | the index, not the model, is losing results |
 | `rogue_dimensions` | variance of the largest dimension as a multiple of the uniform 1/dim share | < 10x | 10 to 50x | ≥ 50x | a few coordinates decide every cosine score |
 | `norms` | coefficient of variation of vector norms | < 0.10 | 0.10 to 0.30 | ≥ 0.30 | inner-product search favors long vectors; zero vectors are reported too |
 | `metric_mismatch` | top-k overlap between cosine and inner product | ≥ 0.90 | 0.70 to 0.90 | < 0.70 | the index metric changes which results come back |
-| `distance_concentration` | random distance / nearest-neighbor distance | ≥ 1.2 | 1.05 to 1.2 | < 1.05 | the nearest neighbor is barely closer than a random item |
+| `distance_concentration` | relative contrast (random distance / nearest-neighbor distance) divided by that of isotropic noise at the same dimension and row count | ≥ 1.4 | 1.1 to 1.4 | < 1.1 | the nearest neighbor is barely closer than a random item; 1.0 is pure noise |
 | `outliers` | share of items with an abnormally far nearest neighbor | < 1% | 1 to 5% | ≥ 5% | junk, empty or foreign items; ids are listed in `details` |
 | `connectivity` | share of items in small k-NN graph islands | < 1% | 1 to 10% | ≥ 10% | self-contained groups too small to be clusters; HNSW attaches them badly or never reaches them |
 | `ood_queries` | share of queries farther from the corpus than 99% of corpus items are from each other | < 5% | 5 to 20% | ≥ 20% | queries and corpus do not share a space: wrong model, missing query prefix, uncovered topics |
@@ -178,8 +177,11 @@ no verdicts; it tells the agent *where* a problem lives.
 
 `vecscope sweep` builds HNSW and IVF indexes with a small parameter grid and reports, for each
 setting, recall@k against exact k-NN, build time and queries per second on this corpus. It then
-recommends the fastest setting that reaches the target recall (default 0.95). It needs the
-`faiss-cpu` extra.
+recommends the fastest setting that reaches the target recall (default 0.95) and reports its
+`margin` over the target. A margin under 0.02 marks the recommendation `tight` and names the
+fastest setting with real headroom, because recall at fixed parameters falls as the corpus
+grows: a setting that just clears the target on a 50k-row sample usually misses it on the
+full corpus. It needs the `faiss-cpu` extra.
 
 ```bash
 pip install "vecscope[index]"
@@ -188,23 +190,58 @@ vecscope sweep embeddings.npy -k 10 --target-recall 0.95
 
 ```text
   index params                                       recall  build s       qps
- *hnsw  M=16, ef_construction=100, ef_search=32       0.994     0.31    141532
-  ivf   nlist=76, nprobe=32                           0.772     0.02     70925
- *ivf   nlist=76, nprobe=64                           0.975     0.02     41427
-  recommendation: hnsw (M=32, ef_construction=100, ef_search=16)  recall=0.985  qps=128425
+ *hnsw  M=8, ef_construction=100, ef_search=16        0.988     0.49    588131
+ *hnsw  M=16, ef_construction=100, ef_search=32       1.000     0.48    238146
+ *ivf   nlist=76, nprobe=16                           1.000     0.14    182966
+  recommendation: hnsw (M=8, ef_construction=100, ef_search=16)  recall=0.988  qps=588131  margin=+0.038  (fastest configuration with recall@10 >= 0.95)
+  note: recall is measured on 1000 queries drawn from the corpus itself; real query traffic can differ, pass it as queries when available
+  note: recall at fixed parameters falls as the corpus grows; a sweep on a sample is optimistic for the full corpus, re-run at production size before fixing parameters
+  note: queries_per_second is the median of 3 runs on this machine with one query batch; it ranks settings against each other and is not a serving throughput
 ```
 
-Queries default to a seeded sample of the corpus; pass `--queries` to time real queries. The
-MCP tool is `sweep_index`.
+Queries default to a seeded sample of the corpus; pass `--queries` to time real queries. Each
+setting is timed three times and the median kept (`--timing-repeats`); the notes at the end
+are part of the JSON as `caveats`. The MCP tool is `sweep_index`.
 
 With a GPU build of faiss (`pip install faiss-gpu-cu12` on Linux) the IVF index and the exact
 baseline run on the GPU automatically; the output header names the device. HNSW has no GPU
 implementation in faiss and stays on the CPU. Force a device with `--device cpu|gpu`.
 
+## Compare two embeddings
+
+When two models embedded the same items, or one model did before and after a change,
+`vecscope compare` tells how far the two spaces agree on who is near whom. It reports how
+often the nearest neighbor and the top-k lists coincide, the near-duplicate share in each
+space and in both, whether both spaces pick the same duplicate partner, and the rows that
+disagree most. It carries no verdicts. Its job is to separate item problems from model
+problems: a 10% collapse that both spaces flag with the same partners is a property of the
+items (the same image under several ids, say); duplicates that only one space flags point at
+that model.
+
+```bash
+vecscope compare clip.npy lens.npy -k 10          # rows must be the same items in the same order
+```
+
+```text
+vecscope 0.3.0  compare  n=3000 dim=128/128 k=10
+  nn1_agreement=0.7050  topk_overlap=0.8537  topk_overlap_p10=0.7000  rows_with_no_overlap=0.0000
+  near_dup A=0.0400  B=0.0400  both=0.0400  only_A=0.0000  only_B=0.0000  same_nearest_among_both=1.0000
+    the two spaces share the nearest neighbor for 70.5% of rows and 85.4% of their top-10 lists
+    on average (0.0% of rows share nothing). Near-duplicates: 4.0% in A, 4.0% in B, 4.0% in both,
+    and 100.0% of those agree on the partner. Duplicates flagged by both spaces with the same
+    partner are a property of the items; duplicates flagged by one space only point at that model.
+  largest disagreements (row: nearest in A / nearest in B, top-k overlap):
+    1769: 1340 / 1340  0.50
+    1810: 1229 / 1229  0.50
+```
+
+The MCP tool is `compare_embeddings`.
+
 ## Use with an agent
 
-`vecscope` ships an MCP server with three read-only tools: `audit_embeddings`, `sweep_index`
-and `describe_findings`. Register it with any MCP client (Claude Code, Cursor, Codex, ...):
+`vecscope` ships an MCP server with four read-only tools: `audit_embeddings`, `sweep_index`,
+`compare_embeddings` and `describe_findings`. Register it with any MCP client (Claude Code,
+Cursor, Codex, ...):
 
 ```bash
 pip install "vecscope[mcp]"
@@ -225,10 +262,20 @@ The agent skill in [`.agents/skills/vecscope/SKILL.md`](.agents/skills/vecscope/
 the agent when to run the audit and what to do about each verdict: center or swap the model,
 deduplicate, re-rank, or rebuild the index. The server also carries those instructions, so an
 agent that only has the MCP connection follows the same loop. `sweep_index` runs the
-[index sweep](#index-sweep); `describe_findings` lists every finding with its thresholds,
-causes and actions. Responses start with a one-line `summary`; pass `verbose=false` to drop
-details for findings that are ok. Agents without MCP can run the CLI with `--json` and read
-the same evidence.
+[index sweep](#index-sweep), `compare_embeddings` the [comparison](#compare-two-embeddings);
+`describe_findings` lists every finding with its thresholds, causes and actions. Responses
+start with a one-line `summary`; pass `verbose=false` to drop details for findings that are
+ok. Agents without MCP can run the CLI with `--json` and read the same evidence.
+
+If the server stops connecting ("vecscope-mcp not found"), the Python environment it was
+installed into has usually been replaced; this happens on hosted notebooks and clusters that
+rebuild their environment. Check with `pip show vecscope` in the interpreter the client uses,
+reinstall there, and prefer registering the server through that interpreter so the error
+names the right environment:
+
+```json
+{ "mcpServers": { "vecscope": { "command": "/path/to/env/bin/python", "args": ["-m", "vecscope.mcp_server"] } } }
+```
 
 ## Use as a library
 
@@ -256,8 +303,11 @@ vecscope audit vectors.npy --thresholds th.json         # override (warn, fail) 
 vecscope audit vectors.npy --fail-on warn              # exit 1 on WARN as well
 vecscope audit vectors.npy --near-dup 0.98             # cosine threshold for near-duplicates
 vecscope audit vectors.npy --sample 0                  # audit every row (default samples 100k)
+vecscope audit vectors.npy --sample-repeats 3          # re-audit 3 samples; report value ranges and verdict stability
 vecscope sweep vectors.npy --target-recall 0.95        # HNSW/IVF parameter sweep (faiss extra)
 vecscope sweep vectors.npy --device gpu                # IVF on the GPU (faiss GPU build)
+vecscope sweep vectors.npy --margin 0.05               # headroom under which the pick is marked tight (default 0.02)
+vecscope compare a.npy b.npy -k 10                     # agreement between two embeddings of the same rows
 ```
 
 ## Input formats
@@ -337,23 +387,45 @@ reproduces it, no model download needed.
 |---|---|---|---|---|---|---|---|---|
 | hubness | 1.47 | 1.16 | 1.56 | 1.21 | 1.59 | 1.85 | 1.43 | 2.28<br>warn |
 | antihubs | 0.009 | 0.005 | 0.013 | 0.005 | 0.022 | 0.026 | 0.019 | 0.013 |
-| anisotropy | 0.333<br>warn | 0.228 | 0.692<br>**fail** | 0.086 | 0.026 | 0.307<br>warn | 0.330<br>warn | 0.210 |
+| anisotropy | 0.333 | 0.228 | 0.692<br>warn | 0.086 | 0.026 | 0.307 | 0.330 | 0.210 |
 | effective_rank | 0.158 | 0.178 | 0.090<br>warn | 0.148 | 0.285 | 0.143 | 0.087<br>warn | 0.136 |
 | collapse | 0.002 | 0.002 | 0.000 | 0.000 | 0.001 | 0.000 | 0.017 | 0.000 |
 | rogue_dimensions | 3.2 | 3.2 | 3.0 | 2.5 | 1.7 | 1.8 | 2.0 | 1.8 |
 | norms | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.007 |
 | metric_mismatch | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 0.952 |
-| distance_concentration | 3.00 | 3.00 | 2.53 | 1.86 | 2.93 | 2.77 | 3.99 | 2.30 |
+| distance_concentration | 1.73 | 1.74 | 1.74 | 1.43 | 1.78 | 1.84 | 2.21 | 1.62 |
 | outliers | 0.001 | 0.001 | 0.000 | 0.000 | 0.001 | 0.002 | 0.003 | 0.000 |
 | connectivity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
 
-ada-002's well-known anisotropy shows up as the only `fail`: its mean unit vector has norm 0.83,
-so unrelated documents start from a cosine floor near 0.7. Its successor is isotropic on the
-same corpus (norm 0.29). Centering brings all three models to a random-pair cosine of 0.00, which
-is why the finding reports that number. Hubness skewness of 1.2 to 1.9 is the normal range for
-text embeddings, so the `warn` threshold sits at 2.0; gte-base on arXiv abstracts sits just
-above it. Three good models land in the anisotropy `warn` band (0.30 to 0.33): mild, and
-their `details` show that centering removes it.
+ada-002's well-known anisotropy is the only `warn` besides hubness: its mean unit vector has
+norm 0.83, so unrelated documents start from a cosine floor near 0.7. Its successor is
+isotropic on the same corpus (norm 0.29). Centering brings every model here to a random-pair
+cosine of 0.00, which is why the finding reports that number. Hubness skewness of 1.2 to 1.9
+is the normal range for text embeddings, so the `warn` threshold sits at 2.0; gte-base on
+arXiv abstracts sits just above it. The anisotropy thresholds (0.5, 0.85) come from the
+retrieval-quality study below, where the best models sit between 0.58 and 0.81.
+
+## Do the findings predict retrieval quality?
+
+Partly, and in a specific way. [docs/retrieval_quality.md](docs/retrieval_quality.md) measures
+every finding against nDCG@10 on two labeled BEIR datasets (SciFact, NFCorpus) with exact
+cosine search, for eight public models and for controlled defects injected into the best one.
+`python examples/retrieval_quality.py` reproduces it.
+
+- **Within one pipeline the findings track damage.** Injecting a rogue dimension, cutting the
+  rank, adding noise or duplicating rows moves the watched finding from `ok` to `fail` while
+  nDCG@10 falls, and the drop is monotone in the defect level. Queries embedded with the wrong
+  model score `ood_queries` = 1.0.
+- **Across good models the geometry findings do not rank the models.** The best models on both
+  datasets (gte-base, bge, e5) have the *highest* anisotropy (0.58 to 0.81) and ordinary
+  effective rank. What does separate the weak models is `norms` with `metric_mismatch`
+  (unnormalized outputs) and `hubness`, each at Spearman |rho| of 0.5 to 0.8 with nDCG@10.
+- **Anisotropy alone does not hurt ranking.** Adding a shared offset until the random-pair
+  cosine reaches 0.98 leaves nDCG@10 unchanged. It compresses scores, so absolute cosine
+  thresholds and score calibration break; `distance_concentration` is the finding that moves
+  when the signal itself is lost.
+
+The `anisotropy` and `distance_concentration` thresholds were recalibrated from this study.
 
 ## FAQ
 
@@ -373,6 +445,12 @@ sample of 100,000 rows when the input is larger, and says so in the output (`sam
 `n_total`). A sampled result describes the sample, not the whole corpus: rare clusters, small
 islands and a handful of outliers can be missed. Use `--sample 0` to audit everything; see
 [performance](#performance) for what that costs.
+
+To see how much the sample itself moves a number, pass `--sample-repeats 3` (MCP:
+`sample_repeats`). vecscope then audits three independent seeded samples and attaches
+`value_range` (minimum to maximum across samples) and `verdict_stable` to every finding, and
+lists `unstable_findings` at the top level. A finding whose verdict flips between samples
+should be read as borderline, not as a property of the corpus. The cost is three audits.
 
 </details>
 
@@ -398,7 +476,8 @@ JSON. The skill file describes both paths.
 ## Documentation
 
 - [Agent skill](.agents/skills/vecscope/SKILL.md): when to run the audit and what to do with each verdict
-- [Examples](examples/): synthetic matrices and the real-embedding calibration script
+- [Retrieval-quality study](docs/retrieval_quality.md): every finding against nDCG@10 on labeled data
+- [Examples](examples/): synthetic matrices, the calibration script and the retrieval-quality study
 - [Changelog](CHANGELOG.md)
 
 ## Contributing

@@ -41,7 +41,9 @@ ranges verbatim; (2) separate causes using likely_causes and the other findings;
 smallest change from suggested_action, applying any vector transform to queries too; (4)
 re-audit and compare retrieval on real queries (verify_by says which number should move);
 (5) adopt only confirmed improvements. Thresholds are calibrated defaults, not a universal
-bar: a warn on a good model is common. Use sweep_index before choosing HNSW/IVF parameters."""
+bar: a warn on a good model is common. Use sweep_index before choosing HNSW/IVF parameters,
+and compare_embeddings when two models embedded the same items (or the same model before and
+after a change) to tell item problems from model problems."""
 
 
 def _annotations():
@@ -79,6 +81,8 @@ def _summary(ev: dict) -> str:
     head = f"verdict={ev['verdict']} n={ev['n']} dim={ev['dim']} k={ev['k']}"
     if ev.get("sampled"):
         head += f" (sampled from {ev['n_total']} rows)"
+    if ev.get("unstable_findings"):
+        head += f"; verdict unstable across sample repeats: {', '.join(ev['unstable_findings'])}"
     if not bad:
         return head + "; all findings ok"
     parts = [f"{f['name']}={f['value']:.3g} {f['verdict']} ({f['healthy_range']})" for f in bad]
@@ -94,6 +98,7 @@ def audit_embeddings(
     clusters: int = 0,
     near_dup_cos: float = 0.99,
     sample: int = 100_000,
+    sample_repeats: int = 1,
     thresholds: dict | None = None,
     verbose: bool = True,
 ) -> dict:
@@ -109,6 +114,9 @@ def audit_embeddings(
     `clusters` > 0 attaches a per-cluster map with sample ids (no verdicts).
     `sample`: rows above this are audited on a seeded random subset (0 = audit every row;
     exact k-NN is quadratic, ~3 min for 100k x 768 on a laptop).
+    `sample_repeats`: when sampling applies, re-audit this many independent samples; each
+    finding then carries `value_range` [min, max] and `verdict_stable`, and the response
+    lists `unstable_findings`. Costs that many times the audit time.
     `thresholds`: override default (warn, fail) pairs, e.g. {"hubness.skewness": [2.5, 5]}.
     `verbose=False` drops details, causes and actions for findings that are ok, which cuts
     the response roughly in half.
@@ -124,7 +132,7 @@ def audit_embeddings(
         q = load_vectors(queries_path) if queries_path else None
         ev = audit(
             x, k=k, ann_neighbors=ann, near_dup_cos=near_dup_cos, sample=sample or None,
-            queries=q, clusters=clusters, thresholds=thresholds,
+            queries=q, clusters=clusters, thresholds=thresholds, sample_repeats=sample_repeats,
         ).to_dict()
     except _USER_ERRORS as e:
         raise _user_error(e) from e
@@ -143,11 +151,16 @@ def sweep_index(
     queries_path: str | None = None,
     target_recall: float = 0.95,
     device: str = "auto",
+    margin: float = 0.02,
+    timing_repeats: int = 3,
 ) -> dict:
     """Sweep HNSW (M, ef_search) and IVF (nprobe) parameters on an embedding file and report
     recall@k against exact k-NN, build time and queries per second for each setting, plus
-    the fastest configuration that reaches `target_recall`. Needs the faiss extra
-    (`pip install "vecscope[index]"`). Read-only; timings are relative to this machine.
+    the fastest configuration that reaches `target_recall`. The recommendation carries
+    `margin` (recall minus target) and is marked `tight` with a `safer_alternative` when the
+    margin is under `margin`, because recall at fixed parameters falls as the corpus grows;
+    relay `caveats` to the user. qps is the median of `timing_repeats` runs. Needs the faiss
+    extra (`pip install "vecscope[index]"`). Read-only; timings are relative to this machine.
     `device` is "auto" (GPU when the faiss build has one), "cpu" or "gpu"; HNSW is CPU-only.
     """
     from vecscope.sweep import sweep
@@ -155,14 +168,42 @@ def sweep_index(
     try:
         x = load_vectors(path)
         q = load_vectors(queries_path) if queries_path else None
-        res = sweep(x, k=k, queries=q, target_recall=target_recall, device=device).to_dict()
+        res = sweep(x, k=k, queries=q, target_recall=target_recall, device=device,
+                    margin=margin, timing_repeats=timing_repeats).to_dict()
     except (*_USER_ERRORS, RuntimeError) as e:
         raise _user_error(e) from e
     r = res["recommendation"]
     params = ", ".join(f"{a}={b}" for a, b in r["params"].items())
-    res["summary"] = (f"recommend {r['index']} ({params}): recall@{k}={r['recall_at_k']:.3f}, "
+    res["summary"] = (f"recommend {r['index']} ({params}): recall@{k}={r['recall_at_k']:.3f} "
+                      f"(margin {r['margin']:+.3f}{', tight' if r.get('tight') else ''}), "
                       f"{r['queries_per_second']:.0f} qps on {res['device']}; {r['reason']}")
     return res
+
+
+@mcp.tool(**_TOOL_KW)
+def compare_embeddings(
+    path_a: str,
+    path_b: str,
+    k: int = 10,
+    near_dup_cos: float = 0.99,
+    sample: int = 100_000,
+) -> dict:
+    """Compare two embedding files whose rows are the same items in the same order (two
+    models, or one model before and after a transform). Reports how often the nearest
+    neighbor and the top-k lists agree, the near-duplicate share in each space and in both,
+    whether both spaces pick the same duplicate partner, and the rows that disagree most.
+    No verdicts: duplicates flagged by both spaces with the same partner belong to the items;
+    duplicates flagged by one space only point at that model. Above `sample` rows a seeded
+    subset is compared (0 = all rows).
+    """
+    from vecscope.compare import compare
+
+    try:
+        res = compare(load_vectors(path_a), load_vectors(path_b), k=k, near_dup_cos=near_dup_cos,
+                      sample=sample or None).to_dict()
+    except _USER_ERRORS as e:
+        raise _user_error(e) from e
+    return {"summary": res["explanation"], **res}
 
 
 @mcp.tool(**_TOOL_KW)

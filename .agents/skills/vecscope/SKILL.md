@@ -20,6 +20,7 @@ vecscope audit <embeddings> --json         # MCP: audit_embeddings
 vecscope audit <embeddings> --queries <query embeddings> --json   # adds query-side findings
 vecscope audit <embeddings> --clusters 10 --json                  # adds a per-cluster map
 vecscope sweep <embeddings>                # MCP: sweep_index; picks HNSW/IVF parameters
+vecscope compare <embeddings A> <embeddings B>   # MCP: compare_embeddings; same rows, two spaces
 ```
 
 MCP only: `describe_findings` lists every finding with thresholds, causes and actions; pass
@@ -27,7 +28,9 @@ MCP only: `describe_findings` lists every finding with thresholds, causes and ac
 
 Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`. Above 100k rows a
 seeded sample is audited and `sampled: true` is set; pass `--sample 0` to audit every row,
-and always do so when `--ann` is used (row ids must line up).
+and always do so when `--ann` is used (row ids must line up). When a sampled verdict sits
+near a threshold, re-run with `--sample-repeats 3` (MCP: `sample_repeats`): findings then
+carry `value_range` and `verdict_stable`, and `unstable_findings` names the borderline ones.
 
 ## Read it
 
@@ -58,11 +61,25 @@ Finding-specific notes:
 
 - **anisotropy**: `details.mean_random_cosine_after_centering` shows what centering alone
   would achieve. Near 0 means the model can stay; centering changes rankings, so step 4 matters.
+  On labeled data anisotropy by itself did not lower nDCG@10 (the best public models sit at
+  0.58 to 0.81); it breaks absolute score thresholds, not ranking. Suspect the model only when
+  `distance_concentration`, `effective_rank` or `rogue_dimensions` move with it.
 - **hubness / antihubs**: hubness often follows anisotropy; fix anisotropy first, then re-rank
   with mutual k-NN or local scaling if hubs remain.
-- **collapse / outliers / connectivity**: `details.sample_ids` are row ids to show the user.
+- **collapse**: read `details.largest_near_duplicate_groups` before blaming the model. Many
+  small groups (pairs, triples) are duplicate items: the same image or text under several ids;
+  deduplicate or collapse them at serving time. A few huge groups are an embedding failure
+  (a constant vector) or boilerplate. `details.sample_pairs` lists row pairs with their cosine.
+  With a second embedding of the same rows, `compare` settles it: duplicates both spaces flag
+  with the same partner belong to the items.
+- **outliers / connectivity**: `details.sample_ids` are row ids to show the user.
 - **norms / metric_mismatch**: decide the index metric deliberately; normalize if cosine is intended.
 - **ann_recall**: raise `ef_search` / `nprobe` before rebuilding; `vecscope sweep` picks values
   and reports qps per device (GPU is used for IVF when the faiss build has one; HNSW is CPU-only).
+  Report the recommendation's `margin`; when it is `tight`, propose the `safer_alternative`
+  instead, and relay `caveats`: recall falls as the corpus grows, so a sweep on a sample is
+  optimistic, and qps only ranks settings on this machine.
 - **ood_queries**: check that queries use the same model and the model's query prefix before
-  suspecting the corpus; `details.ood_sample_ids` lists the farthest queries.
+  suspecting the corpus; `details.ood_sample_ids` lists the farthest queries. It measures
+  distribution shift, not failure: queries from a closely related model can score 1.0 and
+  still retrieve well, so confirm with real queries (step 4).

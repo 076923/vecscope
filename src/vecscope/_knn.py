@@ -12,6 +12,18 @@ def normalize(x: np.ndarray) -> np.ndarray:
     return x / norms
 
 
+def row_overlap(a: np.ndarray, b: np.ndarray, block: int = 4096) -> np.ndarray:
+    """Per-row share of neighbor ids two (n x k) lists have in common (k = the smaller)."""
+    k = min(a.shape[1], b.shape[1])
+    a = np.asarray(a)[:, :k]
+    b = np.asarray(b)[:, :k]
+    out = np.empty(a.shape[0], dtype=np.float64)
+    for s in range(0, a.shape[0], block):
+        e = min(s + block, a.shape[0])
+        out[s:e] = (a[s:e, :, None] == b[s:e, None, :]).any(axis=2).sum(axis=1) / k
+    return out
+
+
 def exact_knn(
     x: np.ndarray, k: int, metric: str = "cosine", block: int = 2048
 ) -> tuple[np.ndarray, np.ndarray]:

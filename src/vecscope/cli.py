@@ -1,4 +1,4 @@
-"""vecscope CLI: `vecscope audit embeddings.npy`."""
+"""vecscope CLI: `vecscope audit embeddings.npy`, `vecscope sweep`, `vecscope compare`."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import sys
 
 from vecscope import __version__
+from vecscope.compare import compare, render_compare
 from vecscope.evidence import audit
 from vecscope.io import load_neighbors, load_vectors
 from vecscope.sweep import render_sweep, sweep
@@ -16,14 +17,18 @@ def _render_text(ev) -> str:
     mark = {"ok": "ok  ", "warn": "WARN", "fail": "FAIL"}
     head = f"vecscope {ev.version}  n={ev.n} dim={ev.dim} k={ev.k}  verdict={ev.verdict.upper()}"
     if ev.sampled:
-        head += f"  (sampled from {ev.n_total} rows)"
+        head += f"  (sampled from {ev.n_total} rows"
+        head += f", {ev.sample_repeats} repeats)" if ev.sample_repeats > 1 else ")"
     if ev.n_queries:
         head += f"  queries={ev.n_queries}"
     lines = [head]
     for f in ev.findings:
-        lines.append(
-            f"  [{mark[f.verdict]}] {f.name:<16} {f.metric}={f.value:.4f}  ({f.healthy_range})"
-        )
+        line = f"  [{mark[f.verdict]}] {f.name:<16} {f.metric}={f.value:.4f}  ({f.healthy_range})"
+        if f.value_range is not None:
+            line += f"  repeats {f.value_range[0]:.4f}~{f.value_range[1]:.4f}"
+            if not f.verdict_stable:
+                line += "  verdict UNSTABLE"
+        lines.append(line)
         lines.append(f"{'':25}{f.explanation}")
         if f.verdict != "ok":
             lines.append(f"{'':25}try: {f.suggested_action}")
@@ -54,6 +59,9 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--near-dup", type=float, default=0.99, help="cosine threshold for near-dups")
     a.add_argument("--sample", type=int, default=100_000,
                    help="audit a seeded random subset when n exceeds this (0 = all rows)")
+    a.add_argument("--sample-repeats", type=int, default=1,
+                   help="when sampling applies, re-audit this many independent samples and "
+                        "report each finding's value range and verdict stability (default 1)")
     a.add_argument("--json", action="store_true", help="emit JSON evidence instead of text")
     a.add_argument("--fail-on", choices=["warn", "fail"], default="fail",
                    help="exit 1 when verdict is at least this level")
@@ -67,7 +75,20 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--device", choices=["auto", "cpu", "gpu"], default="auto",
                    help="run IVF and the exact baseline on the GPU when faiss has GPU support "
                         "(default auto); HNSW is CPU-only in faiss")
+    s.add_argument("--timing-repeats", type=int, default=3,
+                   help="time each setting this many times and keep the median qps (default 3)")
+    s.add_argument("--margin", type=float, default=0.02,
+                   help="recall headroom over the target below which the recommendation is "
+                        "marked tight and a safer setting is named (default 0.02)")
     s.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    c = sub.add_parser("compare", help="compare two embeddings of the same rows (no verdicts)")
+    c.add_argument("path_a", help="embedding file A, one vector per row")
+    c.add_argument("path_b", help="embedding file B, same rows in the same order")
+    c.add_argument("-k", type=int, default=10, help="neighbors per item (default 10)")
+    c.add_argument("--near-dup", type=float, default=0.99, help="cosine threshold for near-dups")
+    c.add_argument("--sample", type=int, default=100_000,
+                   help="compare a seeded random subset when n exceeds this (0 = all rows)")
+    c.add_argument("--json", action="store_true", help="emit JSON instead of text")
     args = p.parse_args(argv)
     try:
         return _run(args)
@@ -81,11 +102,21 @@ def _run(args) -> int:
         raise ValueError("--sample must be 0 (all rows) or a positive number")
     if args.cmd == "audit" and args.clusters < 0:
         raise ValueError("--clusters must be 0 or a positive number")
+    if args.cmd == "audit" and args.sample_repeats < 1:
+        raise ValueError("--sample-repeats must be a positive number")
+    if args.cmd == "compare":
+        if args.sample < 0:
+            raise ValueError("--sample must be 0 (all rows) or a positive number")
+        res = compare(load_vectors(args.path_a), load_vectors(args.path_b), k=args.k,
+                      near_dup_cos=args.near_dup, sample=args.sample or None)
+        print(json.dumps(res.to_dict(), indent=2) if args.json else render_compare(res))
+        return 0
     x = load_vectors(args.path)
     if args.cmd == "sweep":
         q = load_vectors(args.queries) if args.queries else None
         res = sweep(x, k=args.k, queries=q, n_queries=args.n_queries,
-                    target_recall=args.target_recall, device=args.device)
+                    target_recall=args.target_recall, device=args.device,
+                    timing_repeats=args.timing_repeats, margin=args.margin)
         print(json.dumps(res.to_dict(), indent=2) if args.json else render_sweep(res))
         return 0
 
@@ -96,7 +127,8 @@ def _run(args) -> int:
         with open(args.thresholds, encoding="utf-8") as fh:
             th = json.load(fh)
     ev = audit(x, k=args.k, ann_neighbors=ann, near_dup_cos=args.near_dup,
-               sample=args.sample or None, queries=q, clusters=args.clusters, thresholds=th)
+               sample=args.sample or None, queries=q, clusters=args.clusters, thresholds=th,
+               sample_repeats=args.sample_repeats)
     print(ev.to_json() if args.json else _render_text(ev))
     level = {"ok": 0, "warn": 1, "fail": 2}
     return 1 if level[ev.verdict] >= level[args.fail_on] else 0

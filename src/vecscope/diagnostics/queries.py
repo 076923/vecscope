@@ -38,11 +38,13 @@ def query_audit(
     k: int,
     corpus_nn_dist: np.ndarray,
     sample_ids: int = 10,
+    dup_cutoff: float = 1e-4,
 ) -> dict:
     idx, dist = query_knn(corpus, queries, k)
     n_corpus = corpus.shape[0]
     corpus_nn = np.asarray(corpus_nn_dist, dtype=np.float64)
-    corpus_nn = corpus_nn[corpus_nn > 1e-4] if (corpus_nn > 1e-4).any() else corpus_nn
+    # drop duplicate rows (NN distance ~0) so they do not drag the OOD cutoff down
+    corpus_nn = corpus_nn[corpus_nn > dup_cutoff] if (corpus_nn > dup_cutoff).any() else corpus_nn
     cutoff = float(np.quantile(corpus_nn, 0.99))
     nearest = dist[:, 0].astype(np.float64)
     ood = nearest > cutoff

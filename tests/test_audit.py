@@ -1,17 +1,54 @@
+import json
+
 import numpy as np
+import pytest
 
 from vecscope import audit
 from vecscope.diagnostics import ann_recall
 
 
-def test_isotropic_gaussian_is_ok():
+def test_isotropic_gaussian_has_no_signal():
     rng = np.random.default_rng(0)
     x = rng.standard_normal((2000, 64)).astype(np.float32)
     ev = audit(x, k=10)
     by = {f.name: f for f in ev.findings}
     assert by["anisotropy"].verdict == "ok"
     assert by["collapse"].verdict == "ok"
-    assert ev.verdict in {"ok", "warn"}
+    # pure noise has no neighbor structure: the contrast equals the noise baseline
+    assert abs(by["distance_concentration"].value - 1.0) < 0.1
+    assert by["distance_concentration"].verdict == "fail"
+    assert all(f.verdict != "fail" for f in ev.findings if f.name != "distance_concentration")
+
+
+def test_contrast_over_noise_is_size_free():
+    rng = np.random.default_rng(2)
+    x = rng.standard_normal((12000, 128)).astype(np.float32)
+    f = {f.name: f for f in audit(x, k=5, sample=None).findings}["distance_concentration"]
+    assert abs(f.value - 1.0) < 0.05  # the raw contrast of noise rises with n (1.44 -> 1.55)
+    assert f.details["baseline_rows"] == 4000 and f.verdict == "fail"
+    with pytest.raises(ValueError, match="renamed"):
+        audit(x[:500], k=5, thresholds={"distance_concentration.relative_contrast": [1.5, 1.3]})
+
+
+def test_collapse_jittered_boilerplate_is_one_group():
+    rng = np.random.default_rng(0)
+    c = rng.standard_normal((40, 32))
+    base = c[rng.integers(0, 40, 1500)] + rng.standard_normal((1500, 32)) * 0.8
+    boiler = np.ones((300, 32)) + rng.standard_normal((300, 32)) * 0.01  # cos ~0.9999, not exact
+    x = np.concatenate([base, boiler]).astype(np.float32)
+    d = {f.name: f for f in audit(x, k=10).findings}["collapse"].details
+    assert d["largest_exact_duplicate_groups"] == []
+    assert d["largest_near_duplicate_groups"][0] >= 290  # linked through k neighbors, not 1-NN
+    assert d["sample_pairs"][0][0] >= 1500 and d["sample_pairs"][0][2] <= 1.0
+
+
+def test_contrast_over_noise_is_dimension_free():
+    rng = np.random.default_rng(1)
+    vals = []
+    for d in (32, 256, 1024):
+        x = rng.standard_normal((1500, d)).astype(np.float32)
+        vals.append({f.name: f for f in audit(x, k=5).findings}["distance_concentration"].value)
+    assert max(vals) - min(vals) < 0.1  # raw relative contrast would span 2.4 to 1.1
 
 
 def test_shared_offset_triggers_anisotropy():
@@ -20,6 +57,59 @@ def test_shared_offset_triggers_anisotropy():
     ev = audit(x, k=10)
     by = {f.name: f for f in ev.findings}
     assert by["anisotropy"].verdict == "fail"
+
+
+def test_collapse_reports_group_structure():
+    rng = np.random.default_rng(0)
+    c = rng.standard_normal((40, 16))
+    base = c[rng.integers(0, 40, 600)] + rng.standard_normal((600, 16)) * 0.8
+    x = np.concatenate([base, base[:100], np.tile(base[:1], (30, 1))]).astype(np.float32)
+    d = {f.name: f for f in audit(x, k=5).findings}["collapse"].details
+    assert d["largest_exact_duplicate_groups"][0] == 32  # base[0], its copy and 30 tiles
+    assert d["largest_near_duplicate_groups"][0] == 32
+    assert d["near_duplicate_groups"] >= 100
+    assert d["largest_near_duplicate_groups"][1] == 2  # the other copies pair up
+    assert d["sample_pairs"] and all(i != j and 0.99 <= cos <= 1.0 for i, j, cos in d["sample_pairs"])
+    assert len({tuple(p[:2]) for p in d["sample_pairs"]}) == len(d["sample_pairs"])
+    big = {0, 600} | set(range(700, 730))  # rows of the 32-row group
+    assert sum(p[0] in big or p[1] in big for p in d["sample_pairs"]) == 1  # one pair per group
+    clean = {f.name: f for f in audit(base.astype(np.float32), k=5).findings}["collapse"]
+    assert clean.details["largest_near_duplicate_groups"] == []
+    assert "no row has a near-duplicate" in clean.explanation
+
+
+def test_compare_two_spaces():
+    from vecscope import compare
+    from vecscope.compare import render_compare
+
+    rng = np.random.default_rng(0)
+    c = rng.standard_normal((30, 16))
+    a = (c[rng.integers(0, 30, 500)] + rng.standard_normal((500, 16)) * 0.5).astype(np.float32)
+    a = np.concatenate([a, a[:50]])  # 50 duplicate items
+    same = compare(a, a, k=5)
+    assert same.nn1_agreement == 1.0 and same.topk_overlap == 1.0
+    assert same.near_duplicate_both == same.near_duplicate_ratio_a > 0
+    assert same.same_nearest_among_both_flagged == 1.0
+    assert same.near_duplicate_only_a == 0.0
+    # a rotation keeps every neighbor; an orthogonal transform of A is a different "model"
+    q, _ = np.linalg.qr(rng.standard_normal((16, 16)))
+    rot = compare(a, a @ q.astype(np.float32), k=5)
+    assert rot.topk_overlap > 0.95
+    noise = compare(a, rng.standard_normal(a.shape).astype(np.float32), k=5)
+    assert noise.topk_overlap < 0.1 and noise.near_duplicate_only_a > 0
+    assert noise.same_nearest_among_both_flagged is None
+    assert len(noise.sample_disagreements) == 10
+    assert "nn1_agreement" in render_compare(noise) and '"topk_overlap"' in json.dumps(noise.to_dict())
+    sampled = compare(a, a, k=5, sample=200)
+    assert sampled.sampled and sampled.n == 200 and sampled.n_total == 550
+    with pytest.raises(ValueError):
+        compare(a, a[:-1])
+    with pytest.raises(ValueError):
+        compare(a, a, k=0)
+    with pytest.raises(ValueError, match="exceed k"):
+        compare(a, a, k=5, sample=1)
+    with pytest.raises(ValueError, match="NaN"):
+        compare(a, np.full_like(a, np.nan))
 
 
 def test_duplicates_trigger_collapse():
@@ -220,13 +310,49 @@ def test_cluster_report_sizes_and_ids():
 def test_sweep_recommends_a_config():
     pytest = __import__("pytest")
     pytest.importorskip("faiss")
-    from vecscope.sweep import sweep
+    from vecscope.sweep import render_sweep, sweep
 
     rng = np.random.default_rng(0)
     x = rng.standard_normal((3000, 32)).astype(np.float32)
     res = sweep(x, k=5, n_queries=200)
     assert res.points and res.recommendation["index"] in {"hnsw", "ivf"}
     assert all(0.0 <= p.recall_at_k <= 1.0 for p in res.points)
+    r = res.recommendation
+    assert abs(r["margin"] - (r["recall_at_k"] - res.target_recall)) < 1e-9
+    assert len(res.caveats) == 3 and "corpus itself" in res.caveats[0]
+    assert "note:" in render_sweep(res) and "margin=" in render_sweep(res)
+
+
+def test_sweep_recommendation_margin_is_deterministic():
+    from vecscope.sweep import SweepPoint, _recommend
+
+    pts = [SweepPoint("hnsw", {"M": 8}, 0.961, 0.1, 900.0),
+           SweepPoint("hnsw", {"M": 16}, 0.983, 0.1, 700.0),
+           SweepPoint("hnsw", {"M": 32}, 0.990, 0.1, 500.0),
+           SweepPoint("ivf", {"nprobe": 1}, 0.90, 0.1, 2000.0)]
+    r = _recommend(pts, 10, 0.95, 0.02)
+    assert r["params"] == {"M": 8} and r["tight"] is True
+    assert abs(r["margin"] - 0.011) < 1e-9
+    assert r["safer_alternative"]["params"] == {"M": 16}  # fastest with >= 0.02 headroom
+    assert "M=16" in r["reason"] and "larger than this one" in r["reason"]
+    r = _recommend(pts, 10, 0.95, 0.01)
+    assert r["params"] == {"M": 8} and r["tight"] is False and "safer_alternative" not in r
+    r = _recommend(pts, 10, 0.985, 0.02)
+    assert r["params"] == {"M": 32} and r["tight"] is True
+    assert "no setting in the grid" in r["reason"] and "safer_alternative" not in r
+    r = _recommend(pts, 10, 0.995, 0.02)
+    assert r["params"] == {"M": 32} and r["tight"] is True and "no configuration" in r["reason"]
+
+
+def test_sweep_rejects_bad_repeats_and_margin():
+    pytest.importorskip("faiss")
+    from vecscope.sweep import sweep
+
+    x = np.random.default_rng(0).standard_normal((300, 8)).astype(np.float32)
+    with pytest.raises(ValueError):
+        sweep(x, k=5, timing_repeats=0)
+    with pytest.raises(ValueError):
+        sweep(x, k=5, margin=1.0)
 
 
 def test_sweep_device_selection():
@@ -255,7 +381,7 @@ def test_mcp_server_exposes_tools():
 
     tools = asyncio.run(server.list_tools())
     by = {t.name: t for t in tools}
-    assert set(by) >= {"audit_embeddings", "sweep_index", "describe_findings"}
+    assert set(by) >= {"audit_embeddings", "sweep_index", "describe_findings", "compare_embeddings"}
     ann = by["audit_embeddings"].annotations
     if ann is not None:  # older mcp may not carry annotations
         assert getattr(ann, "readOnlyHint", None) or getattr(ann, "read_only_hint", None)
@@ -370,3 +496,18 @@ def test_library_sample_zero_means_all_rows_and_bad_args_raise():
                 {"thresholds": [("hubness.skewness", (1, 2))]}, {"thresholds": {"hubness.skewness": {"warn": 1}}}):
         with pytest.raises((ValueError, TypeError)):
             audit(x, **{"k": 5, **bad})
+
+
+def test_sample_repeats_reports_ranges_and_stability():
+    x = np.random.default_rng(3).standard_normal((2000, 32)).astype(np.float32)
+    ev = audit(x, sample=500, sample_repeats=3)
+    assert ev.sampled and ev.sample_repeats == 3
+    for f in ev.findings:
+        assert f.value_range is not None and f.value_range[0] <= f.value <= f.value_range[1]
+        assert f.verdict_stable is not None
+    assert set(ev.unstable_findings) <= {f.name for f in ev.findings}
+    assert ev.to_json() == audit(x, sample=500, sample_repeats=3).to_json()
+    ev2 = audit(x, sample_repeats=3)  # nothing sampled: repeats ignored, no ranges
+    assert ev2.sample_repeats == 1 and all(f.value_range is None for f in ev2.findings)
+    with pytest.raises(ValueError):
+        audit(x, sample=500, sample_repeats=0)

@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "vecscope"
 dynamic = ["version"]
-description = "Embedding space evidence for agents: hubness, anisotropy, collapse, ANN recall."
+description = "Deterministic evidence about embedding spaces and vector indexes for agents: hubness, anisotropy, collapse, distance concentration, ANN recall, HNSW/IVF sweeps. CLI and MCP server."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "Daehee Yun" }]
-keywords = ["embeddings", "vector-search", "rag", "agents", "mcp", "hubness", "anisotropy"]
+keywords = ["embeddings", "vector-search", "rag", "agents", "mcp", "hubness", "anisotropy", "faiss", "hnsw", "semantic-search", "embedding-quality"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -29,6 +29,8 @@ dependencies = ["numpy>=1.24"]
 Homepage = "https://github.com/076923/vecscope"
 Repository = "https://github.com/076923/vecscope"
 Issues = "https://github.com/076923/vecscope/issues"
+Changelog = "https://github.com/076923/vecscope/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/076923/vecscope#readme"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
