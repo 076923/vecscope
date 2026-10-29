@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `diff_evidence(new, old, tolerances=...)` and `vecscope audit --baseline x --tolerances
+  tol.json`: a per-finding budget for how much a value may worsen against the baseline.
+  Findings beyond it are listed under `value_regressions` and fail the run even when the
+  verdict band did not change; findings without a tolerance keep the verdict-only rule. Every
+  change row now carries `lower_is_worse`, `worsened`, `worsening` (positive = worse) and
+  `tolerance`, so drift inside a band is visible without a tolerance
+- `--require-comparable`: exit 2 when the baseline was made with different n, dim, k,
+  sampling, thresholds or near-duplicate cutoff, instead of printing the diff with a note
+- MCP server path restriction: `vecscope-mcp --allow-dir DIR` (repeatable) or
+  `VECSCOPE_ALLOWED_DIRS`; every tool resolves its path arguments and refuses one outside the
+  allowed directories before opening it. Unset, nothing changes
+- Tests: an end-to-end MCP round trip over stdio through the `mcp` client (initialize, list
+  tools, a successful call, a refused path), and one check that `audit`, `compare` and
+  `sweep` reject NaN/Inf, oversized values, 1-D input, zero columns and non-numeric dtypes
+  with the same messages
+- README: per-finding table of what a sampled audit can and cannot say, the compute cost
+  behind the memory bound, and a procedure for calibrating thresholds and tolerances on
+  labeled queries with a held-out split; the skill file points agents at it
+
 ## [0.4.0] - 2026-10-29
 
 ### Added

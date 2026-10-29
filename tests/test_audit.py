@@ -1003,3 +1003,197 @@ def test_sample_repeats_reports_ranges_and_stability():
     assert ev2.sample_repeats == 1 and all(f.value_range is None for f in ev2.findings)
     with pytest.raises(ValueError):
         audit(x, sample=500, sample_repeats=0)
+
+
+def test_value_regressions_with_tolerances(tmp_path, capsys):
+    """A finding that drifts in the worse direction inside one verdict band is reported as a
+    value regression only when a tolerance is set and exceeded."""
+    from vecscope._knn import normalize
+    from vecscope.cli import main
+    from vecscope.evidence import diff_evidence
+
+    rng = np.random.default_rng(1)
+    c = rng.standard_normal((30, 16))
+    good = normalize(c[rng.integers(0, 30, 800)] + rng.standard_normal((800, 16)) * 0.6)
+    worse = np.concatenate([good[:-4], good[:4]])  # 4 extra copies: collapse rises, same verdict
+    old, new = audit(good, k=5).to_dict(), audit(worse, k=5).to_dict()
+    by_old = {f["name"]: f for f in old["findings"]}
+    by_new = {f["name"]: f for f in new["findings"]}
+    assert by_new["collapse"]["value"] > by_old["collapse"]["value"]
+    assert by_new["collapse"]["verdict"] == by_old["collapse"]["verdict"]
+
+    d = diff_evidence(new, old)
+    row = {c["name"]: c for c in d["changes"]}["collapse"]
+    assert row["worsened"] is True and row["worsening"] == pytest.approx(row["delta"])
+    assert row["lower_is_worse"] is False and row["tolerance"] is None
+    assert d["value_regressions"] == [] and d["tolerances"] == {}  # no tolerance, no verdict change
+    assert "collapse" not in d["regressions"]
+
+    d = diff_evidence(new, old, tolerances={"collapse": 0.0})
+    assert d["value_regressions"] == ["collapse"] and "collapse" not in d["regressions"]
+    assert diff_evidence(new, old, tolerances={"collapse": 1.0})["value_regressions"] == []
+    # lower-is-worse findings count a drop as worsening
+    lowered = json.loads(json.dumps(old))
+    f = {f["name"]: f for f in lowered["findings"]}["effective_rank"]
+    f["value"] -= 0.01
+    d = diff_evidence(lowered, old, tolerances={"effective_rank": 0.005})
+    row = {c["name"]: c for c in d["changes"]}["effective_rank"]
+    assert row["lower_is_worse"] is True and row["worsening"] == pytest.approx(0.01)
+    assert d["value_regressions"] == ["effective_rank"]
+    # a finding that improves is never a value regression, whatever the tolerance
+    f["value"] += 0.02
+    assert diff_evidence(lowered, old, tolerances={"effective_rank": 0.0})["value_regressions"] == []
+    with pytest.raises(ValueError, match="unknown finding"):
+        diff_evidence(new, old, tolerances={"collapse.near_duplicate_ratio": 0.1})
+    with pytest.raises(ValueError, match="finite number >= 0"):
+        diff_evidence(new, old, tolerances={"collapse": -1})
+    with pytest.raises(TypeError, match="mapping"):
+        diff_evidence(new, old, tolerances=[("collapse", 0.1)])
+
+    base = tmp_path / "base.json"
+    base.write_text(json.dumps(old), encoding="utf-8")
+    tol = tmp_path / "tol.json"
+    tol.write_text(json.dumps({"collapse": 0.0}), encoding="utf-8")
+    np.save(tmp_path / "worse.npy", worse)
+    assert old["verdict"] != "fail"
+    assert main(["audit", str(tmp_path / "worse.npy"), "-k", "5", "--baseline", str(base),
+                 "--tolerances", str(tol)]) == 1
+    out = capsys.readouterr().out
+    assert "VALUE WORSE" in out and "value regressions (beyond tolerance): collapse" in out
+    # the same run without tolerances passes: verdicts did not change
+    assert main(["audit", str(tmp_path / "worse.npy"), "-k", "5", "--baseline", str(base)]) == 0
+    capsys.readouterr()
+    assert main(["audit", str(tmp_path / "worse.npy"), "-k", "5", "--tolerances", str(tol)]) == 2
+    assert "need --baseline" in capsys.readouterr().err
+
+
+def test_require_comparable_refuses_a_mismatched_baseline(tmp_path, capsys):
+    from vecscope.cli import main
+
+    rng = np.random.default_rng(2)
+    x = rng.standard_normal((300, 8)).astype(np.float32)
+    np.save(tmp_path / "x.npy", x)
+    base = tmp_path / "base.json"
+    base.write_text(audit(x, k=5).to_json(), encoding="utf-8")
+    assert main(["audit", str(tmp_path / "x.npy"), "-k", "5", "--baseline", str(base),
+                 "--require-comparable", "--fail-on", "fail"]) in (0, 1)
+    capsys.readouterr()
+    # a different k makes the runs incomparable: a plain diff notes it, the strict flag refuses
+    main(["audit", str(tmp_path / "x.npy"), "-k", "6", "--baseline", str(base)])
+    assert "not directly comparable" in capsys.readouterr().out
+    assert main(["audit", str(tmp_path / "x.npy"), "-k", "6", "--baseline", str(base),
+                 "--require-comparable"]) == 2
+    assert "--require-comparable" in capsys.readouterr().err
+
+
+def test_mcp_tools_refuse_paths_outside_allowed_dirs(tmp_path, monkeypatch):
+    pytest.importorskip("mcp")
+    import os
+
+    from vecscope import mcp_server
+
+    inside = tmp_path / "data"
+    inside.mkdir()
+    outside = tmp_path / "secret"
+    outside.mkdir()
+    x = np.random.default_rng(0).standard_normal((100, 8)).astype(np.float32)
+    np.save(inside / "v.npy", x)
+    np.save(outside / "v.npy", x)
+    monkeypatch.delenv(mcp_server.ALLOWED_DIRS_ENV, raising=False)
+    assert mcp_server.allowed_dirs() == []
+    assert mcp_server.audit_embeddings(str(outside / "v.npy"), k=5)["n"] == 100  # unrestricted
+    monkeypatch.setenv(mcp_server.ALLOWED_DIRS_ENV, os.pathsep.join([str(inside), ""]))
+    assert mcp_server.allowed_dirs() == [inside.resolve()]
+    assert mcp_server.audit_embeddings(str(inside / "v.npy"), k=5)["n"] == 100
+    with pytest.raises(Exception, match="outside the directories"):
+        mcp_server.audit_embeddings(str(outside / "v.npy"), k=5)
+    with pytest.raises(Exception, match="queries_path"):
+        mcp_server.audit_embeddings(str(inside / "v.npy"), k=5, queries_path=str(outside / "v.npy"))
+    with pytest.raises(Exception, match="path_b"):
+        mcp_server.compare_embeddings(str(inside / "v.npy"), str(outside / "v.npy"), k=5)
+    # a ".." path that escapes the allowed directory is resolved before the check
+    with pytest.raises(Exception, match="outside"):
+        mcp_server.audit_embeddings(str(inside / ".." / "secret" / "v.npy"), k=5)
+    with pytest.raises(SystemExit):
+        mcp_server.main(["--allow-dir", str(tmp_path / "missing")])
+
+
+def test_mcp_server_round_trip_over_stdio(tmp_path):
+    """Start the server as a subprocess and call tools through the mcp client, so the
+    version-specific server class, the tool schema and the error path run end to end."""
+    pytest.importorskip("mcp")
+    import asyncio
+    import os
+    import sys
+
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    from vecscope.mcp_server import ALLOWED_DIRS_ENV
+
+    x = np.random.default_rng(0).standard_normal((120, 8)).astype(np.float32)
+    inside = tmp_path / "data"
+    inside.mkdir()
+    outside = tmp_path / "secret"
+    outside.mkdir()
+    np.save(inside / "v.npy", x)
+    np.save(outside / "v.npy", x)
+    from pathlib import Path
+
+    import vecscope
+
+    src = str(Path(vecscope.__file__).resolve().parents[1])  # the checkout's src, or site-packages
+    env = {**os.environ, ALLOWED_DIRS_ENV: str(inside),
+           "PYTHONPATH": os.pathsep.join([src, os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
+    params = StdioServerParameters(command=sys.executable, args=["-m", "vecscope.mcp_server"],
+                                   env=env)
+
+    async def run():
+        async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
+            init = await s.initialize()
+            tools = {t.name: t for t in (await s.list_tools()).tools}
+            ok = await s.call_tool("audit_embeddings", {"path": str(inside / "v.npy"), "k": 5})
+            bad = await s.call_tool("audit_embeddings", {"path": str(outside / "v.npy"), "k": 5})
+            desc = await s.call_tool("describe_findings", {})
+            return init, tools, ok, bad, desc
+
+    def attr(obj, *names):  # mcp 1.x uses camelCase fields, 2.x snake_case
+        for name in names:
+            if hasattr(obj, name):
+                return getattr(obj, name)
+        raise AttributeError(names)
+
+    init, tools, ok, bad, desc = asyncio.run(run())
+    assert attr(init, "serverInfo", "server_info").name == "vecscope"
+    assert {"audit_embeddings", "sweep_index", "compare_embeddings", "describe_findings"} <= set(tools)
+    assert not attr(ok, "isError", "is_error") and not attr(desc, "isError", "is_error")
+    payload = json.loads(ok.content[0].text)
+    assert payload["n"] == 120 and payload["summary"].startswith("verdict=")
+    assert attr(bad, "isError", "is_error") and "outside the directories" in bad.content[0].text
+
+
+def test_public_entry_points_validate_input_alike():
+    """audit, compare and sweep refuse the same malformed inputs with the same messages."""
+    from vecscope.compare import compare
+
+    good = np.random.default_rng(0).standard_normal((40, 8)).astype(np.float32)
+    nan = good.copy()
+    nan[3, 2] = np.nan
+    huge = good.copy()
+    huge[0, 0] = 1e17
+    cases = [
+        (nan, "NaN or Inf"),
+        (huge, "float32 dot products overflow"),
+        (good.ravel(), "2-[dD]"),
+        (good[:, :0], "column"),
+        (good.astype(str), "real numbers"),
+    ]
+    entry_points = [lambda x: audit(x, k=5), lambda x: compare(x, good, k=5)]
+    if pytest.importorskip("faiss", reason="sweep needs faiss") is not None:
+        from vecscope.sweep import sweep
+
+        entry_points.append(lambda x: sweep(x, k=5, n_queries=5))
+    for x, message in cases:
+        for call in entry_points:
+            with pytest.raises(ValueError, match=message):
+                call(x)

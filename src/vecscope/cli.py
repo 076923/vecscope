@@ -69,6 +69,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="exit 1 when verdict is at least this level")
     a.add_argument("--baseline", help="earlier --json output to diff against; prints each "
                                       "finding's change and exits 1 when any verdict got worse")
+    a.add_argument("--tolerances", help='JSON file of allowed worsening per finding against the '
+                                        'baseline, e.g. {"collapse": 0.01, "ann_recall": 0.02}; '
+                                        'a finding that worsens by more exits 1 even when its '
+                                        'verdict did not change (needs --baseline)')
+    a.add_argument("--require-comparable", action="store_true",
+                   help="with --baseline: exit 2 instead of printing a note when n, dim, k, "
+                        "sampling, thresholds or the near-dup cutoff differ from the baseline")
     s = sub.add_parser("sweep", help="sweep HNSW/IVF parameters (needs faiss-cpu)")
     s.add_argument("path", help="embedding file, one vector per row")
     s.add_argument("-k", type=int, default=10, help="neighbors per query (default 10)")
@@ -131,8 +138,17 @@ def _run(args) -> int:
     ev = audit(x, k=args.k, ann_neighbors=ann, near_dup_cos=args.near_dup,
                sample=args.sample, queries=q, clusters=args.clusters, thresholds=th,
                sample_repeats=args.sample_repeats)
+    if (args.tolerances or args.require_comparable) and not args.baseline:
+        raise ValueError("--tolerances and --require-comparable need --baseline")
     if args.baseline:
-        d = diff_evidence(ev.to_dict(), _load_json(args.baseline, "--baseline"))
+        tol = _load_json(args.tolerances, "--tolerances") if args.tolerances else None
+        d = diff_evidence(ev.to_dict(), _load_json(args.baseline, "--baseline"), tolerances=tol)
+        if args.require_comparable and not d["comparable"]:
+            raise ValueError(
+                f"--require-comparable: baseline {args.baseline} was made with different n, "
+                "dim, k, sampling, thresholds or near-dup cutoff; re-create it with the same "
+                "settings or drop the flag"
+            )
         if args.json:
             out = ev.to_dict()
             out["baseline_diff"] = d
@@ -140,7 +156,8 @@ def _run(args) -> int:
         else:
             print(_render_text(ev))
             print(_render_diff(d, args.baseline))
-        return 1 if d["regressions"] or WORSE[ev.verdict] >= WORSE[args.fail_on] else 0
+        return (1 if d["regressions"] or d["value_regressions"]
+                or WORSE[ev.verdict] >= WORSE[args.fail_on] else 0)
     print(ev.to_json() if args.json else _render_text(ev))
     return 1 if WORSE[ev.verdict] >= WORSE[args.fail_on] else 0
 
@@ -161,6 +178,8 @@ def _render_diff(d: dict, path: str) -> str:
     for c in d["changes"]:
         mark = ("WORSE" if c["name"] in d["regressions"] else
                 "better" if c["name"] in d["improvements"] else "")
+        if c["name"] in d["value_regressions"]:
+            mark = (mark + " " if mark else "") + f"VALUE WORSE by {c['worsening']:.4f} > {c['tolerance']:g}"
         lines.append(f"    {c['name']:<22} {c['baseline_value']:.4f} -> {c['value']:.4f}  "
                      f"({c['delta']:+.4f})  {c['baseline_verdict']} -> {c['verdict']}  {mark}")
     for name in d["only_in_new"]:
@@ -169,6 +188,8 @@ def _render_diff(d: dict, path: str) -> str:
         lines.append(f"    {name:<22} in baseline only")
     if d["regressions"]:
         lines.append(f"  regressions: {', '.join(d['regressions'])}")
+    if d["value_regressions"]:
+        lines.append(f"  value regressions (beyond tolerance): {', '.join(d['value_regressions'])}")
     return "\n".join(lines)
 
 

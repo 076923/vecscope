@@ -257,6 +257,18 @@ pip install "vecscope[mcp]"
 검색기를 튜닝하기 전에 data/chunks.npy 임베딩을 감사하고, 먼저 조치할 항목을 알려줘.
 ```
 
+도구는 읽기 전용이지만 에이전트가 지정한 경로라면 무엇이든 읽습니다. 에이전트가 보면 안 되는
+데이터가 있는 장비에서는 서버를 임베딩이 있는 디렉터리로 제한하십시오. 그 밖의 경로는(`..`과
+심볼릭 링크를 풀어 확인한 뒤) 파일을 열기 전에 거부됩니다.
+
+```json
+{ "mcpServers": { "vecscope": { "command": "vecscope-mcp", "args": ["--allow-dir", "/data/embeddings"] } } }
+```
+
+`--allow-dir`는 여러 번 줄 수 있고, 환경 변수 `VECSCOPE_ALLOWED_DIRS`(Unix는 `:`, Windows는
+`;`로 구분)도 같은 역할을 합니다. 둘 다 없으면 서버 프로세스가 읽을 수 있는 모든 파일에 접근할
+수 있습니다.
+
 [`.agents/skills/vecscope/SKILL.md`](../../.agents/skills/vecscope/SKILL.md)의 에이전트
 스킬에는 감사를 실행할 시점과 판정별 조치(벡터 중심화(centering) 또는 모델 교체, 중복 제거,
 재순위화(re-ranking), 인덱스 재구축)가 정리되어 있습니다. 같은 절차가 서버 instructions에도
@@ -319,6 +331,32 @@ vecscope audit embeddings.npy --baseline baseline.json        # 다시 만들 �
 함께 거부됩니다. 기준선과 검사 모두 `--sample 0`으로 전체 행을 감사해 두 실행이 같은 행을
 보게 하십시오.
 
+판정은 거친 신호입니다. 측정값이 임곗값을 넘지 않은 채 몇 달 동안 서서히 나빠질 수 있습니다.
+그래서 변화 행마다 `worsened`(값이 나쁜 방향으로 움직였는지)와 `worsening`(얼마나, 해당
+지표의 단위로, 양수가 악화)을 함께 기록하며, `--tolerances`를 주면 이 변화량을 판정 단계와
+무관한 게이트로 쓸 수 있습니다.
+
+```bash
+# tolerances.json: {"collapse": 0.01, "ann_recall": 0.02, "hubness": 0.3}
+vecscope audit embeddings.npy --baseline baseline.json --tolerances tolerances.json --require-comparable
+```
+
+허용량보다 더 나빠진 항목은 `value_regressions`에 오르고(텍스트 출력에서는
+`VALUE WORSE by 0.0300 > 0.01`), 판정이 그대로여도 종료 코드 1을 돌려줍니다. 허용량을 주지
+않은 항목은 판정 변화로만 평가하고, 값이 좋아진 항목은 어떤 허용량에서도 퇴행이 아닙니다.
+허용량은 커밋된 기준선 대비 한 번의 재구축에 허용하는 예산이므로, 검토를 거쳐 받아들인
+변경이 있으면 기준선을 다시 커밋하십시오. 결과에는 `comparable`도 들어 있습니다. n, 차원, k,
+샘플링, 임곗값, 근접 중복 기준이 기준선과 다르면 false가 됩니다. `--require-comparable`을
+주면 이 경우 주의 문구 대신 오류(종료 코드 2)로 처리합니다. 설정이 다른 두 실행의 차이는
+코퍼스가 아니라 설정을 재는 것이므로 게이트에서는 이 정책이 맞습니다. 라이브러리에서는
+`diff_evidence(new, old, tolerances={...})`입니다.
+
+이 게이트는 우선 추세 추적 용도로 쓰십시오. 어느 정도의 변화가 "지나친지"는 진단값이 실제
+질의의 검색 품질과 어떤 관계인지에 달려 있습니다.
+[검색 품질 연구](#진단-항목이-검색-품질을-예측합니까)가 공개 데이터셋에서 그 관계를 보여 주고,
+[임곗값을 도메인에 맞추기](#임곗값을-도메인에-맞추기)는 병합을 차단하기 전에 자신의 데이터로
+그 관계를 재는 방법을 설명합니다.
+
 ## CLI 옵션
 
 ```bash
@@ -330,6 +368,8 @@ vecscope audit vectors.npy --clusters 10               # 군집별 요약 추가
 vecscope audit vectors.npy --thresholds th.json         # (warn, fail) 임곗값 덮어쓰기
 vecscope audit vectors.npy --fail-on warn              # warn 판정도 종료 코드 1로 처리
 vecscope audit vectors.npy --baseline old.json         # 이전 --json 결과와 비교, 퇴행이 있으면 종료 코드 1
+vecscope audit vectors.npy --baseline old.json --tolerances tol.json   # 값이 허용량보다 나빠져도 종료 코드 1
+vecscope audit vectors.npy --baseline old.json --require-comparable    # 기준선의 설정이 다르면 종료 코드 2
 vecscope audit vectors.npy --near-dup 0.98             # 근접 중복으로 간주할 코사인 임곗값
 vecscope audit vectors.npy --sample 0                  # 샘플링 없이 전체 행을 감사 (기본값은 10만 행)
 vecscope audit vectors.npy --sample-repeats 3          # 표본 3개를 감사해 값의 범위와 판정 안정성을 보고
@@ -394,6 +434,22 @@ embeddings[0]                           # 첫 번째 항목의 벡터
 질의 묶음마다 코퍼스를 한 번 더 훑고,
 `metric_mismatch`는 벡터 길이가 다를 때만 k-NN을 한 번 더 계산합니다. 표본 감사는 표본에 대한
 설명이므로, 섬과 이상치를 하나도 빠뜨리지 않아야 한다면 `--sample 0`을 지정하십시오.
+
+블록 계산이 제한하는 것은 메모리이지 연산량이 아닙니다. 정확한 k-NN은 여전히 n² × 차원에
+비례하는 곱셈이 필요하므로, 768차원 100만 행은 10만 행의 약 100배가 듭니다. 그 규모의
+코퍼스는 기본 표본(또는 `--sample-repeats`로 표본 여러 개)을 감사하고, `--sample 0`은 전체 행이
+꼭 필요한 항목에만 쓰십시오. 어느 항목이 그런지는 다음과 같습니다.
+
+| 항목 | 표본으로 얻는 것 | 전체 행이 필요한 경우 |
+|---|---|---|
+| hubness, antihubs, anisotropy, effective_rank, rogue_dimensions, norms, metric_mismatch, distance_concentration | 분포 추정치. 10만 행이면 안정적이며 `--sample-repeats`가 흔들림을 보여 줌 | 없음 |
+| collapse | 중복 *비율*. 표본 밖의 중복 쌍은 세지 않음 | 모든 중복을 세거나 나열할 때 |
+| outliers, connectivity | 이상치와 섬의 *비율*, 표본에 든 것들의 행 번호 | 모든 이상치와 섬을 찾을 때 |
+| ann_recall | 표본에서는 불가. 행 번호가 ANN 파일과 맞아야 함 | 항상 (`--sample 0`) |
+| ood_queries, query_hubness | 표본에서 구한 기준 거리. 질의는 모두 평가 | 없음 |
+
+모든 수치는 감사한 행에 대해 정확합니다. vecscope는 정확한 이웃 탐색을 근사 탐색으로
+대체하지 않으며, 근사가 들어가는 곳은 행의 선택뿐입니다.
 
 ## 동작 원리
 
@@ -462,6 +518,31 @@ NFCorpus)에서 정확한 코사인 검색으로 nDCG@10을 구하고, 공개 �
   깨지지만, 신호 자체가 사라질 때 움직이는 항목은 `distance_concentration`입니다.
 
 `anisotropy`와 `distance_concentration`의 임곗값은 이 연구 결과로 다시 보정했습니다.
+
+### 임곗값을 도메인에 맞추기
+
+기본 임곗값은 공개 모델과 공개 데이터셋으로 보정한 값입니다. 자신의 코퍼스에서 `fail`이
+나왔다면 들여다볼 이유이지 검색이 나쁘다는 증명이 아니고, 모두 `ok`라고 해서 맞는 문서가
+검색된다는 보장도 아닙니다. 임곗값이나 허용량을 병합 차단 게이트로 쓰기 전에, 그것이 자신의
+데이터에서 무엇을 예측하는지 먼저 재십시오.
+
+1. 도메인의 정답 질의를 모읍니다(관련 문서 ID가 달린 질의 수백 개면 충분합니다). 그리고
+   임곗값을 고르는 데 쓸 부분과 검증용으로 따로 둘 부분으로 나눕니다.
+2. 파이프라인의 후보 상태(모델, 청크 분할, 변환, 인덱스 설정)마다 `vecscope audit --json`을
+   실행하고, 같은 상태에서 같은 질의로 검색 품질(nDCG@k, Recall@k, MRR)을 계산합니다.
+   `examples/retrieval_quality.py`가 공개 데이터셋에 대해 둘을 함께 수행하며, 자신의 데이터를
+   가리키도록 바꿀 수 있습니다.
+3. 상태들에 걸쳐 각 진단값과 품질 지표의 관계를 봅니다. 자신의 도메인에서 품질과 함께
+   움직이지 않는 항목은 기본값이 무엇이든 게이트로 쓰지 않습니다.
+4. 품질이 허용 범위였던 상태들을 기준으로 `--thresholds`와 `--tolerances`를 정합니다. 이때
+   첫 번째 부분만 사용합니다.
+5. 따로 둔 검증용 질의로 그 임곗값이 허용 상태와 나머지를 구분하는지 확인합니다. 같은 질의로
+   맞추고 검증한 임곗값은 실제보다 좋아 보입니다.
+
+`suggested_action`에도 같은 절차가 적용됩니다. 권장 조치는 원인에 대한 가설이고, 중심화,
+표준화, 차원 절단은 검색 순위를 바꿉니다. 원본 벡터와 검색 결과를 기준선으로 보관하고, 변환은
+복사본에 적용하며, 양쪽에서 품질과 지연 시간, 메모리를 함께 잰 뒤, 항목이 `ok`로 바뀌었을 때가
+아니라 정답 질의의 품질이 좋아졌을 때만 반영하십시오.
 
 ## FAQ
 

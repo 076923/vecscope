@@ -259,6 +259,18 @@ Audit the embeddings in data/chunks.npy before we tune the retriever, and tell m
 which finding to fix first.
 ```
 
+The tools are read-only, but they read whatever path the agent names. On a machine that holds
+data the agent should not see, restrict the server to the directories with embeddings; any
+path outside them (after resolving `..` and symlinks) is refused before it is opened:
+
+```json
+{ "mcpServers": { "vecscope": { "command": "vecscope-mcp", "args": ["--allow-dir", "/data/embeddings"] } } }
+```
+
+`--allow-dir` can be repeated; the environment variable `VECSCOPE_ALLOWED_DIRS` (paths
+separated by `:` on Unix, `;` on Windows) does the same. Without either, every file the
+server process can read is reachable.
+
 The agent skill in [`.agents/skills/vecscope/SKILL.md`](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) tells
 the agent when to run the audit and what to do about each verdict: center or swap the model,
 deduplicate, re-rank, or rebuild the index. The server also carries those instructions, so an
@@ -321,6 +333,33 @@ no note. With `--json` the diff is attached as `baseline_diff`; the library call
 a message to re-create it. Audit every row (`--sample 0`) for the baseline and the check, so
 the two runs see the same rows.
 
+A verdict is a coarse signal: a value can drift toward the threshold for months without
+crossing it. Every change row therefore carries `worsened` (the value moved in the bad
+direction) and `worsening` (by how much, in the metric's units, positive = worse), and
+`--tolerances` turns that drift into a gate independent of the verdict bands:
+
+```bash
+# tolerances.json: {"collapse": 0.01, "ann_recall": 0.02, "hubness": 0.3}
+vecscope audit embeddings.npy --baseline baseline.json --tolerances tolerances.json --require-comparable
+```
+
+A finding whose value worsens by more than its tolerance is listed under
+`value_regressions` (text: `VALUE WORSE by 0.0300 > 0.01`) and exits 1 even when its verdict
+is unchanged; findings without a tolerance are judged by verdict alone, and a value that
+improves is never a regression. The tolerance is a budget per rebuild against the committed
+baseline, so re-commit the baseline when a change was reviewed and accepted. The run also
+reports `comparable`: false when n, dim, k, sampling, thresholds or the near-duplicate
+cutoff differ from the baseline. `--require-comparable` makes that an error (exit 2) instead
+of a note, which is the right policy for a gate, since a diff across different settings
+measures the settings, not the corpus. The library call is
+`diff_evidence(new, old, tolerances={...})`.
+
+Treat the gate as a trend tracker first. Which tolerance is "too much" depends on how the
+findings relate to retrieval quality on your own queries; the
+[retrieval quality study](#do-the-findings-predict-retrieval-quality) shows that relation for
+public datasets, and [calibrating thresholds](#calibrating-thresholds-to-your-domain) says
+how to measure it on yours before blocking merges on it.
+
 ## CLI options
 
 ```bash
@@ -332,6 +371,8 @@ vecscope audit vectors.npy --clusters 10               # append a per-cluster re
 vecscope audit vectors.npy --thresholds th.json         # override (warn, fail) pairs
 vecscope audit vectors.npy --fail-on warn              # exit 1 on WARN as well
 vecscope audit vectors.npy --baseline old.json         # diff against an earlier --json run; exit 1 on regression
+vecscope audit vectors.npy --baseline old.json --tolerances tol.json   # also exit 1 when a value worsens beyond its tolerance
+vecscope audit vectors.npy --baseline old.json --require-comparable    # exit 2 when the baseline used different settings
 vecscope audit vectors.npy --near-dup 0.98             # cosine threshold for near-duplicates
 vecscope audit vectors.npy --sample 0                  # audit every row (default samples 100k)
 vecscope audit vectors.npy --sample-repeats 3          # re-audit 3 samples; report value ranges and verdict stability
@@ -396,6 +437,22 @@ The default 100k-row sample keeps any corpus inside the last row. `--queries` ad
 pass over the corpus per query batch, and
 `metric_mismatch` adds a second k-NN pass only when vector norms vary. A sampled audit is a
 statement about the sample: use `--sample 0` when you need every island and outlier counted.
+
+Blocking bounds memory, not work: the exact pass still costs about n² × dim multiply-adds,
+so a million rows at 768 dims is roughly 100 times the 100k-row figure. For corpora that
+size, audit the default sample (or several with `--sample-repeats`) and reserve `--sample 0`
+for the findings that need every row. Which findings those are:
+
+| finding | what a sample gives | needs every row |
+|---|---|---|
+| hubness, antihubs, anisotropy, effective_rank, rogue_dimensions, norms, metric_mismatch, distance_concentration | a distribution estimate; stable on 100k rows (`--sample-repeats` shows the spread) | no |
+| collapse | the duplicate *share*; pairs outside the sample are not counted | to count or list every duplicate |
+| outliers, connectivity | the *share* of outliers and islands; the ids of the ones in the sample | to find every outlier or island |
+| ann_recall | not available on a sample: ids must line up with the ANN file | yes (`--sample 0`) |
+| ood_queries, query_hubness | reference distances from the sample; every query is scored | no |
+
+Every number is exact for the rows it saw; vecscope never substitutes an approximate
+neighbor search for the exact one. The only approximation is the choice of rows.
 
 ## How vecscope works
 
@@ -466,6 +523,32 @@ cosine search, for eight public models and for controlled defects injected into 
   when the signal itself is lost.
 
 The `anisotropy` and `distance_concentration` thresholds were recalibrated from this study.
+
+### Calibrating thresholds to your domain
+
+The defaults are calibrated on public models and public datasets; a `fail` on your corpus is
+a reason to look, not proof that retrieval is bad, and all-`ok` is not proof that the right
+documents come back. Before using a threshold or a tolerance as a blocking gate, measure
+what it predicts on your own data:
+
+1. Collect labeled queries from the domain (a few hundred with relevant document ids is
+   enough) and split them: one part to pick thresholds, a held-out part to check them.
+2. Run `vecscope audit --json` on each candidate state of the pipeline (models, chunkers,
+   transforms, index settings) and compute retrieval quality (nDCG@k, Recall@k, MRR) with the
+   same queries on the same state. `examples/retrieval_quality.py` does both for the public
+   datasets and can be pointed at your own.
+3. Relate each finding's value to the quality metric across those states. A finding that does
+   not move with quality in your domain should not gate it, whatever its default says.
+4. Set `--thresholds` and `--tolerances` from the states where quality was acceptable, using
+   only the first split.
+5. Confirm on the held-out split that the thresholds separate the acceptable states from the
+   rest. A threshold tuned and checked on the same queries will look better than it is.
+
+The same procedure applies to a `suggested_action`: it is a hypothesis about the cause, and
+centering, standardizing or truncating vectors changes rankings. Keep the original vectors
+and retrieval results as the baseline, apply the transform to a copy, measure quality,
+latency and memory on both, and adopt the change only when the labeled queries improve, not
+when the finding turns `ok`.
 
 ## FAQ
 

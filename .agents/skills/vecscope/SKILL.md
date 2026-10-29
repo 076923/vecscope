@@ -26,7 +26,17 @@ vecscope compare <embeddings A> <embeddings B>   # MCP: compare_embeddings; same
 In CI: commit a `--json` run as the baseline and run `vecscope audit <embeddings> --baseline
 baseline.json` on every rebuild; it exits 1 when a verdict got worse or when `--fail-on`
 (default `fail`) trips on its own. Report the `regressions` list, not every `warn`; a `fail`
-that was already in the baseline is not a regression.
+that was already in the baseline is not a regression. Verdict bands hide slow drift, so each
+change row also carries `worsened` and `worsening` (positive = worse, in the metric's units);
+`--tolerances tol.json` (`{"collapse": 0.01, "ann_recall": 0.02}`) makes a worsening beyond
+the budget a `value_regressions` entry and exit 1 even when the verdict held. Add
+`--require-comparable` to a gate: it exits 2 when the baseline was made with different n,
+dim, k, sampling, thresholds or near-dup cutoff, instead of printing a diff that measures the
+settings rather than the corpus. Pick tolerances from measured retrieval quality (README,
+"Calibrating thresholds to your domain"), not from what makes the pipeline green.
+
+MCP server on a shared machine: start it with `--allow-dir DIR` (or `VECSCOPE_ALLOWED_DIRS`)
+so the tools can only read embeddings under those directories; a refused path says so.
 
 MCP only: `describe_findings` lists every finding with thresholds, causes and actions; pass
 `verbose=false` to `audit_embeddings` to keep the response short when most findings are ok.
@@ -44,7 +54,11 @@ carry `value_range` and `verdict_stable`, and `unstable_findings` names the bord
 - Quote the numbers and ranges verbatim. Do not describe embedding quality without them.
 - Thresholds are defaults calibrated on seven public models; they are a starting point, not
   a universal bar. `warn` on anisotropy or hubness is common for good models. Override with
-  `--thresholds file.json` (MCP: `thresholds`) when the user's domain has its own baseline.
+  `--thresholds file.json` (MCP: `thresholds`) when the user's domain has its own baseline,
+  and derive that baseline from labeled queries split into a tuning and a held-out part; a
+  threshold chosen to make the current corpus pass predicts nothing.
+- A `fail` does not prove retrieval is bad and all-`ok` does not prove it is good: the audit
+  measures the vector space and the index, not relevance. Say so when reporting.
 
 ## Act on it: diagnose, change one thing, re-verify
 
@@ -60,7 +74,9 @@ carry `value_range` and `verdict_stable`, and `unstable_findings` names the bord
 4. **Re-audit and compare**: `verify_by` says which number should move. Then compare retrieval
    on real queries before and after (recall@k against exact search, and relevance if labels
    exist). A finding turning `ok` is not proof that search got better.
-5. **Adopt only confirmed improvements**; otherwise revert and try the next cause.
+5. **Adopt only confirmed improvements**; otherwise revert and try the next cause. Measure
+   latency and memory alongside quality: a transform that fixes a finding can cost more at
+   serving time than the finding did.
 
 Finding-specific notes:
 

@@ -1,12 +1,20 @@
 """MCP server exposing vecscope as tools. Run: `vecscope-mcp` or `python -m vecscope.mcp_server`.
 
 Works with mcp 1.x (FastMCP) and 2.x (MCPServer). All tools are read-only: they read local
-files and return JSON; nothing is written or sent anywhere.
+files and return JSON; nothing is written or sent anywhere. Read-only is not the same as
+harmless: the tools read whatever path the agent names, so restrict them to the directories
+that hold embeddings with ``vecscope-mcp --allow-dir DIR`` (repeatable) or the environment
+variable ``VECSCOPE_ALLOWED_DIRS`` (paths separated by ``os.pathsep``). With a restriction in
+place, a path outside those directories is refused before anything is opened. Without one,
+every file the server process can read is reachable, which is fine on a developer machine
+and not fine on a shared one.
 """
 
 from __future__ import annotations
 
 import inspect
+import os
+from pathlib import Path
 
 try:  # mcp >= 2.0 renamed FastMCP to MCPServer
     from mcp.server.mcpserver import MCPServer as _Server
@@ -25,11 +33,39 @@ from vecscope.evidence import ACTIONS, THRESHOLDS, audit
 from vecscope.io import load_neighbors, load_vectors
 
 _USER_ERRORS = (ValueError, TypeError, FileNotFoundError, ImportError, OSError)
+ALLOWED_DIRS_ENV = "VECSCOPE_ALLOWED_DIRS"
 
 
 def _user_error(e: Exception) -> ToolError:
     """Return a ToolError whose message reaches the agent (plain exceptions are masked)."""
     return ToolError(f"{type(e).__name__}: {e}")
+
+
+def allowed_dirs() -> list[Path]:
+    """Directories the tools may read from, resolved; empty means no restriction."""
+    raw = os.environ.get(ALLOWED_DIRS_ENV, "")
+    return [Path(p).resolve() for p in raw.split(os.pathsep) if p.strip()]
+
+
+def check_path(path: str | None, what: str = "path") -> str | None:
+    """Refuse a path outside the allowed directories (symlinks resolved) before it is opened.
+    Returns the path unchanged when it is allowed or when no restriction is configured."""
+    if path is None:
+        return None
+    roots = allowed_dirs()
+    if not roots:
+        return path
+    resolved = Path(path).resolve()
+    for root in roots:
+        try:
+            resolved.relative_to(root)
+            return path
+        except ValueError:
+            continue
+    raise PermissionError(
+        f"{what} {path!r} is outside the directories this server may read "
+        f"({', '.join(str(r) for r in roots)}); set {ALLOWED_DIRS_ENV} or --allow-dir"
+    )
 
 INSTRUCTIONS = """vecscope gives deterministic evidence about an embedding matrix and a vector
 index: per-finding measurements, ok/warn/fail verdicts, thresholds, likely causes, the smallest
@@ -106,7 +142,9 @@ def audit_embeddings(
     metric mismatch, distance concentration, outliers, k-NN graph islands, and optionally
     ANN recall and query-side findings. Read-only; the file never leaves the machine.
 
-    `path`: local .npy/.npz/.parquet/.jsonl/.json/.csv with one vector per row.
+    `path`: local .npy/.npz/.parquet/.jsonl/.json/.csv with one vector per row. When the
+    server was started with --allow-dir or VECSCOPE_ALLOWED_DIRS, paths outside those
+    directories are refused.
     `ann_path`: optional (n x k) integer array of neighbor ids from an ANN index (requires
     `sample=0` so row ids line up).
     `queries_path`: optional (m x dim) file of query embeddings; adds ood_queries and
@@ -128,9 +166,9 @@ def audit_embeddings(
     retrieval on real queries before adopting.
     """
     try:
-        x = load_vectors(path)
-        ann = load_neighbors(ann_path) if ann_path else None
-        q = load_vectors(queries_path) if queries_path else None
+        x = load_vectors(check_path(path))
+        ann = load_neighbors(check_path(ann_path, "ann_path")) if ann_path else None
+        q = load_vectors(check_path(queries_path, "queries_path")) if queries_path else None
         ev = audit(
             x, k=k, ann_neighbors=ann, near_dup_cos=near_dup_cos, sample=sample or None,
             queries=q, clusters=clusters, thresholds=thresholds, sample_repeats=sample_repeats,
@@ -169,8 +207,8 @@ def sweep_index(
     from vecscope.sweep import sweep
 
     try:
-        x = load_vectors(path)
-        q = load_vectors(queries_path) if queries_path else None
+        x = load_vectors(check_path(path))
+        q = load_vectors(check_path(queries_path, "queries_path")) if queries_path else None
         res = sweep(x, k=k, queries=q, n_queries=n_queries, target_recall=target_recall,
                     device=device, margin=margin, timing_repeats=timing_repeats).to_dict()
     except (*_USER_ERRORS, RuntimeError) as e:
@@ -202,7 +240,8 @@ def compare_embeddings(
     from vecscope.compare import compare
 
     try:
-        res = compare(load_vectors(path_a), load_vectors(path_b), k=k, near_dup_cos=near_dup_cos,
+        res = compare(load_vectors(check_path(path_a, "path_a")),
+                      load_vectors(check_path(path_b, "path_b")), k=k, near_dup_cos=near_dup_cos,
                       sample=sample or None).to_dict()
     except _USER_ERRORS as e:
         raise _user_error(e) from e
@@ -233,7 +272,21 @@ def describe_findings() -> dict:
     return out
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+
+    p = argparse.ArgumentParser(prog="vecscope-mcp", description="vecscope MCP server (stdio)")
+    p.add_argument("--allow-dir", action="append", default=[], metavar="DIR",
+                   help="only read files under this directory (repeatable); adds to "
+                        f"{ALLOWED_DIRS_ENV}. Without it every readable file is reachable")
+    args = p.parse_args(argv)
+    if args.allow_dir:
+        for d in args.allow_dir:
+            if not Path(d).is_dir():
+                p.error(f"--allow-dir {d}: not a directory")
+        current = os.environ.get(ALLOWED_DIRS_ENV, "")
+        os.environ[ALLOWED_DIRS_ENV] = os.pathsep.join(
+            [*([current] if current else []), *(str(Path(d).resolve()) for d in args.allow_dir)])
     mcp.run()
 
 

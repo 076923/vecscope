@@ -106,13 +106,50 @@ _RENAMED_KEYS = {
 }
 
 
-def diff_evidence(new: dict, old: dict) -> dict:
+def _finding_direction(f: Mapping) -> bool | None:
+    """Whether lower values of this finding are worse: from the finding itself, else from the
+    default threshold key of its name, else unknown (None)."""
+    if isinstance(f.get("lower_is_worse"), bool):
+        return f["lower_is_worse"]
+    key = _FINDING_KEYS.get(f.get("name"))
+    return lower_is_worse(key) if key else None
+
+
+def resolve_tolerances(tolerances: Mapping | None) -> dict:
+    """Validate ``{finding name: allowed worsening}``: each value is a finite number >= 0 in
+    the units of that finding's metric."""
+    if tolerances is None:
+        return {}
+    if not isinstance(tolerances, Mapping):
+        raise TypeError("tolerances must be a mapping of finding name -> allowed worsening")
+    out = {}
+    for name, tol in tolerances.items():
+        if name not in _FINDING_KEYS:
+            raise ValueError(f"unknown finding {name!r} in tolerances; known: {sorted(_FINDING_KEYS)}")
+        if isinstance(tol, bool) or not isinstance(tol, (int, float)) or not np.isfinite(tol) or tol < 0:
+            raise ValueError(f"tolerance for {name!r} must be a finite number >= 0, got {tol!r}")
+        out[name] = float(tol)
+    return out
+
+
+def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> dict:
     """Compare two evidence dicts (``Evidence.to_dict()`` or a parsed ``--json`` file).
 
     Returns per-finding value and verdict changes, the findings whose verdict got worse
-    (``regressions``), those that improved, and findings present on one side only. Meant for
-    CI: audit the new index, diff against the committed baseline, fail on regressions.
+    (``regressions``), those that improved, and findings present on one side only. Each
+    change row says whether the value moved in the worse direction (``worsened``) and by how
+    much (``worsening``, positive = worse, in the metric's units), so a drift that stays
+    inside one verdict band is visible too.
+
+    ``tolerances`` maps a finding name to the worsening it may accumulate against the
+    baseline, e.g. ``{"collapse": 0.01, "ann_recall": 0.02}``; findings beyond it are listed
+    in ``value_regressions`` whether or not their verdict changed. Findings without a
+    tolerance are never value regressions. Meant for CI: audit the new index, diff against
+    the committed baseline, fail on ``regressions`` or ``value_regressions``; ``comparable``
+    says whether n, dim, k, sampling, thresholds and the near-duplicate cutoff match, and a
+    CI policy should refuse to read the diff when it is false.
     """
+    tol = resolve_tolerances(tolerances)
     if not isinstance(new, Mapping) or not isinstance(old, Mapping):
         raise TypeError("evidence must be a mapping (Evidence.to_dict() or parsed --json output)")
     for name, ev in (("new", new), ("baseline", old)):
@@ -133,23 +170,32 @@ def diff_evidence(new: dict, old: dict) -> dict:
                 raise ValueError(f"{name} evidence has a malformed finding: {f!r:.80}")
     a = {f["name"]: f for f in new["findings"]}
     b = {f["name"]: f for f in old["findings"]}
-    changes, regressions, improvements = [], [], []
+    changes, regressions, improvements, value_regressions = [], [], [], []
     for name in a.keys() & b.keys():
         fa, fb = a[name], b[name]
+        delta = fa["value"] - fb["value"]
+        low = _finding_direction(fa)
+        worsening = None if low is None else (-delta if low else delta)
         row = {"name": name, "metric": fa["metric"], "value": fa["value"], "baseline_value": fb["value"],
-               "delta": fa["value"] - fb["value"], "verdict": fa["verdict"],
-               "baseline_verdict": fb["verdict"]}
+               "delta": delta, "lower_is_worse": low,
+               "worsened": None if worsening is None else bool(worsening > 0),
+               "worsening": worsening, "tolerance": tol.get(name),
+               "verdict": fa["verdict"], "baseline_verdict": fb["verdict"]}
         changes.append(row)
         if WORSE[fa["verdict"]] > WORSE[fb["verdict"]]:
             regressions.append(name)
         elif WORSE[fa["verdict"]] < WORSE[fb["verdict"]]:
             improvements.append(name)
+        if name in tol and worsening is not None and worsening > tol[name]:
+            value_regressions.append(name)
     order = [f["name"] for f in new["findings"]]
     changes.sort(key=lambda r: order.index(r["name"]))
     return {
         "verdict": new.get("verdict"),
         "baseline_verdict": old.get("verdict"),
         "regressions": regressions,
+        "value_regressions": sorted(value_regressions, key=order.index),
+        "tolerances": tol,
         "improvements": improvements,
         "only_in_new": sorted(a.keys() - b.keys()),
         "only_in_baseline": sorted(b.keys() - a.keys()),
