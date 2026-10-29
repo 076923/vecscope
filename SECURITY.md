@@ -2,7 +2,8 @@
 
 `vecscope` runs locally, reads the files you point it at, and makes no network connections.
 The attack surface is file parsing (`.npy`, `.npz`, `.parquet`, `.jsonl`, `.json`, `.csv`)
-and the MCP server, which exposes `audit_embeddings` to any client that can reach it.
+and the MCP server, whose tools (`audit_embeddings`, `sweep_index`, `compare_embeddings`)
+read any local file path a connected client passes.
 
 ## Reporting
 

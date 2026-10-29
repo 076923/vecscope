@@ -23,6 +23,11 @@ vecscope sweep <embeddings>                # MCP: sweep_index; picks HNSW/IVF pa
 vecscope compare <embeddings A> <embeddings B>   # MCP: compare_embeddings; same rows, two spaces
 ```
 
+In CI: commit a `--json` run as the baseline and run `vecscope audit <embeddings> --baseline
+baseline.json` on every rebuild; it exits 1 when a verdict got worse or when `--fail-on`
+(default `fail`) trips on its own. Report the `regressions` list, not every `warn`; a `fail`
+that was already in the baseline is not a regression.
+
 MCP only: `describe_findings` lists every finding with thresholds, causes and actions; pass
 `verbose=false` to `audit_embeddings` to keep the response short when most findings are ok.
 
@@ -37,7 +42,7 @@ carry `value_range` and `verdict_stable`, and `unstable_findings` names the bord
 - `verdict` is the worst finding. Each finding has `value`, `healthy_range`, `warn_at`,
   `fail_at`, `explanation`, `details`, `likely_causes`, `suggested_action`, `verify_by`.
 - Quote the numbers and ranges verbatim. Do not describe embedding quality without them.
-- Thresholds are defaults calibrated on eight public models; they are a starting point, not
+- Thresholds are defaults calibrated on seven public models; they are a starting point, not
   a universal bar. `warn` on anisotropy or hubness is common for good models. Override with
   `--thresholds file.json` (MCP: `thresholds`) when the user's domain has its own baseline.
 
@@ -74,7 +79,9 @@ Finding-specific notes:
   with the same partner belong to the items.
 - **outliers / connectivity**: `details.sample_ids` are row ids to show the user.
 - **norms / metric_mismatch**: decide the index metric deliberately; normalize if cosine is intended.
-- **ann_recall**: raise `ef_search` / `nprobe` before rebuilding; `vecscope sweep` picks values
+- **ann_recall**: if `details.rows_with_fewer_than_k_ids_ratio` is above 0 the ANN file was
+  queried with k and included self, which caps recall; re-export with k + 1 before judging the
+  index. Then raise `ef_search` / `nprobe` before rebuilding; `vecscope sweep` picks values
   and reports qps per device (GPU is used for IVF when the faiss build has one; HNSW is CPU-only).
   Report the recommendation's `margin`; when it is `tight`, propose the `safer_alternative`
   instead, and relay `caveats`: recall falls as the corpus grows, so a sweep on a sample is

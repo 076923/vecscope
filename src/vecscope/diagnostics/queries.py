@@ -15,10 +15,14 @@ import numpy as np
 from vecscope._knn import normalize
 
 
-def query_knn(corpus: np.ndarray, queries: np.ndarray, k: int, block: int = 2048):
+def query_knn(corpus: np.ndarray, queries: np.ndarray, k: int, block: int | None = None):
+    from vecscope._knn import auto_block
+
     c = normalize(corpus)
     q = normalize(queries)
     k = min(k, c.shape[0])
+    if block is None:
+        block = auto_block(c.shape[0])
     idx = np.empty((q.shape[0], k), dtype=np.int64)
     dist = np.empty((q.shape[0], k), dtype=np.float32)
     for s in range(0, q.shape[0], block):
@@ -26,7 +30,7 @@ def query_knn(corpus: np.ndarray, queries: np.ndarray, k: int, block: int = 2048
         d = 1.0 - q[s:e] @ c.T
         part = np.argpartition(d, k - 1, axis=1)[:, :k]
         pd = np.take_along_axis(d, part, axis=1)
-        order = np.argsort(pd, axis=1)
+        order = np.argsort(pd, axis=1, kind="stable")
         idx[s:e] = np.take_along_axis(part, order, axis=1)
         dist[s:e] = np.take_along_axis(pd, order, axis=1)
     return idx, dist
@@ -43,12 +47,14 @@ def query_audit(
     idx, dist = query_knn(corpus, queries, k)
     n_corpus = corpus.shape[0]
     corpus_nn = np.asarray(corpus_nn_dist, dtype=np.float64)
-    # drop duplicate rows (NN distance ~0) so they do not drag the OOD cutoff down
-    corpus_nn = corpus_nn[corpus_nn > dup_cutoff] if (corpus_nn > dup_cutoff).any() else corpus_nn
-    cutoff = float(np.quantile(corpus_nn, 0.99))
+    # drop duplicate rows (NN distance ~0) so they do not drag the OOD cutoff down; when no
+    # row has a neighbor that is not a copy of it there is no reference distance at all
+    distinct = corpus_nn > dup_cutoff
+    corpus_nn = corpus_nn[distinct]
+    cutoff = float(np.quantile(corpus_nn, 0.99)) if corpus_nn.size else 0.0
     nearest = dist[:, 0].astype(np.float64)
-    ood = nearest > cutoff
-    worst = np.argsort(nearest)[::-1][:sample_ids]
+    ood = nearest > cutoff if corpus_nn.size else np.zeros(nearest.shape[0], dtype=bool)
+    worst = np.argsort(-nearest, kind="stable")[:sample_ids]
 
     nk = np.bincount(idx.ravel(), minlength=n_corpus).astype(np.float64)
     std = nk.std()
@@ -59,7 +65,8 @@ def query_audit(
         "ood_query_ratio": float(ood.mean()),
         "ood_cutoff_distance": cutoff,
         "median_query_nn_distance": float(np.median(nearest)),
-        "median_corpus_nn_distance": float(np.median(corpus_nn)),
+        "median_corpus_nn_distance": float(np.median(corpus_nn)) if corpus_nn.size else 0.0,
+        "corpus_has_distinct_neighbors": bool(corpus_nn.size),
         "ood_sample_ids": [int(i) for i in worst if ood[i]],
         "query_hubness_skewness": skew,
         "max_query_k_occurrence": int(nk.max()),

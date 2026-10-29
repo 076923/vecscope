@@ -20,7 +20,8 @@ from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
-from vecscope._knn import normalize
+from vecscope._knn import check_magnitude, normalize
+from vecscope.diagnostics.ann_recall import tie_aware_hits
 from vecscope.diagnostics.queries import query_knn
 
 HNSW_GRID = {"M": (8, 16, 32), "ef_construction": (100,), "ef_search": (16, 32, 64, 128, 256)}
@@ -95,10 +96,20 @@ def _drop_self(idx: np.ndarray, qids: np.ndarray | None, k: int) -> np.ndarray:
     return out
 
 
-def _recall(approx: np.ndarray, exact: np.ndarray) -> float:
+def _recall(approx: np.ndarray, exact: np.ndarray, q: np.ndarray, c: np.ndarray) -> float:
+    """Share of the k exact neighbor slots the index filled, counted by distance so that
+    tied duplicates are interchangeable while a missed closer neighbor stays a miss."""
     k = exact.shape[1]
-    hits = [np.intersect1d(a[a >= 0], e[e >= 0]).size for a, e in zip(approx, exact)]
-    return float(np.mean(hits) / k)
+    hits = np.empty(exact.shape[0])
+    for i, (a, e) in enumerate(zip(approx, exact)):
+        e, a = e[e >= 0], np.unique(a[a >= 0])
+        if e.size == 0:
+            hits[i] = 0.0
+            continue
+        qi = q[i].astype(np.float64)
+        exact_d = np.sort(1.0 - c[e].astype(np.float64) @ qi)
+        hits[i] = tie_aware_hits(exact_d, 1.0 - c[a].astype(np.float64) @ qi)
+    return float(hits.mean() / k)
 
 
 def sweep(
@@ -134,13 +145,27 @@ def sweep(
         raise ValueError("timing_repeats must be at least 1")
     if not (0.0 <= margin < 1.0):
         raise ValueError("margin must be in [0, 1)")
+    x = np.asarray(x)
+    if x.dtype.kind not in "iufb":
+        raise ValueError(f"embeddings must be real numbers, got dtype {x.dtype}")
+    if x.ndim != 2 or x.shape[0] <= k or x.shape[1] < 1:
+        raise ValueError(f"need a 2-D matrix with more than k={k} rows and at least one column, "
+                         f"got shape {x.shape}")
+    if not np.isfinite(x).all():
+        raise ValueError("embeddings contain NaN or Inf")
+    check_magnitude(x)
     x = np.asarray(x, dtype=np.float32)
-    if x.ndim != 2 or x.shape[0] <= k:
-        raise ValueError(f"need a 2-D matrix with more than k={k} rows, got shape {x.shape}")
     if queries is not None:
+        queries = np.asarray(queries)
+        if queries.dtype.kind not in "iufb":
+            raise ValueError(f"queries must be real numbers, got dtype {queries.dtype}")
+        if queries.ndim != 2 or queries.shape[1] != x.shape[1] or queries.shape[0] == 0:
+            raise ValueError(f"queries must be shaped (m, {x.shape[1]}) with m >= 1, got "
+                             f"{queries.shape}")
+        if not np.isfinite(queries).all():
+            raise ValueError("queries contain NaN or Inf")
+        check_magnitude(queries, "queries")
         queries = np.asarray(queries, dtype=np.float32)
-        if queries.ndim != 2 or queries.shape[1] != x.shape[1]:
-            raise ValueError(f"queries must be shaped (m, {x.shape[1]}), got {queries.shape}")
     dev = _resolve_device(faiss, device)
     gpu_res = faiss.StandardGpuResources() if dev == "gpu" else None
     gpu_name = None
@@ -183,7 +208,7 @@ def sweep(
             _, approx = index.search(q, kq)
             times.append(time.perf_counter() - t)
         qps = q.shape[0] / max(float(np.median(times)), 1e-9)
-        return name, params, _recall(_drop_self(approx, qids, k), exact_idx), qps
+        return name, params, _recall(_drop_self(approx, qids, k), exact_idx, q, c), qps
 
     for m in HNSW_GRID["M"]:
         for efc in HNSW_GRID["ef_construction"]:

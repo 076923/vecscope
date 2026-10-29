@@ -111,9 +111,10 @@ def audit_embeddings(
     `sample=0` so row ids line up).
     `queries_path`: optional (m x dim) file of query embeddings; adds ood_queries and
     query_hubness.
-    `clusters` > 0 attaches a per-cluster map with sample ids (no verdicts).
+    `clusters` > 0 attaches a per-cluster map with sample ids (no verdicts); capped at one
+    cluster per 10 rows.
     `sample`: rows above this are audited on a seeded random subset (0 = audit every row;
-    exact k-NN is quadratic, ~3 min for 100k x 768 on a laptop).
+    exact k-NN is quadratic, minutes for 100k rows on a laptop; peak memory about 2 GiB).
     `sample_repeats`: when sampling applies, re-audit this many independent samples; each
     finding then carries `value_range` [min, max] and `verdict_stable`, and the response
     lists `unstable_findings`. Costs that many times the audit time.
@@ -153,6 +154,7 @@ def sweep_index(
     device: str = "auto",
     margin: float = 0.02,
     timing_repeats: int = 3,
+    n_queries: int = 1000,
 ) -> dict:
     """Sweep HNSW (M, ef_search) and IVF (nprobe) parameters on an embedding file and report
     recall@k against exact k-NN, build time and queries per second for each setting, plus
@@ -162,14 +164,15 @@ def sweep_index(
     relay `caveats` to the user. qps is the median of `timing_repeats` runs. Needs the faiss
     extra (`pip install "vecscope[index]"`). Read-only; timings are relative to this machine.
     `device` is "auto" (GPU when the faiss build has one), "cpu" or "gpu"; HNSW is CPU-only.
+    `n_queries` caps the queries timed (sampled from the corpus, or from `queries_path`).
     """
     from vecscope.sweep import sweep
 
     try:
         x = load_vectors(path)
         q = load_vectors(queries_path) if queries_path else None
-        res = sweep(x, k=k, queries=q, target_recall=target_recall, device=device,
-                    margin=margin, timing_repeats=timing_repeats).to_dict()
+        res = sweep(x, k=k, queries=q, n_queries=n_queries, target_recall=target_recall,
+                    device=device, margin=margin, timing_repeats=timing_repeats).to_dict()
     except (*_USER_ERRORS, RuntimeError) as e:
         raise _user_error(e) from e
     r = res["recommendation"]

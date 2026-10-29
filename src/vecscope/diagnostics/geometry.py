@@ -26,7 +26,7 @@ def rogue_dimensions(x: np.ndarray, top: int = 3) -> dict:
                 "top3_dim_variance_share": 0.0, "expected_share": expected,
                 "rogue_dims": [0, 1, 2][: x.shape[1]]}
     share = var / total
-    order = np.argsort(share)[::-1]
+    order = np.argsort(-share, kind="stable")
     return {
         "top1_dim_variance_share": float(share[order[0]]),
         "top1_dim_variance_ratio": float(share[order[0]] / expected),
@@ -84,7 +84,9 @@ def _noise_relative_contrast(m: int, dim: int, seed: int) -> float:
     g /= np.maximum(np.linalg.norm(g, axis=1, keepdims=True), 1e-12)
     _, d = exact_knn(g, 1)
     median_nn = float(np.median(d[:, 0]))
-    mean_random = float(1.0 - (g.mean(0) @ g.mean(0)))  # 1 - E[cos] over random pairs
+    from vecscope.diagnostics.anisotropy import _mean_pair_cosine
+
+    mean_random = 1.0 - _mean_pair_cosine(g)  # exact mean over pairs, as on the data side
     return mean_random / max(median_nn, 1e-6)
 
 
@@ -116,15 +118,22 @@ def distance_concentration(nn_dist: np.ndarray, random_pair_cos: float, dim: int
     mean_random = float(max(1.0 - random_pair_cos, 1e-9))
     cutoff = duplicate_cutoff(mean_random)
     median_nn = _median_distinct(nn, cutoff)
-    rc = mean_random / max(median_nn, 1e-6)
+    distinct = median_nn > 0  # False when every row's nearest neighbor is a copy of it
+    rc = mean_random / median_nn if distinct else 0.0
     out = {
         "relative_contrast": rc,
         "median_nn_distance": median_nn,
         "mean_random_distance": mean_random,
+        "distinct_neighbors": bool(distinct),
     }
     if dim is not None:
         n = int(nn.shape[0])
         median_at_base = median_nn
+        if x is None and n > cap:
+            raise ValueError(
+                f"distance_concentration needs x when there are more than {cap} rows, so the "
+                "data median is measured on a subsample of the same size as the noise baseline"
+            )
         if x is not None and n > cap:
             from vecscope._knn import exact_knn, normalize
 
@@ -132,27 +141,33 @@ def distance_concentration(nn_dist: np.ndarray, random_pair_cos: float, dim: int
             _, d = exact_knn(normalize(np.asarray(x)[rows]), 1)
             median_at_base = _median_distinct(d[:, 0].astype(np.float64), cutoff)
         base = noise_relative_contrast(n, dim, seed, cap)
+        rc_base = mean_random / median_at_base if median_at_base > 0 else 0.0
         out["baseline_rows"] = int(min(n, cap))
         out["median_nn_distance_at_baseline_rows"] = median_at_base
+        out["relative_contrast_at_baseline_rows"] = rc_base
         out["noise_relative_contrast"] = base
-        out["contrast_over_noise"] = (mean_random / max(median_at_base, 1e-6)) / max(base, 1e-6)
+        out["contrast_over_noise"] = rc_base / max(base, 1e-6)
     return out
 
 
 def outliers(nn_dist: np.ndarray, factor: float = 3.0, sample_ids: int = 10,
              dup_cutoff: float = 1e-4) -> dict:
     nn = np.asarray(nn_dist, dtype=np.float64)
-    distinct = nn[nn > dup_cutoff] if (nn > dup_cutoff).any() else nn
+    if not (nn > dup_cutoff).any():  # every nearest neighbor is a copy: nothing to compare
+        return {"outlier_ratio": 0.0, "cutoff_nn_distance": 0.0, "median_nn_distance": 0.0,
+                "sample_ids": [], "distinct_neighbors": False}
+    distinct = nn[nn > dup_cutoff]
     median = float(np.median(distinct))
     mad = float(np.median(np.abs(distinct - median)))
     cutoff = median + factor * 1.4826 * mad if mad > 0 else median * (1 + factor)
     mask = nn > cutoff
-    worst = np.argsort(nn)[::-1][:sample_ids]
+    worst = np.argsort(-nn, kind="stable")[:sample_ids]
     return {
         "outlier_ratio": float(mask.mean()),
         "cutoff_nn_distance": float(cutoff),
         "median_nn_distance": median,
         "sample_ids": [int(i) for i in worst if mask[i]],
+        "distinct_neighbors": True,
     }
 
 

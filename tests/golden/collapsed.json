@@ -1,0 +1,447 @@
+{
+ "tool": "vecscope",
+ "version": "0.4.0",
+ "n": 2000,
+ "dim": 128,
+ "k": 10,
+ "findings": [
+  {
+   "name": "hubness",
+   "metric": "skewness",
+   "value": 0.8594450013218188,
+   "verdict": "ok",
+   "explanation": "k-occurrence skewness 0.86; top 1% of items take 3.2% of all neighbor slots (max N_k=40, expected 10).",
+   "details": {
+    "k": 10,
+    "skewness": 0.8594450013218188,
+    "max_k_occurrence": 40,
+    "expected_k_occurrence": 10.0,
+    "hub_share_top1pct": 0.0325,
+    "antihub_ratio": 0.0105,
+    "antihub_baseline": 4.5399929762484854e-05,
+    "antihub_excess": 0.010454600070237515
+   },
+   "warn_at": 2.0,
+   "fail_at": 4.0,
+   "lower_is_worse": false,
+   "healthy_range": "ok < 2, warn >= 2, fail >= 4",
+   "likely_causes": [
+    "high-dimensional concentration (dim >> effective rank)",
+    "strong shared direction (see anisotropy)",
+    "a few generic items close to the corpus mean"
+   ],
+   "suggested_action": "re-rank top-k with mutual k-NN or local scaling; if anisotropy also fails, center first",
+   "verify_by": "re-run the audit on the transformed vectors and compare hubness.skewness and details.hub_share_top1pct; check that recall on held-out queries did not drop",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "antihubs",
+   "metric": "antihub_excess",
+   "value": 0.010454600070237515,
+   "verdict": "ok",
+   "explanation": "1.1% of items are never anyone's neighbor (random data at k=10 would give 0.0%); the excess is unreachable through k-NN retrieval.",
+   "details": {
+    "antihub_ratio": 0.0105,
+    "antihub_baseline": 4.5399929762484854e-05
+   },
+   "warn_at": 0.05,
+   "fail_at": 0.2,
+   "lower_is_worse": false,
+   "healthy_range": "ok < 0.05, warn >= 0.05, fail >= 0.2",
+   "likely_causes": [
+    "same causes as hubness",
+    "items embedded from empty or near-empty text"
+   ],
+   "suggested_action": "inspect a sample of never-retrieved items; drop empty inputs, then apply the hubness fix",
+   "verify_by": "antihub_excess (antihub_ratio minus the random baseline) should fall below warn_at after the fix; spot-check that the dropped items were genuinely empty",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "anisotropy",
+   "metric": "mean_random_cosine",
+   "value": 0.01270749410888533,
+   "verdict": "ok",
+   "explanation": "random pairs have mean cosine 0.013 (isotropic ~0); mean unit vector has norm 0.11; centering would bring the cosine to -0.000.",
+   "details": {
+    "dim": 128,
+    "mean_random_cosine": 0.01270749410888533,
+    "mean_vector_norm": 0.11489623785018921,
+    "mean_random_cosine_after_centering": -0.0004982342622334304,
+    "top1_pc_variance_share": 0.03472663834691048,
+    "effective_rank": 66.94046783447266,
+    "max_attainable_rank": 128,
+    "effective_rank_ratio": 0.5229724049568176
+   },
+   "warn_at": 0.5,
+   "fail_at": 0.85,
+   "lower_is_worse": false,
+   "healthy_range": "ok < 0.5, warn >= 0.5, fail >= 0.85",
+   "likely_causes": [
+    "model emits a large shared component (common in older text embedding models)",
+    "un-normalized vectors with a constant offset"
+   ],
+   "suggested_action": "subtract the corpus mean vector and re-normalize, applying the same transform to queries; details.mean_random_cosine_after_centering shows the expected result",
+   "verify_by": "re-audit the centered vectors; then compare retrieval quality on real queries before and after, because centering changes the ranking",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "effective_rank",
+   "metric": "effective_rank_ratio",
+   "value": 0.5229724049568176,
+   "verdict": "ok",
+   "explanation": "effective rank 66.9 of 128 attainable (128 dims; 52.3%); low values mean most dimensions carry nothing.",
+   "details": {
+    "dim": 128,
+    "effective_rank": 66.94046783447266,
+    "max_attainable_rank": 128,
+    "effective_rank_ratio": 0.5229724049568176,
+    "top1_pc_variance_share": 0.03472663834691048
+   },
+   "warn_at": 0.1,
+   "fail_at": 0.05,
+   "lower_is_worse": true,
+   "healthy_range": "ok >= 0.1, warn < 0.1, fail < 0.05",
+   "likely_causes": [
+    "model dimensions mostly unused",
+    "corpus covers a very narrow topic",
+    "a rogue dimension dominates the variance"
+   ],
+   "suggested_action": "if rogue_dimensions also fails, standardize dimensions; otherwise consider PCA or Matryoshka truncation to the effective rank to cut index size",
+   "verify_by": "re-audit after the transform; recall@k of the truncated index against the full exact k-NN should stay above 0.95",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "collapse",
+   "metric": "near_duplicate_ratio",
+   "value": 0.8,
+   "verdict": "fail",
+   "explanation": "80.0% of items have a neighbor with cosine >= 0.99 or an exact copy (exact duplicates 50.0%); they form 600 groups, the largest of 3 rows; largest exact-duplicate group 3 rows. Many small groups mean duplicate items, a few huge groups mean an embedding failure or boilerplate; see details.sample_pairs.",
+   "details": {
+    "n": 2000,
+    "exact_duplicate_ratio": 0.5,
+    "near_duplicate_ratio": 0.8,
+    "nn_cosine_median": 0.9999999403953552,
+    "nn_cosine_p95": 1.0,
+    "near_dup_threshold": 0.99,
+    "exact_nn_match_ratio": 0.8,
+    "near_duplicate_groups": 600,
+    "largest_near_duplicate_groups": [
+     3,
+     3,
+     3,
+     3,
+     3
+    ],
+    "largest_exact_duplicate_groups": [
+     3,
+     3,
+     3,
+     3,
+     3
+    ],
+    "sample_pairs": [
+     [
+      1,
+      1601,
+      1.0
+     ],
+     [
+      4,
+      1004,
+      1.0
+     ],
+     [
+      6,
+      1006,
+      1.0
+     ],
+     [
+      10,
+      1610,
+      1.0
+     ],
+     [
+      11,
+      1011,
+      1.0
+     ],
+     [
+      12,
+      1612,
+      1.0
+     ],
+     [
+      13,
+      1613,
+      1.0
+     ],
+     [
+      14,
+      1014,
+      1.0
+     ],
+     [
+      15,
+      1615,
+      1.0
+     ],
+     [
+      16,
+      1616,
+      1.0
+     ]
+    ]
+   },
+   "warn_at": 0.02,
+   "fail_at": 0.1,
+   "lower_is_worse": false,
+   "healthy_range": "ok < 0.02, warn >= 0.02, fail >= 0.1",
+   "likely_causes": [
+    "duplicate or boilerplate documents",
+    "chunking that repeats headers/footers",
+    "embedding failures returning a constant vector"
+   ],
+   "suggested_action": "read details.largest_near_duplicate_groups: a few huge groups point at an embedding failure or boilerplate (re-embed or fix chunking), many small groups at duplicate items (deduplicate or collapse them at serving time); details.sample_pairs lists row pairs to inspect",
+   "verify_by": "near_duplicate_ratio should drop below warn_at; top-k on sample queries should no longer repeat the same item",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "rogue_dimensions",
+   "metric": "top1_dim_variance_ratio",
+   "value": 1.3654865878326672,
+   "verdict": "ok",
+   "explanation": "dimension 31 alone holds 1.1% of variance, 1.4x the uniform share of 0.78%; top 3 dims hold 3.1%. Rogue dimensions dominate cosine.",
+   "details": {
+    "top1_dim_variance_share": 0.010667863967442712,
+    "top1_dim_variance_ratio": 1.3654865878326672,
+    "top3_dim_variance_share": 0.030915519055939727,
+    "expected_share": 0.0078125,
+    "rogue_dims": [
+     31,
+     19,
+     111
+    ]
+   },
+   "warn_at": 10.0,
+   "fail_at": 50.0,
+   "lower_is_worse": false,
+   "healthy_range": "ok < 10, warn >= 10, fail >= 50",
+   "likely_causes": [
+    "model outputs a few high-variance coordinates (known in BERT-family encoders)"
+   ],
+   "suggested_action": "z-score each dimension or drop details.rogue_dims before indexing; apply the same transform to queries",
+   "verify_by": "top1_dim_variance_ratio falls below warn_at; retrieval quality on real queries does not regress",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "norms",
+   "metric": "norm_cv",
+   "value": 3.6405082029904785e-09,
+   "verdict": "ok",
+   "explanation": "vector norms vary with CV 0.000 (median 1.000, range 1.000-1.000); 0.00% are zero vectors. Unequal norms bias inner-product search toward long vectors.",
+   "details": {
+    "norm_cv": 3.6405082029904785e-09,
+    "zero_norm_ratio": 0.0,
+    "norm_min": 0.9999999894704296,
+    "norm_median": 1.0000000000597233,
+    "norm_max": 1.0000000122112715
+   },
+   "warn_at": 0.1,
+   "fail_at": 0.3,
+   "lower_is_worse": false,
+   "healthy_range": "ok < 0.1, warn >= 0.1, fail >= 0.3",
+   "likely_causes": [
+    "vectors not L2-normalized",
+    "zero vectors from empty inputs or failed embedding calls"
+   ],
+   "suggested_action": "drop zero vectors; L2-normalize before indexing if cosine ranking is intended",
+   "verify_by": "norm_cv near 0 and zero_norm_ratio 0 on re-audit; metric_mismatch returns to 1.0",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "metric_mismatch",
+   "metric": "topk_overlap",
+   "value": 1.0,
+   "verdict": "ok",
+   "explanation": "cosine and inner-product top-10 share 100.0% of neighbors; 100.0% of items get identical lists. Low overlap means the index metric changes the results.",
+   "details": {
+    "k": 10,
+    "topk_overlap": 1.0,
+    "queries_fully_agreeing_ratio": 1.0,
+    "min_overlap": 1.0,
+    "skipped": "norms are uniform, cosine == inner product"
+   },
+   "warn_at": 0.9,
+   "fail_at": 0.7,
+   "lower_is_worse": true,
+   "healthy_range": "ok >= 0.9, warn < 0.9, fail < 0.7",
+   "likely_causes": [
+    "vector norms vary, so cosine and inner-product rankings diverge"
+   ],
+   "suggested_action": "decide which metric the index uses; normalize vectors if cosine is intended, or keep norms deliberately if length should carry relevance",
+   "verify_by": "topk_overlap above warn_at, or a documented decision to keep inner product",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "distance_concentration",
+   "metric": "contrast_over_noise",
+   "value": 2.135818315010003,
+   "verdict": "ok",
+   "explanation": "on 2000 rows a random item is 3.03x farther than the nearest neighbor (random distance 0.987); isotropic noise at 128-d and the same rows would give 1.42x, so the contrast is 2.14x that of noise. On all rows the contrast is 3.03x (median NN distance 0.326). Near 1.0 means distances carry no signal.",
+   "details": {
+    "relative_contrast": 3.0271026476090466,
+    "median_nn_distance": 0.3261509835720062,
+    "mean_random_distance": 0.9872925058911147,
+    "distinct_neighbors": true,
+    "baseline_rows": 2000,
+    "median_nn_distance_at_baseline_rows": 0.3261509835720062,
+    "relative_contrast_at_baseline_rows": 3.0271026476090466,
+    "noise_relative_contrast": 1.417303441184729,
+    "contrast_over_noise": 2.135818315010003
+   },
+   "warn_at": 1.4,
+   "fail_at": 1.1,
+   "lower_is_worse": true,
+   "healthy_range": "ok >= 1.4, warn < 1.4, fail < 1.1",
+   "likely_causes": [
+    "curse of dimensionality on near-isotropic vectors",
+    "model with little structure for this domain"
+   ],
+   "suggested_action": "try a different model or dimensionality reduction; add a re-ranker over a larger candidate set",
+   "verify_by": "contrast_over_noise rises above warn_at; expect ann_recall to improve as well",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "outliers",
+   "metric": "outlier_ratio",
+   "value": 0.0005,
+   "verdict": "ok",
+   "explanation": "0.05% of items have no neighbor within cosine distance 0.454 (median 0.326); see details.sample_ids. Typically junk, empty or foreign-language content.",
+   "details": {
+    "outlier_ratio": 0.0005,
+    "cutoff_nn_distance": 0.45442847578525547,
+    "median_nn_distance": 0.3261509835720062,
+    "sample_ids": [
+     864
+    ],
+    "distinct_neighbors": true
+   },
+   "warn_at": 0.01,
+   "fail_at": 0.05,
+   "lower_is_worse": false,
+   "healthy_range": "ok < 0.01, warn >= 0.01, fail >= 0.05",
+   "likely_causes": [
+    "junk, empty or foreign-language documents",
+    "chunks of code or tables embedded as prose",
+    "a few vectors from a different model"
+   ],
+   "suggested_action": "inspect details.sample_ids; remove or re-embed them",
+   "verify_by": "outlier_ratio below warn_at; the removed items were confirmed irrelevant",
+   "value_range": null,
+   "verdict_stable": null
+  },
+  {
+   "name": "connectivity",
+   "metric": "island_ratio",
+   "value": 0.0,
+   "verdict": "ok",
+   "explanation": "0.00% of items sit in 0 small island(s) of the k-NN graph (fewer than 11 items; 55 components in total). Graph-based ANN (HNSW) attaches islands to the wrong region or never reaches them.",
+   "details": {
+    "island_ratio": 0.0,
+    "n_components": 55,
+    "n_islands": 0,
+    "min_island_size": 11,
+    "largest_component_ratio": 0.0965,
+    "sample_ids": []
+   },
+   "warn_at": 0.01,
+   "fail_at": 0.1,
+   "lower_is_worse": false,
+   "healthy_range": "ok < 0.01, warn >= 0.01, fail >= 0.1",
+   "likely_causes": [
+    "tiny self-contained groups (near-duplicates, boilerplate) isolated from the rest",
+    "corpus assembled from disconnected sources"
+   ],
+   "suggested_action": "inspect details.sample_ids; deduplicate or merge; for HNSW raise M / ef_construction",
+   "verify_by": "island_ratio below warn_at; ANN recall measured on items from former islands is comparable to the rest",
+   "value_range": null,
+   "verdict_stable": null
+  }
+ ],
+ "n_total": 2000,
+ "sampled": false,
+ "n_queries": 0,
+ "clusters": [],
+ "thresholds": {
+  "hubness.skewness": [
+   2.0,
+   4.0
+  ],
+  "hubness.antihub_excess": [
+   0.05,
+   0.2
+  ],
+  "anisotropy.mean_random_cosine": [
+   0.5,
+   0.85
+  ],
+  "anisotropy.effective_rank_ratio": [
+   0.1,
+   0.05
+  ],
+  "collapse.near_duplicate_ratio": [
+   0.02,
+   0.1
+  ],
+  "ann_recall.recall_at_k": [
+   0.95,
+   0.85
+  ],
+  "rogue_dimensions.top1_dim_variance_ratio": [
+   10.0,
+   50.0
+  ],
+  "norms.norm_cv": [
+   0.1,
+   0.3
+  ],
+  "metric_mismatch.topk_overlap": [
+   0.9,
+   0.7
+  ],
+  "distance_concentration.contrast_over_noise": [
+   1.4,
+   1.1
+  ],
+  "outliers.outlier_ratio": [
+   0.01,
+   0.05
+  ],
+  "connectivity.island_ratio": [
+   0.01,
+   0.1
+  ],
+  "queries.ood_query_ratio": [
+   0.05,
+   0.2
+  ],
+  "queries.query_hubness_skewness": [
+   2.0,
+   4.0
+  ]
+ },
+ "sample_repeats": 1,
+ "unstable_findings": [],
+ "near_dup_cos": 0.99,
+ "schema_version": 1,
+ "verdict": "fail"
+}

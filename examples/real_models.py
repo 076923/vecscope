@@ -58,7 +58,8 @@ def load(repo: str, file: str, col: str, rows: int) -> np.ndarray:
     chunks, total = [], 0
     for i in range(pf.num_row_groups):  # read only the row groups we need
         chunk = pf.read_row_group(i, columns=[col]).column(col).to_numpy(zero_copy_only=False)
-        chunks.append(np.stack(chunk)); total += len(chunk)
+        chunks.append(np.stack(chunk))
+        total += len(chunk)
         if total >= rows:
             break
     return np.concatenate(chunks)[:rows].astype(np.float32)

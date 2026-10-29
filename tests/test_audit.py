@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from vecscope import audit
+from vecscope import audit, compare
 from vecscope.diagnostics import ann_recall
 
 
@@ -79,7 +79,6 @@ def test_collapse_reports_group_structure():
 
 
 def test_compare_two_spaces():
-    from vecscope import compare
     from vecscope.compare import render_compare
 
     rng = np.random.default_rng(0)
@@ -108,8 +107,475 @@ def test_compare_two_spaces():
         compare(a, a, k=0)
     with pytest.raises(ValueError, match="exceed k"):
         compare(a, a, k=5, sample=1)
+    assert compare(a, a, k=5, sample=0).sampled is False  # 0 = every row, as in audit
+    with pytest.raises(ValueError, match="non-negative"):
+        compare(a, a, k=5, sample=-1)
     with pytest.raises(ValueError, match="NaN"):
         compare(a, np.full_like(a, np.nan))
+
+
+def test_ann_neighbors_without_columns_is_rejected():
+    from vecscope.diagnostics import ann_recall
+
+    x = np.random.default_rng(0).standard_normal((50, 8)).astype(np.float32)
+    with pytest.raises(ValueError, match="neighbor column"):
+        audit(x, k=5, sample=None, ann_neighbors=np.zeros((50, 0), dtype=np.int64))
+    with pytest.raises(ValueError, match="neighbor column"):
+        ann_recall(np.zeros((10, 3), np.int64), np.zeros((10, 0), np.int64))
+    # a row whose index returned nothing (all -1) simply scores 0, it is not an error
+    ev = audit(x, k=5, sample=None, ann_neighbors=np.full((50, 5), -1))
+    assert {f.name: f for f in ev.findings}["ann_recall"].value == 0.0
+
+
+def test_diff_evidence_and_baseline_cli(tmp_path, capsys):
+    from vecscope.cli import main
+    from vecscope.evidence import SCHEMA_VERSION, diff_evidence
+
+    rng = np.random.default_rng(0)
+    c = rng.standard_normal((30, 16))
+    good = (c[rng.integers(0, 30, 800)] + rng.standard_normal((800, 16)) * 0.6).astype(np.float32)
+    bad = np.concatenate([good, good[:200]])  # duplicates: collapse gets worse
+    old, new = audit(good, k=5).to_dict(), audit(bad, k=5).to_dict()
+    assert old["schema_version"] == SCHEMA_VERSION
+    d = diff_evidence(new, old)
+    assert "collapse" in d["regressions"] and not d["improvements"]
+    assert d["comparable"] is False  # n differs
+    assert diff_evidence(old, old)["comparable"] is True
+    loose = audit(good, k=5, thresholds={"collapse.near_duplicate_ratio": (0.5, 0.9)}).to_dict()
+    assert diff_evidence(loose, old)["comparable"] is False  # thresholds differ
+    by = {c["name"]: c for c in d["changes"]}
+    assert by["collapse"]["delta"] == pytest.approx(new["findings"][4]["value"] - old["findings"][4]["value"])
+    assert diff_evidence(old, old)["regressions"] == []
+    with pytest.raises(ValueError, match="schema_version"):
+        diff_evidence(new, {**old, "schema_version": 99})
+    with pytest.raises(ValueError, match="findings"):
+        diff_evidence(new, {"verdict": "ok"})
+
+    base = tmp_path / "base.json"
+    base.write_text(json.dumps(old), encoding="utf-8")
+    np.save(tmp_path / "bad.npy", bad)
+    np.save(tmp_path / "good.npy", good)
+    assert main(["audit", str(tmp_path / "bad.npy"), "-k", "5", "--baseline", str(base)]) == 1
+    out = capsys.readouterr().out
+    assert "WORSE" in out and "regressions: collapse" in out
+    # same data as the baseline: no regression, exit code follows --fail-on alone
+    code = main(["audit", str(tmp_path / "good.npy"), "-k", "5", "--baseline", str(base), "--json"])
+    # no regression, yet exit 1: the baseline itself is FAIL and --fail-on fail (the default)
+    # still trips, as the README states; regressions alone are not what decides the code
+    assert old["verdict"] == "fail" and code == 1
+    assert json.loads(capsys.readouterr().out)["baseline_diff"]["regressions"] == []
+
+
+def test_golden_evidence_for_shipped_examples():
+    """The committed JSON pins values and verdicts for the example files; a change here is a
+    change in what users see and must be deliberate (regenerate with examples/make_examples.py)."""
+    import importlib.util
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("make_examples", root / "examples" / "make_examples.py")
+    make_examples = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(make_examples)
+    for name, x in make_examples.make_examples().items():  # the .npy files are not in git
+        ev = audit(x, k=10).to_dict()
+        gold = json.loads((root / "tests" / "golden" / f"{name}.json").read_text(encoding="utf-8"))
+        assert ev["schema_version"] == gold["schema_version"]
+        assert [f["name"] for f in ev["findings"]] == [f["name"] for f in gold["findings"]]
+        assert set(ev) == set(gold)
+        for f, g in zip(ev["findings"], gold["findings"]):
+            assert f["verdict"] == g["verdict"], (name, f["name"])
+            # a different BLAS can flip a near-tied neighbor, which moves the count-based
+            # findings slightly; verdicts and the other values are pinned tightly
+            loose = f["name"] in {"hubness", "antihubs", "outliers", "connectivity"}
+            # distance_concentration depends on a median of float32 distances, which a
+            # different BLAS accumulation order moves by a few 1e-6 relative
+            tol = (5e-2, 1e-3) if loose else (1e-4, 1e-8) if f["name"] == "distance_concentration" else (1e-5, 1e-8)
+            assert f["value"] == pytest.approx(g["value"], rel=tol[0], abs=tol[1]), (name, f["name"])
+            assert set(f["details"]) == set(g["details"]), (name, f["name"])
+
+
+def test_neighbor_ids_written_as_floats_and_bad_baseline_file(tmp_path, capsys):
+    from vecscope.cli import main
+    from vecscope.io import load_neighbors
+
+    (tmp_path / "nb.csv").write_text("1.0,2.0\n0.0,2.0\n", encoding="utf-8")
+    assert load_neighbors(tmp_path / "nb.csv").tolist() == [[1, 2], [0, 2]]
+    (tmp_path / "frac.csv").write_text("1.5,2\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="integers"):
+        load_neighbors(tmp_path / "frac.csv")
+    with pytest.raises(FileNotFoundError):
+        load_neighbors(tmp_path / "missing.csv")
+    np.save(tmp_path / "x.npy", np.random.default_rng(0).standard_normal((50, 8)).astype(np.float32))
+    assert main(["audit", str(tmp_path / "x.npy"), "-k", "5", "--baseline", str(tmp_path / "x.npy")]) == 2
+    assert "--baseline" in capsys.readouterr().err
+
+
+def test_sampled_audit_reports_input_row_ids():
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((3000, 16)).astype(np.float32)
+    x[2500:2510] = x[2500]  # a duplicate group that lives far beyond the sample size
+    ev = audit(x, k=5, sample=1000, clusters=2)
+    assert ev.sampled
+    pairs = next(f for f in ev.findings if f.name == "collapse").details["sample_pairs"]
+    assert pairs and all(2500 <= a <= 2509 and 2500 <= b <= 2509 for a, b, _ in pairs)
+    assert max(i for c in ev.clusters for i in c["sample_ids"]) >= 1000
+    y = x.copy()
+    y[2600] = rng.standard_normal(16)
+    r = compare(x, y, k=5, sample=1000)
+    assert max(d["nearest_a"] for d in r.sample_disagreements) >= 1000
+
+
+def test_cli_reports_missing_gpu_as_user_error(tmp_path, capsys, monkeypatch):
+    pytest.importorskip("faiss")
+    import vecscope.sweep as sw
+    from vecscope.cli import main
+
+    monkeypatch.setattr(sw, "gpu_available", lambda faiss: False)
+    np.save(tmp_path / "x.npy", np.random.default_rng(0).standard_normal((100, 8)).astype(np.float32))
+    assert main(["sweep", str(tmp_path / "x.npy"), "--device", "gpu"]) == 2
+    assert "no GPU" in capsys.readouterr().err
+
+
+def test_loader_rejects_empty_text_and_non_integer_ids_cleanly(tmp_path):
+    import warnings
+
+    from vecscope.io import load_neighbors, load_vectors
+
+    (tmp_path / "empty.csv").write_text("", encoding="utf-8")
+    (tmp_path / "blank.txt").write_text("\n  \n", encoding="utf-8")
+    (tmp_path / "null.json").write_text("[[1, 2], [null, 2]]", encoding="utf-8")
+    (tmp_path / "inf.csv").write_text("1,inf\n", encoding="utf-8")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # a numpy warning here is a failure
+        for name in ("empty.csv", "blank.txt"):
+            with pytest.raises(ValueError, match="empty"):
+                load_vectors(tmp_path / name)
+            with pytest.raises(ValueError, match="empty"):
+                load_neighbors(tmp_path / name)
+        (tmp_path / "huge.csv").write_text("1e30,1\n", encoding="utf-8")
+        (tmp_path / "nested.json").write_text("[[[1, 2]], [[3, 4]]]", encoding="utf-8")
+        (tmp_path / "objects.json").write_text('[[1, {"a": 2}]]', encoding="utf-8")
+        for name in ("null.json", "inf.csv", "huge.csv"):
+            with pytest.raises(ValueError, match="integers|numbers only"):
+                load_neighbors(tmp_path / name)
+        for name in ("nested.json", "objects.json"):
+            with pytest.raises(ValueError, match="flat lists|numbers only"):
+                load_vectors(tmp_path / name)
+
+
+def test_equal_warn_and_fail_override_keeps_the_default_direction():
+    from vecscope.evidence import _verdict
+
+    th = {"ann_recall.recall_at_k": (0.9, 0.9), "hubness.skewness": (3.0, 3.0)}
+    assert _verdict("ann_recall.recall_at_k", 0.99, th) == "ok"  # lower is worse: 0.99 is fine
+    assert _verdict("ann_recall.recall_at_k", 0.5, th) == "fail"
+    assert _verdict("hubness.skewness", 2.0, th) == "ok"
+    assert _verdict("hubness.skewness", 3.0, th) == "fail"
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((200, 16)).astype(np.float32)
+    f = next(f for f in audit(x, k=5, thresholds={"metric_mismatch.topk_overlap": (0.8, 0.8)}).findings
+             if f.name == "metric_mismatch")
+    assert f.lower_is_worse and f.healthy_range.startswith("ok >=")
+
+
+def test_ann_file_with_self_in_k_columns_is_explained(tmp_path):
+    from vecscope._knn import exact_knn
+    from vecscope.evidence import diff_evidence
+    from vecscope.io import load_neighbors
+
+    x = np.random.default_rng(0).standard_normal((200, 8)).astype(np.float32)
+    idx, _ = exact_knn(x, 5)
+    ann = np.concatenate([np.arange(200)[:, None], idx[:, :4]], axis=1)  # self + 4 true ids
+    f = audit(x, k=5, sample=None, ann_neighbors=ann).findings[-1]
+    assert f.value == pytest.approx(0.8)
+    assert f.details["rows_with_fewer_than_k_ids_ratio"] == 1.0 and "k + 1" in f.explanation
+    (tmp_path / "ids.jsonl").write_text('{"ids": [1.5, 2]}\n{"ids": [0, 2]}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="integers"):
+        load_neighbors(tmp_path / "ids.jsonl")
+    nameless = {"schema_version": 1, "findings": [{"verdict": "ok", "value": 1.0}]}
+    with pytest.raises(ValueError, match="malformed"):
+        diff_evidence(nameless, nameless)
+
+
+def test_all_rows_duplicated_is_reported_as_collapse_not_outliers():
+    x = np.repeat(np.random.default_rng(0).standard_normal((300, 16)).astype(np.float32), 4, axis=0)
+    by = {f.name: f for f in audit(x, k=5).findings}
+    assert by["collapse"].verdict == "fail"
+    assert by["outliers"].value == 0.0 and by["outliers"].details["distinct_neighbors"] is False
+    assert by["distance_concentration"].value == 0.0
+    assert by["distance_concentration"].details["distinct_neighbors"] is False
+
+
+def test_fully_duplicated_corpus_does_not_flag_every_query_as_ood():
+    rng = np.random.default_rng(0)
+    base = rng.standard_normal((100, 16)).astype(np.float32)
+    x = np.repeat(base, 3, axis=0)
+    q = base + rng.standard_normal(base.shape).astype(np.float32) * 0.05
+    f = next(f for f in audit(x, k=5, queries=q).findings if f.name == "ood_queries")
+    assert f.value == 0.0 and f.details["corpus_has_distinct_neighbors"] is False
+    with pytest.raises(ValueError, match="no rows"):
+        audit(x, k=5, queries=np.zeros((0, 16), np.float32))
+    with pytest.raises(ValueError, match="pair"):
+        audit(x, k=5, thresholds={"hubness.skewness": "35"})
+
+
+def test_unreadable_npy_and_npz_are_user_errors(tmp_path, capsys):
+    from vecscope.cli import main
+
+    (tmp_path / "empty.npy").write_bytes(b"")
+    np.savez(tmp_path / "t.npz", x=np.ones((5, 3), np.float32))
+    data = (tmp_path / "t.npz").read_bytes()
+    (tmp_path / "t.npz").write_bytes(data[:-30])
+    for name in ("empty.npy", "t.npz"):
+        assert main(["audit", str(tmp_path / name)]) == 2
+        assert "not a readable" in capsys.readouterr().err
+
+
+def test_cluster_near_dup_rule_matches_collapse_and_float32_options_serialize():
+    import warnings
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((400, 16)).astype(np.float32)
+    x[:40] = 0.0
+    ev = audit(x, k=5, clusters=2, near_dup_cos=np.float32(0.99))
+    json.loads(ev.to_json())  # numpy scalars must not leak into the evidence
+    collapse_value = next(f.value for f in ev.findings if f.name == "collapse")
+    weighted = sum(c["near_duplicate_ratio"] * c["size"] for c in ev.clusters) / 400
+    assert weighted == pytest.approx(collapse_value)
+    big = rng.standard_normal((50, 4)) * 1e300  # float64, finite, beyond float32
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="Rescale"):
+            audit(big, k=3)
+
+
+def test_short_distinct_rows_are_not_exact_copies_and_loader_messages(tmp_path):
+    from vecscope.io import load_neighbors, load_vectors
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((400, 16)).astype(np.float32)
+    x[:40] *= 1e-7  # tiny but distinct directions: not copies of each other
+    c = next(f for f in audit(x, k=5).findings if f.name == "collapse")
+    assert c.details["exact_duplicate_ratio"] == 0.0 and c.details["largest_exact_duplicate_groups"] == []
+    (tmp_path / "scalars.jsonl").write_text("1\n2\n3\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="list of numbers"):
+        load_vectors(tmp_path / "scalars.jsonl")
+    (tmp_path / "empty.json").write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="empty.json"):
+        load_vectors(tmp_path / "empty.json")
+    np.save(tmp_path / "bool.npy", np.ones((5, 3), bool))
+    with pytest.raises(ValueError, match="boolean"):
+        load_neighbors(tmp_path / "bool.npy")
+
+
+def test_tie_aware_recall_still_counts_a_missed_unique_neighbor():
+    from vecscope._knn import exact_knn
+    from vecscope.diagnostics.ann_recall import tie_aware_hits
+
+    assert tie_aware_hits([0.1, 0.2, 0.2, 0.2, 0.3], [0.2, 0.2, 0.2, 0.3, 0.9]) == 4  # 0.1 missed
+    # slots 1e-5 apart must not chain into one tie set: only the slot nearest to 0.10004 counts
+    # slots 1e-5 apart (tolerance ~1.1e-5): five copies of 0.10004 can fill the two slots
+    # within tolerance of it, never the farther ones
+    assert tie_aware_hits([0.1, 0.10001, 0.10002, 0.10003, 0.10004], [0.10004] * 5) == 2
+    assert tie_aware_hits([0.1, 0.2, 0.3, 0.4, 0.5], [0.5] * 5) == 1
+    # a hit must not be wasted on a slot another id could still fill (maximum matching)
+    assert tie_aware_hits([0.1, 0.100005, 0.100010], [0.100010, 0.100005, 0.1]) == 3
+    assert tie_aware_hits([0.1, 0.2, 0.2, 0.2, 0.3], [0.2, 0.2, 0.2, 0.2, 0.2]) == 3  # tie set capped
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((400, 32)).astype(np.float32)
+    x[1] = x[0] + rng.standard_normal(32).astype(np.float32) * 0.05  # unique nearest of row 0
+    x[2] = x[0] + rng.standard_normal(32).astype(np.float32) * 0.3  # second nearest ...
+    x[3:40] = x[2]  # ... copied: a tie set at the k-th distance
+    idx, _ = exact_knn(x, 5)
+    ann = idx.copy()
+    ann[0] = [10, 11, 12, 13, 14]  # members of the tie set only: the nearest (row 1) is missed
+    r = audit(x, k=5, sample=None, ann_neighbors=ann).findings[-1]
+    assert r.details["min_recall"] == pytest.approx(0.8)
+    r = audit(x, k=5, sample=None, ann_neighbors=idx.astype(np.uint64)).findings[-1]
+    assert r.value == 1.0  # unsigned ids are accepted
+
+
+def test_compare_agrees_on_nearest_within_copy_groups():
+    from vecscope import compare
+
+    rng = np.random.default_rng(0)
+    for seed in range(30):
+        r = np.random.default_rng(seed)
+        a = r.standard_normal((300, 32)).astype(np.float32)
+        b = r.standard_normal((300, 16)).astype(np.float32)
+        a[1:6], b[1:6] = a[0], b[0]  # the same copy group in both spaces
+        assert compare(a, b, k=5).same_nearest_among_both_flagged == 1.0, seed
+    del rng
+
+
+def test_zero_width_input_is_rejected(tmp_path, capsys):
+    from vecscope import compare
+    from vecscope.cli import main
+
+    empty = np.zeros((30, 0), np.float32)
+    with pytest.raises(ValueError, match="column"):
+        audit(empty, k=5)
+    with pytest.raises(ValueError, match="column"):
+        compare(empty, empty, k=5)
+    np.save(tmp_path / "d0.npy", empty)
+    assert main(["audit", str(tmp_path / "d0.npy")]) == 2
+    assert "vecscope: error" in capsys.readouterr().err
+
+
+def test_loader_rejects_string_dtype_and_unsigned_ids_beyond_int64(tmp_path):
+    from vecscope.io import load_neighbors, load_vectors
+
+    np.save(tmp_path / "s.npy", np.array([["a", "b"], ["c", "d"], ["e", "f"]]))
+    with pytest.raises(ValueError, match="real numbers"):
+        load_vectors(tmp_path / "s.npy")
+    with pytest.raises(ValueError, match="real numbers"):
+        audit(np.array([["a", "b"]] * 3), k=1)
+    np.save(tmp_path / "u.npy", np.array([[2**63, 1], [0, 1], [1, 0]], np.uint64))
+    with pytest.raises(ValueError, match="int64"):
+        load_neighbors(tmp_path / "u.npy")
+
+
+def test_exact_copy_groups_match_float64_reference_and_signed_zero():
+    from vecscope._knn import exact_copy_groups
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((500, 24)).astype(np.float32)
+    x[10:20] = x[10]
+    x[30] = -0.0
+    x[31] = 0.0
+    x[40] = x[41] * 1e-7  # same direction, different length: not a copy
+    x[42] = x[41] * 3e-7  # nor of row 40, although both are tiny
+    x[50] = x[51] * 2.0
+    _, inverse, counts = exact_copy_groups(x)
+    assert counts[inverse[10]] == 10 and inverse[30] == inverse[31]
+    assert inverse[40] != inverse[41] and inverse[50] != inverse[51] and inverse[40] != inverse[42]
+    assert (counts[inverse] > 1).sum() == 12
+
+
+def test_near_dup_cutoff_is_part_of_baseline_comparability(tmp_path, capsys):
+    from vecscope import compare
+    from vecscope.cli import main
+    from vecscope.evidence import diff_evidence
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((200, 16)).astype(np.float32)
+    old = audit(x, k=5).to_dict()
+    assert old["near_dup_cos"] == 0.99
+    assert diff_evidence(audit(x, k=5, near_dup_cos=0.5).to_dict(), old)["comparable"] is False
+    (tmp_path / "b.json").write_text(json.dumps(old), encoding="utf-8")
+    np.save(tmp_path / "x.npy", x)
+    main(["audit", str(tmp_path / "x.npy"), "-k", "5", "--near-dup", "0.5", "--baseline", str(tmp_path / "b.json")])
+    assert "near-dup cutoff differ" in capsys.readouterr().out
+    big = rng.standard_normal((50, 4)) * 1e300
+    with pytest.raises(ValueError, match="Rescale"):
+        compare(big, big, k=3)
+    z = np.concatenate([rng.integers(-5, 5, (20, 4)), np.full((3, 4), -2**63, np.int64)])
+    with pytest.raises(ValueError, match="Rescale"):
+        audit(z, k=3)
+    y = np.repeat(rng.standard_normal((50, 1536)).astype(np.float32), 2, axis=0)
+    c = next(f for f in audit(y, k=3).findings if f.name == "collapse")
+    assert c.details["nn_cosine_p95"] <= 1.0 and c.details["nn_cosine_median"] <= 1.0
+
+
+def test_sweep_rejects_bad_queries_and_mislabelled_npy(tmp_path):
+    pytest.importorskip("faiss")
+    from vecscope.compare import compare
+    from vecscope.io import load_vectors
+    from vecscope.sweep import sweep
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((300, 8)).astype(np.float32)
+    q = x[:20].copy()
+    q[3, 0] = np.nan
+    with pytest.raises(ValueError, match="NaN"):
+        sweep(x, k=5, queries=q, timing_repeats=1)
+    with pytest.raises(ValueError, match="Rescale"):
+        sweep(x, k=5, queries=x[:20].astype(np.float64) * 1e300, timing_repeats=1)
+    with pytest.raises(ValueError, match="smaller than the number of rows"):
+        compare(x[:10], x[:10], k=10)
+    np.savez(tmp_path / "a.npz", x=x)
+    (tmp_path / "zip_as.npy").write_bytes((tmp_path / "a.npz").read_bytes())
+    np.save(tmp_path / "b.npy", x)
+    (tmp_path / "array_as.npz").write_bytes((tmp_path / "b.npy").read_bytes())
+    for name in ("zip_as.npy", "array_as.npz"):
+        with pytest.raises(ValueError, match="suffix"):
+            load_vectors(tmp_path / name)
+
+
+def test_verify_by_names_the_metric_the_verdict_uses():
+    from vecscope.evidence import _FINDING_KEYS, ACTIONS
+
+    for name in ("antihubs", "rogue_dimensions", "hubness", "collapse", "outliers"):
+        metric = _FINDING_KEYS[name].split(".")[1]
+        assert metric in ACTIONS[name][2], name
+
+
+def test_distance_concentration_needs_x_above_baseline_rows():
+    from vecscope.diagnostics import distance_concentration
+
+    nn = np.random.default_rng(0).uniform(0.1, 0.5, 5000)
+    with pytest.raises(ValueError, match="needs x"):
+        distance_concentration(nn, 0.0, dim=16)
+    assert "contrast_over_noise" in distance_concentration(nn[:4000], 0.0, dim=16)
+
+
+def test_exact_ids_score_full_recall_on_tight_high_dim_neighbors():
+    from vecscope._knn import exact_knn
+
+    rng = np.random.default_rng(0)
+    for spread in (0.01, 0.005):
+        c = rng.standard_normal((30, 1536))
+        x = c[rng.integers(0, 30, 3000)] + rng.standard_normal((3000, 1536)) * spread
+        x = (x / np.linalg.norm(x, axis=1, keepdims=True)).astype(np.float32)
+        idx, _ = exact_knn(x, 10)
+        r = audit(x, k=10, sample=None, ann_neighbors=idx).findings[-1]
+        assert r.value == 1.0 and r.details["min_recall"] == 1.0, spread
+
+
+def test_csv_with_huge_values_and_json_booleans_are_rejected_clearly(tmp_path, capsys):
+    from vecscope.cli import main
+    from vecscope.io import load_vectors
+
+    (tmp_path / "huge.csv").write_text("1e300,1\n2,3\n4,5\n", encoding="utf-8")
+    assert main(["audit", str(tmp_path / "huge.csv"), "-k", "1"]) == 2
+    assert "Rescale" in capsys.readouterr().err
+    (tmp_path / "bools.json").write_text("[[true, 1.0], [0, 1], [1, 0]]", encoding="utf-8")
+    with pytest.raises(ValueError, match="numbers only"):
+        load_vectors(tmp_path / "bools.json")
+
+
+def test_query_and_json_values_beyond_float32_get_the_rescale_message(tmp_path, capsys):
+    import warnings
+
+    from vecscope.cli import main
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((100, 8)).astype(np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="Rescale"):
+            audit(x, k=5, queries=rng.standard_normal((4, 8)) * 1e300)
+        with pytest.raises(ValueError, match="real numbers"):
+            audit(x, k=5, queries=np.array([["a"] * 8]))
+    (tmp_path / "big.json").write_text("[[1e39,1,2,3,4,5,6,7],[1,2,3,4,5,6,7,8],[2,3,4,5,6,7,8,9]]",
+                                       encoding="utf-8")
+    assert main(["audit", str(tmp_path / "big.json"), "-k", "1"]) == 2
+    assert "Rescale" in capsys.readouterr().err
+
+
+def test_zero_vectors_count_as_collapse():
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((400, 16)).astype(np.float32)
+    x[:40] = 0.0  # 10% zero vectors: cosine 0 with everything, including each other
+    c = next(f for f in audit(x, k=5).findings if f.name == "collapse")
+    assert c.value == pytest.approx(0.1) and c.verdict == "fail"
+    assert c.details["largest_near_duplicate_groups"][0] == 40
+    row_a, row_b, cos = c.details["sample_pairs"][0]
+    assert row_a < 40 and row_b < 40 and cos == 1.0  # the partner is another copy, not a random row
+    ev = audit(np.zeros((50, 8)), k=5)
+    assert [f.verdict for f in ev.findings if f.name == "collapse"] == ["fail"]
+    with pytest.raises(ValueError, match="near_dup_cos"):
+        compare(x, x, k=3, near_dup_cos=1.5)
 
 
 def test_duplicates_trigger_collapse():
@@ -132,17 +598,20 @@ def test_json_roundtrip():
     rng = np.random.default_rng(1)
     ev = audit(rng.standard_normal((300, 16)).astype(np.float32), k=5)
     s = ev.to_json()
-    assert '"tool": "vecscope"' in s and '"verdict"' in s
+    back = json.loads(s)  # strict JSON: no NaN/Infinity tokens
+    assert back == ev.to_dict() and back["tool"] == "vecscope" and "verdict" in back
 
 
 def test_hub_cluster_raises_k_occurrence():
     rng = np.random.default_rng(0)
     x = rng.standard_normal((1500, 32)).astype(np.float32)
+    plain = {f.name: f for f in audit(x, k=10).findings}["hubness"].details
     center = rng.standard_normal((1, 32)).astype(np.float32)
     x[:100] = center + rng.standard_normal((100, 32)).astype(np.float32) * 0.05
-    ev = audit(x, k=10)
-    by = {f.name: f for f in ev.findings}
-    assert by["hubness"].details["max_k_occurrence"] > 10
+    hub = {f.name: f for f in audit(x, k=10).findings}["hubness"].details
+    # a tight cluster makes its members everyone's neighbors inside it: more skew, bigger hubs
+    assert hub["max_k_occurrence"] > plain["max_k_occurrence"]
+    assert hub["skewness"] > plain["skewness"]
 
 
 def test_sampling_caps_rows_and_refuses_ann():
@@ -450,6 +919,9 @@ def test_sweep_reaches_full_recall_with_duplicates_and_zero_rows():
     base = rng.standard_normal((600, 16)).astype(np.float32)
     res = sweep(np.concatenate([base, base]), k=5, n_queries=100, device="cpu")
     assert max(p.recall_at_k for p in res.points) >= 0.99  # duplicates no longer cap recall
+    # 8 copies per item at k=5: every neighbor set is a tie set, any member must count
+    res = sweep(np.repeat(base[:150], 8, axis=0), k=5, n_queries=100, device="cpu", timing_repeats=1)
+    assert max(p.recall_at_k for p in res.points) >= 0.99
     # zero rows have no meaningful neighbors (all ties); the sweep must still run cleanly
     res = sweep(np.concatenate([base, np.zeros((50, 16), np.float32)]), k=5, n_queries=100, device="cpu")
     assert all(0.0 <= p.recall_at_k <= 1.0 for p in res.points)
@@ -472,6 +944,26 @@ def test_ann_validation_and_self_ids():
     with_self = np.concatenate([np.arange(200)[:, None], exact], axis=1)  # index returned self first
     r = _by(audit(x, k=5, ann_neighbors=with_self, sample=None))["ann_recall"]
     assert r.value == 1.0
+    # ties: 8 copies per item, an exact index that breaks ties differently is still perfect
+    y = np.repeat(x[:50], 8, axis=0)
+    idx, _ = exact_knn(y, 6)
+    other = (idx // 8) * 8 + (idx + 3) % 8  # another member of the same copy group
+    r = _by(audit(y, k=5, ann_neighbors=other, sample=None))["ann_recall"]
+    assert r.value == 1.0
+    wrong = (idx + 8) % len(y)  # a different group: a genuine miss
+    r = _by(audit(y, k=5, ann_neighbors=wrong, sample=None))["ann_recall"]
+    assert r.value < 0.2
+
+
+def test_parquet_neighbor_ids_keep_values_above_2_24(tmp_path):
+    pa = pytest.importorskip("pyarrow")
+    import pyarrow.parquet as pq
+
+    from vecscope.io import load_neighbors
+
+    ids = [[16777217, 16777219], [33554433, 1]]
+    pq.write_table(pa.table({"neighbors": ids}), tmp_path / "nb.parquet")
+    assert load_neighbors(tmp_path / "nb.parquet").tolist() == ids
 
 
 def test_parquet_picks_vector_column_by_type(tmp_path):

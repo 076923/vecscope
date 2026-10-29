@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
-from vecscope._knn import exact_knn
+from vecscope._knn import check_magnitude, exact_knn, resolve_sample
 from vecscope.diagnostics import (
     anisotropy,
     ann_recall,
@@ -25,7 +25,7 @@ from vecscope.diagnostics import (
     rogue_dimensions,
 )
 
-# Default verdict thresholds: (warn, fail). Calibrated on eight public embedding models
+# Default verdict thresholds: (warn, fail). Calibrated on seven public embedding models
 # (see README "Real embeddings"); they are a starting point for diagnosis, not a universal
 # quality bar. Override per call with ``audit(..., thresholds={key: (warn, fail)})``.
 THRESHOLDS = {
@@ -65,6 +65,11 @@ class Finding:
     verdict_stable: bool | None = None  # verdict identical on every sample repeat
 
 
+SCHEMA_VERSION = 1  # bumped when a key in the JSON is renamed, removed or changes meaning
+
+WORSE = {"ok": 0, "warn": 1, "fail": 2}
+
+
 @dataclass
 class Evidence:
     tool: str
@@ -80,11 +85,12 @@ class Evidence:
     thresholds: dict = field(default_factory=dict)
     sample_repeats: int = 1
     unstable_findings: list[str] = field(default_factory=list)
+    near_dup_cos: float = 0.99
+    schema_version: int = SCHEMA_VERSION
 
     @property
     def verdict(self) -> str:
-        order = {"ok": 0, "warn": 1, "fail": 2}
-        return max((f.verdict for f in self.findings), key=order.get, default="ok")
+        return max((f.verdict for f in self.findings), key=WORSE.get, default="ok")
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -98,6 +104,73 @@ class Evidence:
 _RENAMED_KEYS = {
     "distance_concentration.relative_contrast": "distance_concentration.contrast_over_noise",
 }
+
+
+def diff_evidence(new: dict, old: dict) -> dict:
+    """Compare two evidence dicts (``Evidence.to_dict()`` or a parsed ``--json`` file).
+
+    Returns per-finding value and verdict changes, the findings whose verdict got worse
+    (``regressions``), those that improved, and findings present on one side only. Meant for
+    CI: audit the new index, diff against the committed baseline, fail on regressions.
+    """
+    if not isinstance(new, Mapping) or not isinstance(old, Mapping):
+        raise TypeError("evidence must be a mapping (Evidence.to_dict() or parsed --json output)")
+    for name, ev in (("new", new), ("baseline", old)):
+        if "findings" not in ev or not isinstance(ev["findings"], list):
+            raise ValueError(f"{name} evidence has no findings list")
+        if ev.get("schema_version", 1) != SCHEMA_VERSION:
+            raise ValueError(
+                f"{name} evidence has schema_version {ev.get('schema_version')}, this vecscope "
+                f"writes {SCHEMA_VERSION}; re-create the baseline with this version"
+            )
+    for name, ev in (("new", new), ("baseline", old)):
+        for f in ev["findings"]:
+            if (not isinstance(f, Mapping) or not isinstance(f.get("name"), str)
+                    or not isinstance(f.get("metric"), str)
+                    or not isinstance(f.get("verdict"), str) or f["verdict"] not in WORSE
+                    or isinstance(f.get("value"), bool)
+                    or not isinstance(f.get("value"), (int, float))):
+                raise ValueError(f"{name} evidence has a malformed finding: {f!r:.80}")
+    a = {f["name"]: f for f in new["findings"]}
+    b = {f["name"]: f for f in old["findings"]}
+    changes, regressions, improvements = [], [], []
+    for name in a.keys() & b.keys():
+        fa, fb = a[name], b[name]
+        row = {"name": name, "metric": fa["metric"], "value": fa["value"], "baseline_value": fb["value"],
+               "delta": fa["value"] - fb["value"], "verdict": fa["verdict"],
+               "baseline_verdict": fb["verdict"]}
+        changes.append(row)
+        if WORSE[fa["verdict"]] > WORSE[fb["verdict"]]:
+            regressions.append(name)
+        elif WORSE[fa["verdict"]] < WORSE[fb["verdict"]]:
+            improvements.append(name)
+    order = [f["name"] for f in new["findings"]]
+    changes.sort(key=lambda r: order.index(r["name"]))
+    return {
+        "verdict": new.get("verdict"),
+        "baseline_verdict": old.get("verdict"),
+        "regressions": regressions,
+        "improvements": improvements,
+        "only_in_new": sorted(a.keys() - b.keys()),
+        "only_in_baseline": sorted(b.keys() - a.keys()),
+        "comparable": new.get("n") == old.get("n") and new.get("dim") == old.get("dim")
+        and new.get("k") == old.get("k") and new.get("sampled") == old.get("sampled")
+        and new.get("thresholds") == old.get("thresholds")
+        and new.get("near_dup_cos") == old.get("near_dup_cos"),
+        "changes": changes,
+    }
+
+
+def _to_original_rows(findings: list[Finding], clusters: list[dict], rows: np.ndarray) -> None:
+    """Row ids in details index the audited subsample; rewrite them as ids of the input."""
+    for f in findings:
+        if "sample_ids" in f.details:
+            f.details["sample_ids"] = [int(rows[i]) for i in f.details["sample_ids"]]
+        if "sample_pairs" in f.details:
+            f.details["sample_pairs"] = [[int(rows[a]), int(rows[b]), cos]
+                                         for a, b, cos in f.details["sample_pairs"]]
+    for c in clusters:
+        c["sample_ids"] = [int(rows[i]) for i in c["sample_ids"]]
 
 
 def resolve_thresholds(overrides: dict | None) -> dict:
@@ -114,6 +187,8 @@ def resolve_thresholds(overrides: dict | None) -> dict:
             )
         if key not in THRESHOLDS:
             raise ValueError(f"unknown threshold key {key!r}; known: {sorted(THRESHOLDS)}")
+        if isinstance(pair, (str, bytes, Mapping)) or not hasattr(pair, "__len__") or len(pair) != 2:
+            raise ValueError(f"threshold {key!r} must be a (warn, fail) pair")
         try:
             warn, fail = (float(pair[0]), float(pair[1]))
         except (TypeError, ValueError, IndexError, KeyError) as e:
@@ -130,9 +205,15 @@ def resolve_thresholds(overrides: dict | None) -> dict:
     return th
 
 
+def lower_is_worse(key: str) -> bool:
+    """Direction of a threshold key, fixed by the defaults (an override may set warn == fail)."""
+    warn, fail = THRESHOLDS[key]
+    return warn > fail
+
+
 def _verdict(key: str, value: float, th: dict) -> str:
     warn, fail = th[key]
-    if warn > fail:  # lower is worse
+    if lower_is_worse(key):
         return "fail" if value < fail else "warn" if value < warn else "ok"
     return "fail" if value >= fail else "warn" if value >= warn else "ok"
 
@@ -152,7 +233,8 @@ ACTIONS = {
     "antihubs": (
         ["same causes as hubness", "items embedded from empty or near-empty text"],
         "inspect a sample of never-retrieved items; drop empty inputs, then apply the hubness fix",
-        ("antihub_ratio should fall below warn_at after the fix; spot-check that the dropped "
+        ("antihub_excess (antihub_ratio minus the random baseline) should fall below warn_at "
+         "after the fix; spot-check that the dropped "
         "items were genuinely empty"),
     ),
     "anisotropy": (
@@ -192,7 +274,7 @@ ACTIONS = {
         ["model outputs a few high-variance coordinates (known in BERT-family encoders)"],
         ("z-score each dimension or drop details.rogue_dims before indexing; apply the same "
         "transform to queries"),
-        ("top1_dim_variance_share falls below warn_at; retrieval quality on real queries "
+        ("top1_dim_variance_ratio falls below warn_at; retrieval quality on real queries "
         "does not regress"),
     ),
     "norms": (
@@ -264,7 +346,7 @@ _FINDING_KEYS = {
 def _attach_thresholds(findings: list[Finding], th: dict) -> list[Finding]:
     for f in findings:
         warn, fail = th[_FINDING_KEYS[f.name]]
-        f.warn_at, f.fail_at, f.lower_is_worse = warn, fail, warn > fail
+        f.warn_at, f.fail_at, f.lower_is_worse = warn, fail, lower_is_worse(_FINDING_KEYS[f.name])
         causes, action, verify = ACTIONS[f.name]
         f.likely_causes, f.suggested_action, f.verify_by = list(causes), action, verify
         if f.lower_is_worse:
@@ -274,8 +356,24 @@ def _attach_thresholds(findings: list[Finding], th: dict) -> list[Finding]:
     return findings
 
 
+def _checked_queries(queries, dim: int) -> np.ndarray:
+    """Validate query vectors like the corpus, before any expensive pass runs."""
+    qv = np.asarray(queries)
+    if qv.dtype.kind not in "iufb":
+        raise ValueError(f"queries must be real numbers, got dtype {qv.dtype}")
+    if qv.ndim != 2 or qv.shape[1] != dim:
+        raise ValueError(f"queries must be (m, {dim}) to match the corpus")
+    if qv.shape[0] == 0:
+        raise ValueError("queries has no rows")
+    if not np.isfinite(qv).all():
+        raise ValueError("queries contain NaN or Inf")
+    check_magnitude(qv, "queries")
+    return np.asarray(qv, dtype=np.float32)
+
+
 def _core_findings(
-    x: np.ndarray, k: int, near_dup_cos: float, queries: np.ndarray | None, th: dict
+    x: np.ndarray, k: int, near_dup_cos: float, queries: np.ndarray | None, th: dict,
+    seed: int = 0,
 ) -> tuple[list[Finding], np.ndarray, np.ndarray]:
     """Compute every finding that depends only on the (sampled) matrix and the queries."""
     knn_idx, knn_dist = exact_knn(x, k)
@@ -302,7 +400,7 @@ def _core_findings(
         )
     )
 
-    a = anisotropy(x)
+    a = anisotropy(x, seed=seed)
     findings.append(
         Finding(
             "anisotropy", "mean_random_cosine", a["mean_random_cosine"],
@@ -317,9 +415,13 @@ def _core_findings(
         Finding(
             "effective_rank", "effective_rank_ratio", a["effective_rank_ratio"],
             _verdict("anisotropy.effective_rank_ratio", a["effective_rank_ratio"], th),
-            f"effective rank {a['effective_rank']:.1f} of {a['dim']} dims "
-            f"({a['effective_rank_ratio']:.1%}); low values mean most dimensions carry nothing.",
-            {},
+            f"effective rank {a['effective_rank']:.1f} of {a['max_attainable_rank']} attainable "
+            + (f"({a['dim']} dims" if a["max_attainable_rank"] == a["dim"] else
+               f"({a['dim']} dims, but only {a['max_attainable_rank'] + 1} rows were used, which "
+               "bounds the rank")
+            + f"; {a['effective_rank_ratio']:.1%}); low values mean most dimensions carry nothing.",
+            {key: a[key] for key in ("dim", "effective_rank", "max_attainable_rank",
+                                     "effective_rank_ratio", "top1_pc_variance_share")},
         )
     )
 
@@ -338,7 +440,7 @@ def _core_findings(
             "collapse", "near_duplicate_ratio", c["near_duplicate_ratio"],
             _verdict("collapse.near_duplicate_ratio", c["near_duplicate_ratio"], th),
             f"{c['near_duplicate_ratio']:.1%} of items have a neighbor with cosine >= {near_dup_cos} "
-            f"(exact duplicates {c['exact_duplicate_ratio']:.1%}); {shape}",
+            f"or an exact copy (exact duplicates {c['exact_duplicate_ratio']:.1%}); {shape}",
             c,
         )
     )
@@ -384,17 +486,21 @@ def _core_findings(
         )
     )
 
-    dc = distance_concentration(knn_dist[:, 0], a["mean_random_cosine"], dim=x.shape[1], x=x)
+    dc = distance_concentration(knn_dist[:, 0], a["mean_random_cosine"], dim=x.shape[1],
+                                seed=seed, x=x)
     findings.append(
         Finding(
             "distance_concentration", "contrast_over_noise", dc["contrast_over_noise"],
             _verdict("distance_concentration.contrast_over_noise", dc["contrast_over_noise"], th),
-            f"a random item is {dc['relative_contrast']:.2f}x farther than the nearest neighbor "
-            f"(median NN distance {dc['median_nn_distance']:.3f}, random "
-            f"{dc['mean_random_distance']:.3f}); isotropic noise at {x.shape[1]}-d and "
-            f"{dc['baseline_rows']} rows would give {dc['noise_relative_contrast']:.2f}x, so "
-            f"the contrast is {dc['contrast_over_noise']:.2f}x that of noise. Near 1.0 means "
-            "distances carry no signal.",
+            (f"on {dc['baseline_rows']} rows a random item is "
+             f"{dc['relative_contrast_at_baseline_rows']:.2f}x farther than the nearest neighbor "
+             f"(random distance {dc['mean_random_distance']:.3f}); isotropic noise at "
+             f"{x.shape[1]}-d and the same rows would give {dc['noise_relative_contrast']:.2f}x, "
+             f"so the contrast is {dc['contrast_over_noise']:.2f}x that of noise. On all rows the "
+             f"contrast is {dc['relative_contrast']:.2f}x (median NN distance "
+             f"{dc['median_nn_distance']:.3f}). Near 1.0 means distances carry no signal."
+             + ("" if dc["distinct_neighbors"] else " No row has a neighbor that is not a copy "
+                "of it, so the nearest-neighbor distance is 0 everywhere; see collapse.")),
             dc,
         )
     )
@@ -426,10 +532,6 @@ def _core_findings(
 
     if queries is not None:
         qv = np.asarray(queries, dtype=np.float32)
-        if qv.ndim != 2 or qv.shape[1] != x.shape[1]:
-            raise ValueError(f"queries must be (m, {x.shape[1]}) to match the corpus")
-        if not np.isfinite(qv).all():
-            raise ValueError("queries contain NaN or Inf")
         qa = query_audit(x, qv, k, knn_dist[:, 0],
                          dup_cutoff=duplicate_cutoff(dc["mean_random_distance"]))
         findings.append(
@@ -440,7 +542,10 @@ def _core_findings(
                 f"their nearest corpus item (median {qa['median_query_nn_distance']:.3f}) than "
                 f"99% of corpus items are from theirs (cutoff {qa['ood_cutoff_distance']:.3f}). "
                 "Out-of-distribution queries: wrong model, missing query prefix, or uncovered "
-                "topics; see details.ood_sample_ids.",
+                "topics; see details.ood_sample_ids."
+                + ("" if qa["corpus_has_distinct_neighbors"] else " No corpus row has a "
+                   "neighbor that is not a copy of it, so there is no reference distance and "
+                   "nothing is flagged; see collapse."),
                 qa,
             )
         )
@@ -451,7 +556,7 @@ def _core_findings(
                 f"k-occurrence skewness over query results {qa['query_hubness_skewness']:.2f} "
                 f"(max {qa['max_query_k_occurrence']} appearances); queries reach "
                 f"{qa['coverage']:.1%} of the corpus in their top-{qa['k']}.",
-                {},
+                {key: qa[key] for key in ("k", "n_queries", "max_query_k_occurrence", "coverage")},
             )
         )
 
@@ -492,29 +597,28 @@ def audit(
     if isinstance(k, bool) or not isinstance(k, (int, np.integer)) or k < 1:
         raise ValueError(f"k must be a positive integer, got {k!r}")
     k = int(k)
-    if sample is not None:
-        if isinstance(sample, bool) or not isinstance(sample, (int, np.integer)) or sample < 0:
-            raise ValueError(f"sample must be None or a non-negative integer, got {sample!r}")
-        sample = None if sample == 0 else int(sample)
-        if sample is not None and sample <= k:
-            raise ValueError(f"sample={sample} must exceed k={k} (0 audits every row)")
+    sample = resolve_sample(sample, k)
     if isinstance(clusters, bool) or not isinstance(clusters, (int, np.integer)) or clusters < 0:
         raise ValueError(f"clusters must be a non-negative integer, got {clusters!r}")
     if not (0.0 < float(near_dup_cos) <= 1.0):
         raise ValueError(f"near_dup_cos must be in (0, 1], got {near_dup_cos!r}")
+    near_dup_cos = float(near_dup_cos)
     if (isinstance(sample_repeats, bool) or not isinstance(sample_repeats, (int, np.integer))
             or sample_repeats < 1):
         raise ValueError(f"sample_repeats must be a positive integer, got {sample_repeats!r}")
     sample_repeats = int(sample_repeats)
 
     x = np.asarray(x)
-    if x.dtype == object or np.iscomplexobj(x):
+    if x.dtype.kind not in "iufb":
         raise ValueError(f"embeddings must be real numbers, got dtype {x.dtype}")
-    x = np.asarray(x, dtype=np.float32)
-    if x.ndim != 2 or x.shape[0] < 3:
-        raise ValueError(f"expected a 2-D array with at least 3 rows, got shape {x.shape}")
+    if x.ndim != 2 or x.shape[0] < 3 or x.shape[1] < 1:
+        raise ValueError(f"expected a 2-D array with at least 3 rows and 1 column, got shape {x.shape}")
+    if x.dtype.kind == "b":
+        x = x.astype(np.float32)
     if not np.isfinite(x).all():
         raise ValueError("embeddings contain NaN or Inf")
+    check_magnitude(x)  # before the float32 cast, so float64 values beyond its range are named
+    x = np.asarray(x, dtype=np.float32)
     n_total = int(x.shape[0])
     sampled = sample is not None and n_total > sample
     if sampled and ann_neighbors is not None:
@@ -539,24 +643,34 @@ def audit(
             )
         if not np.issubdtype(ann_neighbors.dtype, np.integer):
             raise ValueError("ann_neighbors must hold integer row ids")
+        if ann_neighbors.shape[1] == 0:
+            raise ValueError("ann_neighbors has no neighbor columns; pass at least one id per row")
         if ann_neighbors.max() >= x.shape[0]:
             raise ValueError(
                 f"ann_neighbors contains id {int(ann_neighbors.max())} but there are only "
                 f"{x.shape[0]} rows; ids must index the same rows as the embedding file"
             )
-    findings, knn_idx, knn_dist = _core_findings(x, k, near_dup_cos, queries, th)
+    if queries is not None:
+        queries = _checked_queries(queries, x.shape[1])
+    findings, knn_idx, knn_dist = _core_findings(x, k, near_dup_cos, queries, th, seed)
     n_queries = 0 if queries is None else int(np.asarray(queries).shape[0])
     if ann_neighbors is not None:
+        ann_neighbors = ann_neighbors.astype(np.int64)  # ids were checked to fit; -1 marks fillers
         own = ann_neighbors == np.arange(x.shape[0])[:, None]
         if own.any():  # the index returned the item itself; it is not a neighbor
             ann_neighbors = np.where(own, -1, ann_neighbors)
-        r = ann_recall(knn_idx, ann_neighbors)
+        r = ann_recall(knn_idx, ann_neighbors, exact_dist=knn_dist, vectors=x)
+        short = r["rows_with_fewer_than_k_ids_ratio"]
+        note = ("" if short == 0 else
+                f" {short:.1%} of rows supplied fewer than {r['k']} valid ids (self ids are "
+                f"dropped), which caps their recall below 1; query the index with k + 1.")
         findings.append(
             Finding(
                 "ann_recall", "recall_at_k", r["recall_at_k"],
                 _verdict("ann_recall.recall_at_k", r["recall_at_k"], th),
                 f"ANN recall@{r['k']} = {r['recall_at_k']:.3f}; "
-                f"{r['queries_below_floor_ratio']:.1%} of queries fall below {r['floor']:.0%}.",
+                f"{r['queries_below_floor_ratio']:.1%} of queries fall below {r['floor']:.0%}."
+                + note,
                 r,
             )
         )
@@ -567,7 +681,7 @@ def audit(
         verdicts: dict[str, set[str]] = {f.name: {f.verdict} for f in findings}
         for r in range(1, sample_repeats):
             rows_r = np.sort(np.random.default_rng(seed + r).choice(n_total, sample, replace=False))
-            rep, _, _ = _core_findings(x_full[rows_r], k, near_dup_cos, queries, th)
+            rep, _, _ = _core_findings(x_full[rows_r], k, near_dup_cos, queries, th, seed)
             for f in rep:
                 values[f.name].append(f.value)
                 verdicts[f.name].add(f.verdict)
@@ -578,10 +692,12 @@ def audit(
                 unstable.append(f.name)
 
     report = cluster_report(x, clusters, knn_idx, knn_dist, near_dup_cos, seed) if clusters else []
+    if sampled:
+        _to_original_rows(findings, report, rows)
     return Evidence(
         "vecscope", __version__, int(x.shape[0]), int(x.shape[1]), int(k),
         _attach_thresholds(findings, th),
         n_total=n_total, sampled=sampled, n_queries=n_queries, clusters=report,
         thresholds={k: list(v) for k, v in th.items()},
-        sample_repeats=sample_repeats, unstable_findings=unstable,
+        sample_repeats=sample_repeats, unstable_findings=unstable, near_dup_cos=near_dup_cos,
     )

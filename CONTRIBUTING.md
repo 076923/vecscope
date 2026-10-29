@@ -34,9 +34,11 @@ audit time, or when it makes two runs on the same input produce different output
 2. Register the threshold pair in `THRESHOLDS` and build the `Finding` in
    `src/vecscope/evidence.py`. The explanation string must state the number, what it means, and
    what "healthy" looks like.
-3. Add a test with a synthetic case that fails and a healthy case that stays `ok`.
-4. Describe the finding in the table in `README.md` and the action in
-   `.agents/skills/vecscope/SKILL.md`.
+3. Add a test with a synthetic case that fails and a healthy case that stays `ok`. When a
+   change moves the value of an existing finding on the example matrices, regenerate
+   `tests/golden/` with `python examples/make_examples.py` and say so in the PR.
+4. Describe the finding in the table in `README.md` and `docs/readme/README_ko.md`, and the
+   action in `.agents/skills/vecscope/SKILL.md`.
 
 ## Pull requests
 

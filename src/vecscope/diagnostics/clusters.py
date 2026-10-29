@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from vecscope._knn import normalize
+from vecscope._knn import exact_copy_groups, normalize
 
 
 def spherical_kmeans(q: np.ndarray, n_clusters: int, seed: int = 0, iters: int = 15) -> np.ndarray:
@@ -44,7 +44,9 @@ def cluster_report(
     n_clusters = max(1, min(n_clusters, n // 10))
     labels = spherical_kmeans(q, n_clusters, seed)
     nk = np.bincount(knn_idx.ravel(), minlength=n).astype(np.float64)
-    nn_cos = 1.0 - knn_dist[:, 0]
+    _, inverse, counts = exact_copy_groups(x)
+    nn_cos = 1.0 - np.asarray(knn_dist[:, 0], dtype=np.float64)  # float64, as in collapse
+    near_dup = (nn_cos >= near_dup_cos) | (counts[inverse] > 1)
     report = []
     for c in range(n_clusters):
         m = np.nonzero(labels == c)[0]
@@ -56,9 +58,9 @@ def cluster_report(
             "size": int(m.size),
             "share": float(m.size / n),
             "mean_cosine_to_center": float((q[m] @ center).mean()),
-            "near_duplicate_ratio": float((nn_cos[m] >= near_dup_cos).mean()),
+            "near_duplicate_ratio": float(near_dup[m].mean()),
             "hub_share": float(nk[m].sum() / nk.sum()) if nk.sum() > 0 else 0.0,
-            "sample_ids": [int(i) for i in m[np.argsort(-(q[m] @ center))[:sample_ids]]],
+            "sample_ids": [int(i) for i in m[np.argsort(-(q[m] @ center), kind="stable")[:sample_ids]]],
         })
     report.sort(key=lambda r: -r["size"])
     return report

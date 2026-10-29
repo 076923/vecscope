@@ -49,7 +49,7 @@ def build(name: str, rng: np.random.Generator) -> tuple[np.ndarray, dict[str, se
     if name == "norm_spread":
         return (structured(rng) * rng.uniform(0.1, 10, (N, 1))).astype(np.float32), {"norms": {"fail"}, "metric_mismatch": {"warn", "fail"}}
     if name == "zero_vectors":
-        return np.concatenate([unit(structured(rng, N - 100)), np.zeros((100, D), np.float32)]), {"norms": {"warn", "fail"}, "hubness": {"ok", "warn", "fail"}, "antihubs": {"ok", "warn"}, "outliers": {"ok", "warn", "fail"}}
+        return np.concatenate([unit(structured(rng, N - 100)), np.zeros((100, D), np.float32)]), {"norms": {"warn", "fail"}, "collapse": {"warn", "fail"}, "hubness": {"ok", "warn", "fail"}, "antihubs": {"ok", "warn"}, "outliers": {"ok", "warn", "fail"}}
     if name == "junk_outliers":
         c = g((30, D))
         x = np.concatenate([c[rng.integers(0, 30, N - 120)] + g((N - 120, D)) * 0.15, g((120, D))])
@@ -106,11 +106,21 @@ def test_edge_inputs_do_not_crash(name):
 
 
 @pytest.mark.parametrize(
-    "bad", [np.zeros((2, 4)), np.zeros(10), np.full((10, 4), np.nan), np.full((10, 4), np.inf)]
+    "bad", [np.zeros((2, 4)), np.zeros(10), np.full((10, 4), np.nan), np.full((10, 4), np.inf),
+            np.full((10, 4), 1e20, np.float32)]  # finite, but squares overflow float32
 )
 def test_invalid_inputs_raise(bad):
     with pytest.raises(ValueError):
         audit(bad, k=3)
+
+
+def test_large_but_safe_values_do_not_warn():
+    import warnings
+
+    x = np.random.default_rng(0).standard_normal((200, 16)).astype(np.float32) * 1e15
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert all(np.isfinite(f.value) for f in audit(x, k=5).findings)
 
 
 def test_same_input_same_json():
