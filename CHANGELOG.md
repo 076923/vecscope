@@ -6,6 +6,90 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
+### Changed (from the verification run, docs/verification.md)
+
+- Thresholds re-calibrated on 19 public models against nDCG@10 on SciFact, NFCorpus and
+  ko-strategyqa: `anisotropy.mean_random_cosine` (0.5, 0.85) to (0.85, 0.95), because the
+  best retrievers sit at 0.58 to 0.82 with no quality cost; `queries.ood_query_ratio`
+  (0.05, 0.20) to (0.5, 0.8), because short queries against long passages put good models at
+  0 to 0.65 and only a wrong model or language reaches 0.7 to 1.0; `queries.query_hubness_skewness`
+  (2, 4) to (4, 10), because good multilingual models on Korean data sit at 2.3 to 9.1 and
+  wrong-language models at 11 to 30. Baselines written with the old thresholds are reported
+  as not `comparable`
+- ANN recall tie slack reduced from `1e-6 + 1e-4 x distance` to `1e-6 + 1e-5 x distance`: the
+  old slack was about 70x float32 rounding and credited an 11th neighbor up to 7e-5 farther
+  than the 10th, inflating recall by up to +0.0016 against a strict scorer. Exact ties
+  (duplicates) are still interchangeable; `ann_recall` and `sweep` move together
+- Sampled audits: hubness, antihubs and connectivity verdicts other than `fail`, and outlier
+  verdicts other than `ok`, are marked `inconclusive` (new `Finding.inconclusive`,
+  `Evidence.inconclusive_findings`, `gate.inconclusive`, text marker `INCONCLUSIVE (sampled)`),
+  because on 200k x 384 a full-corpus connectivity `fail` (0.372) read `ok` (0.0008) on a 25%
+  sample and a hubness `warn` read `ok`. The collapse verdict is taken from the estimated full
+  share `value / fraction` (`details.estimated_full_share`), so a full-corpus `fail` no longer
+  reads `warn` on a sample. `value_range` is documented as the spread between samples, not
+  an interval for the full value
+- Sweep caveat: HNSW recall falls with corpus size, IVF recall can move either way because
+  `nlist` follows the row count (observed 0.696 at 100k to 0.955 at 500k on the clustered
+  synthetic corpus, whose n/200 centers line up with nlist)
+- README: performance table replaced with measured seconds and memory for 384, 768 and
+  1,536 dims up to 200k rows (8-vCPU EPYC 7R13, three-run medians within 2% of single runs,
+  tracemalloc within 0.04 GiB of the OS peak); Cohere ko `distance_concentration` 1.73 to 1.72;
+  all 88 "Real embeddings" verdicts reproduced; ada-002 anisotropy is `ok` under the new threshold
+- Golden evidence regenerated for the threshold change (`anisotropic.npy` is now `warn`)
+
+### Added
+
+- `docs/verification.md`: what was measured and what changed because of it;
+  Korean documents moved under `docs/ko/` (`README.md`, `verification.md`,
+  `retrieval_quality.md`), linked from each English page and from the Korean README
+- Tests moved in from the verification: `tests/test_new_features.py` (sweep latency and
+  `index_bytes` against an independent serialization, GPU/CPU agreement, compare with supplied
+  neighbors, gate table, `--fail-on none`) and `tests/test_scale_exactness.py` (exact_knn,
+  query_knn and faiss flat against float64 on six corpus shapes, sweep recall against an
+  independent strict scorer; `-m slow` for 100k rows, `-m gpu` for the GPU baseline), with
+  `tests/exactness_helpers.py` and `examples/bench_common.py` (six seeded corpus shapes and a
+  machine description)
+- `examples/benchmark_sweep.py`: index sweep per corpus shape with `--centers`, machine
+  description in the JSON; `benchmark_scale.py` takes `--corpus` and records the machine too
+
+- `compare(..., neighbors_a=, neighbors_b=)`, CLI `--neighbors-a/--neighbors-b`, MCP
+  `neighbors_a_path`/`neighbors_b_path`: neighbor lists computed on the full corpus in each
+  space (exact or from an index), so a sampled compare keeps full-corpus neighbors. Every
+  result carries `neighbor_scope` ("full" or "sample") and `neighbor_source` ("recomputed" or
+  "supplied"), the text header shows them, and a sample-scope explanation says that the
+  agreement is about the sample's own neighbor graph (on a 2k-row synthetic pair a 500-row
+  sample reports top-10 overlap 0.75 where the full corpus gives 0.57)
+- `vecscope audit --fail-on none`: never fail on the absolute thresholds, so with
+  `--baseline` only regressions decide the exit code. Every audit run ends with a `gate`
+  block (JSON) or line (text) that separates the absolute rule from the baseline rules
+  (`absolute`, `verdict_regressions`, `value_regressions`, `reasons`, `exit_code`);
+  `vecscope.cli.gate_decision` is the library call
+- `sweep`: each point carries single-query latency percentiles `latency_ms_p50/p95/p99`
+  (`--latency-queries`, MCP `latency_queries`, default 200, 0 to skip) and `index_bytes`, the
+  serialized index size; the text table shows p50, p95 and MiB, the recommendation carries
+  p95 and size, and two caveats say what the numbers are and are not
+- Sampled audits now state in the explanation of hubness, antihubs, collapse, outliers and
+  connectivity what the sampled value stands for, with the sample fraction: hubness and
+  antihubs are a lower bound (k-occurrence concentrates with density; a clustered 6k-row
+  corpus scores skewness 1.6 on all rows, 0.9 on half, 0.0 on a quarter), the collapse share
+  is about fraction times the full share, outliers and islands are those inside the sample
+- Tests (`tests/test_regression_injection.py`): a mismatched query model trips only
+  `ood_queries`; lowering HNSW `ef_search` lowers `ann_recall` monotonically into fail;
+  injected duplicates move only `collapse`, in proportion; a 25% and 50% sample keep the
+  verdict and stay within 5% on the distribution findings while hubness falls and collapse
+  scales with the fraction; compare's neighbor scope and supplied neighbors; the gate
+- `examples/benchmark_scale.py`: wall-clock and peak NumPy memory of a full and a sampled
+  audit at chosen row counts, as a Markdown table
+
+### Changed
+
+- README performance table of what a sample can say: hubness and antihubs moved from
+  "distribution estimate" to "lower bound", collapse states the fraction rule; the
+  retrieval-quality section says what the study has not shown (other domains, languages,
+  production query logs)
+
 ## [0.5.0] - 2026-10-29
 
 ### Added
