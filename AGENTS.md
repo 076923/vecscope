@@ -27,5 +27,6 @@ pytest -q
 ruff check src tests examples
 ```
 
-Update `README.md`, `docs/readme/README_ko.md`, the skill file and `CHANGELOG.md` when the
-CLI, MCP tool, findings or verdicts change. Keep the English and Korean READMEs in sync.
+Update `README.md`, `docs/ko/README.md`, the skill file and `CHANGELOG.md` when the
+CLI, MCP tool, findings or verdicts change. Keep the English and Korean READMEs in sync,
+and every `docs/*.md` with its `docs/ko/*.md` translation.

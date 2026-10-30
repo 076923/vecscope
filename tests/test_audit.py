@@ -373,10 +373,16 @@ def test_tie_aware_recall_still_counts_a_missed_unique_neighbor():
     from vecscope.diagnostics.ann_recall import tie_aware_hits
 
     assert tie_aware_hits([0.1, 0.2, 0.2, 0.2, 0.3], [0.2, 0.2, 0.2, 0.3, 0.9]) == 4  # 0.1 missed
-    # slots 1e-5 apart must not chain into one tie set: only the slot nearest to 0.10004 counts
-    # slots 1e-5 apart (tolerance ~1.1e-5): five copies of 0.10004 can fill the two slots
-    # within tolerance of it, never the farther ones
-    assert tie_aware_hits([0.1, 0.10001, 0.10002, 0.10003, 0.10004], [0.10004] * 5) == 2
+    # slots 1e-5 apart are distinct neighbors (tolerance ~2e-6 at this distance): five copies
+    # of 0.10004 fill only its own slot
+    assert tie_aware_hits([0.1, 0.10001, 0.10002, 0.10003, 0.10004], [0.10004] * 5) == 1
+    # slots 1e-6 apart are within float32 rounding and do tie: the copies fill the slots
+    # within tolerance of 0.100004, never the farther ones
+    assert tie_aware_hits([0.1, 0.100001, 0.100002, 0.100003, 0.100004], [0.100004] * 5) == 3
+    # an 11th neighbor 1e-5 farther than the 10th is a miss, not a tie (recall inflation seen
+    # with the earlier 1e-4 relative slack: docs/verification.md)
+    exact = np.array([0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.705, 0.708, 0.709, 0.7100])
+    assert tie_aware_hits(exact, np.r_[exact[:9], 0.71001]) == 9
     assert tie_aware_hits([0.1, 0.2, 0.3, 0.4, 0.5], [0.5] * 5) == 1
     # a hit must not be wasted on a slot another id could still fill (maximum matching)
     assert tie_aware_hits([0.1, 0.100005, 0.100010], [0.100010, 0.100005, 0.1]) == 3
@@ -788,8 +794,18 @@ def test_sweep_recommends_a_config():
     assert all(0.0 <= p.recall_at_k <= 1.0 for p in res.points)
     r = res.recommendation
     assert abs(r["margin"] - (r["recall_at_k"] - res.target_recall)) < 1e-9
-    assert len(res.caveats) == 3 and "corpus itself" in res.caveats[0]
+    assert len(res.caveats) == 5 and "corpus itself" in res.caveats[0]
     assert "note:" in render_sweep(res) and "margin=" in render_sweep(res)
+    assert res.latency_queries == 200  # capped by n_queries
+    for p in res.points:
+        assert p.index_bytes > 0 and p.latency_ms_p50 <= p.latency_ms_p95 <= p.latency_ms_p99
+    assert r["latency_ms_p95"] is not None and r["index_bytes"] > 0
+    assert "p95 ms" in render_sweep(res) and "MiB" in render_sweep(res)
+    skipped = sweep(x, k=5, n_queries=50, latency_queries=0)
+    assert skipped.latency_queries == 0 and all(p.latency_ms_p95 is None for p in skipped.points)
+    assert "skipped" in skipped.caveats[3] and "-" in render_sweep(skipped)
+    with pytest.raises(ValueError, match="latency_queries"):
+        sweep(x, k=5, n_queries=50, latency_queries=-1)
 
 
 def test_sweep_recommendation_margin_is_deterministic():

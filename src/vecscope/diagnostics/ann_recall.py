@@ -32,9 +32,13 @@ def tie_aware_hits(exact_dist: np.ndarray, ann_dist: np.ndarray) -> int:
 
 def tie_tolerance(kth: np.ndarray) -> np.ndarray:
     """Slack below which a returned id counts as tied with the k-th exact neighbor: float32
-    rounding of a cosine distance (about 1e-6) plus 1e-4 of the distance itself, so corpora
-    whose neighbor distances are tiny are not scored with a slack larger than the distances."""
-    return 1e-6 + 1e-4 * np.asarray(kth, dtype=np.float64)
+    rounding of a cosine distance (about 1e-6; measured at most 4.1e-7 at 768 dims) plus
+    1e-5 of the distance itself, so corpora whose neighbor distances are tiny are not scored
+    with a slack larger than the distances. An earlier 1e-4 relative term credited an 11th
+    neighbor up to 7e-5 farther than the 10th and inflated recall by up to +0.0016 against a
+    strict scorer (docs/verification.md); at 1e-5 the slack stays an order of magnitude
+    above rounding and an order below the gaps that separate distinct neighbors."""
+    return 1e-6 + 1e-5 * np.asarray(kth, dtype=np.float64)
 
 
 def ann_recall(exact_knn_idx: np.ndarray, ann_idx: np.ndarray, floor: float = 0.8,

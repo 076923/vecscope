@@ -54,3 +54,7 @@ target-version = "py310"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+  "slow: large-n exactness checks (minutes); run with -m slow",
+  "gpu: needs a faiss GPU build and a visible GPU",
+]

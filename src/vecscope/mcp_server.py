@@ -77,9 +77,11 @@ ranges verbatim; (2) separate causes using likely_causes and the other findings;
 smallest change from suggested_action, applying any vector transform to queries too; (4)
 re-audit and compare retrieval on real queries (verify_by says which number should move);
 (5) adopt only confirmed improvements. Thresholds are calibrated defaults, not a universal
-bar: a warn on a good model is common. Use sweep_index before choosing HNSW/IVF parameters,
-and compare_embeddings when two models embedded the same items (or the same model before and
-after a change) to tell item problems from model problems."""
+bar: a warn on a good model is common, and neither a fail nor all-ok is a statement about
+relevance; say so. Use sweep_index before choosing HNSW/IVF parameters, and
+compare_embeddings when two models embedded the same items (or the same model before and
+after a change) to tell item problems from model problems; quote its neighbor_scope, because
+a sampled compare without supplied neighbors describes the sample's neighbor graph only."""
 
 
 def _annotations():
@@ -119,6 +121,9 @@ def _summary(ev: dict) -> str:
         head += f" (sampled from {ev['n_total']} rows)"
     if ev.get("unstable_findings"):
         head += f"; verdict unstable across sample repeats: {', '.join(ev['unstable_findings'])}"
+    if ev.get("inconclusive_findings"):
+        head += (f"; inconclusive on this sample (not evidence of health): "
+                 f"{', '.join(ev['inconclusive_findings'])}")
     if not bad:
         return head + "; all findings ok"
     parts = [f"{f['name']}={f['value']:.3g} {f['verdict']} ({f['healthy_range']})" for f in bad]
@@ -154,8 +159,13 @@ def audit_embeddings(
     `sample`: rows above this are audited on a seeded random subset (0 = audit every row;
     exact k-NN is quadratic, minutes for 100k rows on a laptop; peak memory about 2 GiB).
     `sample_repeats`: when sampling applies, re-audit this many independent samples; each
-    finding then carries `value_range` [min, max] and `verdict_stable`, and the response
-    lists `unstable_findings`. Costs that many times the audit time.
+    finding then carries `value_range` [min, max] (the spread between samples, not an
+    interval for the full-corpus value) and `verdict_stable`, and the response lists
+    `unstable_findings`. Costs that many times the audit time. A sampled audit also lists
+    `inconclusive_findings`: hubness, antihubs and connectivity verdicts other than fail,
+    and outlier verdicts other than ok, which the sample systematically mis-states; do not
+    report them as healthy. The collapse verdict uses the estimated full share
+    (`details.estimated_full_share`).
     `thresholds`: override default (warn, fail) pairs, e.g. {"hubness.skewness": [2.5, 5]}.
     `verbose=False` drops details, causes and actions for findings that are ok, which cuts
     the response roughly in half.
@@ -193,16 +203,22 @@ def sweep_index(
     margin: float = 0.02,
     timing_repeats: int = 3,
     n_queries: int = 1000,
+    latency_queries: int = 200,
 ) -> dict:
     """Sweep HNSW (M, ef_search) and IVF (nprobe) parameters on an embedding file and report
-    recall@k against exact k-NN, build time and queries per second for each setting, plus
-    the fastest configuration that reaches `target_recall`. The recommendation carries
+    recall@k against exact k-NN, build time, queries per second, single-query latency
+    percentiles (p50/p95/p99 ms) and the serialized index size for each setting, plus the
+    fastest configuration that reaches `target_recall`. The recommendation carries
     `margin` (recall minus target) and is marked `tight` with a `safer_alternative` when the
     margin is under `margin`, because recall at fixed parameters falls as the corpus grows;
     relay `caveats` to the user. qps is the median of `timing_repeats` runs. Needs the faiss
-    extra (`pip install "vecscope[index]"`). Read-only; timings are relative to this machine.
+    extra (`pip install "vecscope[index]"`). Read-only; timings are relative to this machine
+    and process, not a serving latency.
     `device` is "auto" (GPU when the faiss build has one), "cpu" or "gpu"; HNSW is CPU-only.
-    `n_queries` caps the queries timed (sampled from the corpus, or from `queries_path`).
+    `n_queries` caps the queries timed (sampled from the corpus, or from `queries_path`);
+    pass real query traffic as `queries_path` whenever it exists, because the best setting
+    on corpus-drawn queries can differ. `latency_queries` are searched one at a time per
+    setting for the percentiles (0 = skip).
     """
     from vecscope.sweep import sweep
 
@@ -210,14 +226,19 @@ def sweep_index(
         x = load_vectors(check_path(path))
         q = load_vectors(check_path(queries_path, "queries_path")) if queries_path else None
         res = sweep(x, k=k, queries=q, n_queries=n_queries, target_recall=target_recall,
-                    device=device, margin=margin, timing_repeats=timing_repeats).to_dict()
+                    device=device, margin=margin, timing_repeats=timing_repeats,
+                    latency_queries=latency_queries).to_dict()
     except (*_USER_ERRORS, RuntimeError) as e:
         raise _user_error(e) from e
     r = res["recommendation"]
     params = ", ".join(f"{a}={b}" for a, b in r["params"].items())
+    lat = (f", p95 {r['latency_ms_p95']:.3f} ms single-query"
+           if r.get("latency_ms_p95") is not None else "")
+    size = f", index {r['index_bytes'] / 2**20:.1f} MiB" if r.get("index_bytes") is not None else ""
     res["summary"] = (f"recommend {r['index']} ({params}): recall@{k}={r['recall_at_k']:.3f} "
                       f"(margin {r['margin']:+.3f}{', tight' if r.get('tight') else ''}), "
-                      f"{r['queries_per_second']:.0f} qps on {res['device']}; {r['reason']}")
+                      f"{r['queries_per_second']:.0f} qps on {res['device']}{lat}{size}; "
+                      f"{r['reason']}")
     return res
 
 
@@ -228,6 +249,8 @@ def compare_embeddings(
     k: int = 10,
     near_dup_cos: float = 0.99,
     sample: int = 100_000,
+    neighbors_a_path: str | None = None,
+    neighbors_b_path: str | None = None,
 ) -> dict:
     """Compare two embedding files whose rows are the same items in the same order (two
     models, or one model before and after a transform). Reports how often the nearest
@@ -236,13 +259,25 @@ def compare_embeddings(
     No verdicts: duplicates flagged by both spaces with the same partner belong to the items;
     duplicates flagged by one space only point at that model. Above `sample` rows a seeded
     subset is compared (0 = all rows).
+
+    Read `neighbor_scope` before quoting the agreement: "sample" means the neighbors were
+    recomputed inside the sampled rows, so the numbers describe the sample's own neighbor
+    graph and are usually higher than the full corpus's. To compare full-corpus rankings,
+    pass `neighbors_a_path` and `neighbors_b_path` (both): (n x >= k) neighbor ids per row
+    computed on the full corpus in each space, exact or from the production index; the
+    rows may still be sampled but their neighbors are not (`neighbor_scope` = "full",
+    `neighbor_source` = "supplied").
     """
     from vecscope.compare import compare
 
     try:
+        if (neighbors_a_path is None) != (neighbors_b_path is None):
+            raise ValueError("neighbors_a_path and neighbors_b_path go together")
+        na = load_neighbors(check_path(neighbors_a_path, "neighbors_a_path")) if neighbors_a_path else None
+        nb = load_neighbors(check_path(neighbors_b_path, "neighbors_b_path")) if neighbors_b_path else None
         res = compare(load_vectors(check_path(path_a, "path_a")),
                       load_vectors(check_path(path_b, "path_b")), k=k, near_dup_cos=near_dup_cos,
-                      sample=sample or None).to_dict()
+                      sample=sample or None, neighbors_a=na, neighbors_b=nb).to_dict()
     except _USER_ERRORS as e:
         raise _user_error(e) from e
     return {"summary": res["explanation"], **res}

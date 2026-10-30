@@ -1,6 +1,6 @@
 <div align="center">
 
-**English** · [한국어](https://github.com/076923/vecscope/blob/main/docs/readme/README_ko.md)
+**English** · [한국어](https://github.com/076923/vecscope/blob/main/docs/ko/README.md)
 
 # vecscope
 
@@ -113,18 +113,18 @@ vecscope 0.4.0  n=3000 dim=128 k=10  verdict=FAIL
 | --- | --- | --- | --- | --- | --- |
 | `hubness` | skewness of the k-occurrence distribution | < 2.0 | 2.0 to 4.0 | ≥ 4.0 | a few items appear in everyone's k-NN list and will top every query |
 | `antihubs` | share of items never retrieved as a neighbor, above the random baseline e^-k | < 5% | 5 to 20% | ≥ 20% | part of the corpus is unreachable through k-NN |
-| `anisotropy` | mean cosine of random pairs | < 0.50 | 0.50 to 0.85 | ≥ 0.85 | vectors crowd into a narrow cone, so scores compress into a band |
+| `anisotropy` | mean cosine of random pairs | < 0.85 | 0.85 to 0.95 | ≥ 0.95 | vectors crowd into a narrow cone, so scores compress into a band; good retrievers sit well below this without losing nDCG, so only extreme values are flagged |
 | `effective_rank` | participation ratio of the covariance spectrum / attainable rank (dim, or rows − 1 when rows do not exceed dims) | ≥ 0.10 | 0.05 to 0.10 | < 0.05 | most dimensions carry nothing |
 | `collapse` | share of rows with a neighbor at cosine ≥ 0.99 or an exact copy (zero vectors included); details give the duplicate groups and sample pairs | < 2% | 2 to 10% | ≥ 10% | top-k is spent on copies of the same item |
-| `ann_recall` | recall@k of ANN neighbors vs exact k-NN | ≥ 0.95 | 0.85 to 0.95 | < 0.85 | the index, not the model, is losing results |
+| `ann_recall` | recall@k of ANN neighbors vs exact k-NN, counted by distance so that exact ties (duplicates) are interchangeable; the tie slack is 1e-6 + 1e-5 x distance, about ten times float32 rounding | ≥ 0.95 | 0.85 to 0.95 | < 0.85 | the index, not the model, is losing results |
 | `rogue_dimensions` | variance of the largest dimension as a multiple of the uniform 1/dim share | < 10x | 10 to 50x | ≥ 50x | a few coordinates decide every cosine score |
 | `norms` | coefficient of variation of vector norms | < 0.10 | 0.10 to 0.30 | ≥ 0.30 | inner-product search favors long vectors; zero vectors are reported too |
 | `metric_mismatch` | top-k overlap between cosine and inner product | ≥ 0.90 | 0.70 to 0.90 | < 0.70 | the index metric changes which results come back |
 | `distance_concentration` | relative contrast (random distance / nearest-neighbor distance) divided by that of isotropic noise at the same dimension and row count | ≥ 1.4 | 1.1 to 1.4 | < 1.1 | the nearest neighbor is barely closer than a random item; 1.0 is pure noise |
 | `outliers` | share of items with an abnormally far nearest neighbor | < 1% | 1 to 5% | ≥ 5% | junk, empty or foreign items; ids are listed in `details` |
 | `connectivity` | share of items in small k-NN graph islands | < 1% | 1 to 10% | ≥ 10% | self-contained groups too small to be clusters; HNSW attaches them badly or never reaches them |
-| `ood_queries` | share of queries farther from the corpus than 99% of corpus items are from each other | < 5% | 5 to 20% | ≥ 20% | queries and corpus do not share a space: wrong model, missing query prefix, uncovered topics |
-| `query_hubness` | skewness of corpus k-occurrence over query results | < 2.0 | 2.0 to 4.0 | ≥ 4.0 | the same few items answer most queries |
+| `ood_queries` | share of queries farther from the corpus than 99% of corpus items are from each other | < 50% | 50 to 80% | ≥ 80% | queries and corpus do not share a space: wrong model, missing query prefix, uncovered topics. Short queries against long passages are farther by design (good models score 0 to 65% on BEIR), so only a large share is flagged |
+| `query_hubness` | skewness of corpus k-occurrence over query results | < 4.0 | 4.0 to 10.0 | ≥ 10.0 | the same few items answer most queries; the value tracks nDCG@10 across models (Spearman −0.5 to −0.9), wrong-language models score 11 to 30 |
 
 Every finding in the JSON carries its `healthy_range`, `warn_at` and `fail_at`, plus a `details`
 block with the raw numbers. For `anisotropy` that block includes the cosine the same vectors
@@ -137,8 +137,9 @@ hypotheses, not prescriptions: apply the smallest change, re-audit, and compare 
 real queries before adopting it. The [agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) spells out
 that loop.
 
-Thresholds are defaults calibrated on [seven public models](#real-embeddings); they are a
-starting point for diagnosis, not a universal quality bar. Embedding spaces differ by model,
+Thresholds are defaults calibrated on [seven public models](#real-embeddings) and re-checked
+against 19 models on three labeled datasets ([verification](https://github.com/076923/vecscope/blob/main/docs/verification.md));
+they are a starting point for diagnosis, not a universal quality bar. Embedding spaces differ by model,
 language, domain and dimensionality, so a `warn` on a good model is normal and a clean audit
 does not guarantee good search. Override any pair per run:
 
@@ -176,7 +177,8 @@ no verdicts; it tells the agent *where* a problem lives.
 ## Index sweep
 
 `vecscope sweep` builds HNSW and IVF indexes with a small parameter grid and reports, for each
-setting, recall@k against exact k-NN, build time and queries per second on this corpus. It then
+setting, recall@k against exact k-NN, build time, queries per second, single-query latency
+percentiles (p50/p95/p99) and the serialized index size on this corpus. It then
 recommends the fastest setting that reaches the target recall (default 0.95) and reports its
 `margin` over the target. A margin under 0.02 marks the recommendation `tight` and names the
 fastest setting with real headroom, because recall at fixed parameters falls as the corpus
@@ -189,20 +191,32 @@ vecscope sweep embeddings.npy -k 10 --target-recall 0.95
 ```
 
 ```text
-  index params                                       recall  build s       qps  dev
- *hnsw  M=8, ef_construction=100, ef_search=16        0.988     0.49    588131  cpu
- *hnsw  M=16, ef_construction=100, ef_search=32       1.000     0.48    238146  cpu
- *ivf   nlist=76, nprobe=16                           1.000     0.14    182966  cpu
-  recommendation: hnsw (M=8, ef_construction=100, ef_search=16)  recall=0.988  qps=588131  margin=+0.038  (fastest configuration with recall@10 >= 0.95)
-  note: recall is measured on 1000 queries drawn from the corpus itself; real query traffic can differ, pass it as queries when available
-  note: recall at fixed parameters falls as the corpus grows; a sweep on a sample is optimistic for the full corpus, re-run at production size before fixing parameters
+  index params                                        recall  build s       qps  p50 ms  p95 ms     MiB  dev
+ *hnsw  M=8, ef_construction=100, ef_search=16         0.987     0.35    237954   0.034   0.051     0.6  cpu
+ *hnsw  M=16, ef_construction=100, ef_search=32        0.998     1.23    165139   0.084   0.108     0.8  cpu
+ *ivf   nlist=76, nprobe=64                            0.999     0.14     33251   0.087   0.095     0.4  cpu
+  recommendation: hnsw (M=8, ef_construction=100, ef_search=16)  recall=0.987  qps=237954  p95=0.051ms  index=0.6MiB  margin=+0.037  (fastest configuration with recall@5 >= 0.95)
+  note: recall is measured on 200 queries drawn from the corpus itself; real query traffic can differ, pass it as queries when available
+  note: HNSW recall at fixed parameters falls as the corpus grows, so a sweep on a sample is optimistic for HNSW; IVF nlist is set from the row count (4*sqrt(n)), so its recall at a given nprobe can move either way with size. Re-run at production size before fixing parameters
   note: queries_per_second is the median of 3 runs on this machine with one query batch; it ranks settings against each other and is not a serving throughput
+  note: latency_ms_p50/p95/p99 time 200 queries one at a time in this process, with no network, concurrency or serving stack; compare settings with them, do not quote them as service latency
+  note: index_bytes is the serialized index (vectors plus graph or lists); the process needs more while building, and a product-quantized index would be smaller
 ```
 
-Queries default to a seeded sample of the corpus; pass `--queries` to time real queries. Each
-setting is timed three times and the median kept (`--timing-repeats`); the notes at the end
+Queries default to a seeded sample of the corpus; pass `--queries` to time real queries,
+and do so whenever a query log exists: the setting that is fastest at the target recall on
+corpus-drawn queries can differ from the one real traffic needs. Each setting is timed three
+times and the median kept (`--timing-repeats`); `--latency-queries` (default 200, 0 to skip)
+are also searched one at a time for the percentiles, and `index_bytes` is the size of the
+serialized index, so a setting can be judged on memory as well as speed. The notes at the end
 are part of the JSON as `caveats`. The MCP tool is `sweep_index`, with the same options as
-parameters (`n_queries`, `target_recall`, `device`, `margin`, `timing_repeats`).
+parameters (`n_queries`, `target_recall`, `device`, `margin`, `timing_repeats`,
+`latency_queries`).
+
+The sweep answers one question: which parameters reach the target recall on this corpus
+and these queries, and what they cost. The numbers are relative to this machine and this
+process; confirm the chosen setting in the serving environment with its own latency,
+throughput and memory measurements before fixing it.
 
 With a GPU build of faiss (`pip install faiss-gpu-cu12` on Linux) the IVF index and the exact
 baseline run on the GPU automatically; the output header names the device. HNSW has no GPU
@@ -224,7 +238,7 @@ vecscope compare clip.npy lens.npy -k 10          # rows must be the same items 
 ```
 
 ```text
-vecscope 0.4.0  compare  n=3000 dim=128/128 k=10
+vecscope 0.6.0  compare  n=3000 dim=128/128 k=10  neighbors=recomputed/full
   nn1_agreement=0.7050  topk_overlap=0.8537  topk_overlap_p10=0.7000  rows_with_no_overlap=0.0000
   near_dup A=0.0400  B=0.0400  both=0.0400  only_A=0.0000  only_B=0.0000  same_nearest_among_both=1.0000
     the two spaces share the nearest neighbor for 70.5% of rows and 85.4% of their top-10 lists
@@ -236,7 +250,23 @@ vecscope 0.4.0  compare  n=3000 dim=128/128 k=10
     1810: 1229 / 1229  0.50
 ```
 
-The MCP tool is `compare_embeddings`.
+Read `neighbor_scope` before quoting the agreement. Above `--sample` rows (default 100k) a
+seeded subset is compared, and by default the neighbors are recomputed exactly *inside that
+subset*: an item whose true neighbors fell outside the sample is compared on substitutes,
+which agree more often than the real ones. On a 2,000-row synthetic pair of spaces, a
+500-row sample reports a top-10 overlap of 0.75 where the full corpus gives 0.57. Such a
+result is marked `neighbor_scope: sample`, and the explanation says so. To compare
+full-corpus rankings on a sample of rows, pass neighbor lists computed on the full corpus
+in each space, exact or from the production index (an `(n x >= k)` id file, self ids and
+negative fillers are dropped):
+
+```bash
+vecscope compare clip.npy lens.npy -k 10 --neighbors-a clip_knn.npy --neighbors-b lens_knn.npy
+```
+
+The result is then `neighbors=supplied/full`: the rows may be sampled, their neighbors are
+not, and the agreement is between the lists you supplied, exact or approximate as they were
+computed. The MCP tool is `compare_embeddings` (`neighbors_a_path`, `neighbors_b_path`).
 
 ## Use with an agent
 
@@ -354,6 +384,20 @@ of a note, which is the right policy for a gate, since a diff across different s
 measures the settings, not the corpus. The library call is
 `diff_evidence(new, old, tolerances={...})`.
 
+Two different rules can fail a run, and the output keeps them apart. The absolute rule is
+the verdict against the thresholds (`--fail-on fail` by default, `--fail-on warn` to be
+strict); the baseline rules are `regressions` (a verdict got worse) and `value_regressions`
+(a value worsened beyond its tolerance). The defaults are calibrated on public models, so a
+domain whose healthy corpus sits at `warn` or `fail` on some finding should not be blocked
+by the absolute rule at all: `--fail-on none --baseline baseline.json` judges only the
+change against the reviewed baseline. Every run ends with a `gate` block (JSON) or line
+(text) that names the rule that decided:
+
+```text
+  gate: FAIL; verdict fail reaches --fail-on fail; verdict worse than baseline: collapse
+  gate: pass (baseline)
+```
+
 Treat the gate as a trend tracker first. Which tolerance is "too much" depends on how the
 findings relate to retrieval quality on your own queries; the
 [retrieval quality study](#do-the-findings-predict-retrieval-quality) shows that relation for
@@ -370,6 +414,7 @@ vecscope audit vectors.npy --queries queries.npy       # add query-side findings
 vecscope audit vectors.npy --clusters 10               # append a per-cluster report (at most n/10 clusters)
 vecscope audit vectors.npy --thresholds th.json         # override (warn, fail) pairs
 vecscope audit vectors.npy --fail-on warn              # exit 1 on WARN as well
+vecscope audit vectors.npy --fail-on none --baseline old.json   # ignore the absolute thresholds; fail only on regressions
 vecscope audit vectors.npy --baseline old.json         # diff against an earlier --json run; exit 1 on regression
 vecscope audit vectors.npy --baseline old.json --tolerances tol.json   # also exit 1 when a value worsens beyond its tolerance
 vecscope audit vectors.npy --baseline old.json --require-comparable    # exit 2 when the baseline used different settings
@@ -380,7 +425,9 @@ vecscope sweep vectors.npy --target-recall 0.95        # HNSW/IVF parameter swee
 vecscope sweep vectors.npy --device gpu                # IVF on the GPU (faiss GPU build)
 vecscope sweep vectors.npy --margin 0.05               # headroom under which the pick is marked tight (default 0.02)
 vecscope sweep vectors.npy --n-queries 2000 --timing-repeats 5   # queries to time (default 1000), timing runs per setting (default 3)
+vecscope sweep vectors.npy --latency-queries 0         # skip the single-query latency percentiles (default 200 queries)
 vecscope compare a.npy b.npy -k 10                     # agreement between two embeddings of the same rows
+vecscope compare a.npy b.npy --neighbors-a a_knn.npy --neighbors-b b_knn.npy   # full-corpus neighbors on a sample of rows
 ```
 
 ## Input formats
@@ -422,21 +469,36 @@ Exact k-NN is quadratic in the number of rows: doubling the rows roughly quadrup
 and a full audit (`--sample 0`) of 100k rows takes minutes on a laptop. The k-NN pass works in
 row blocks sized to keep its distance matrix near 1 GiB whatever the row count; the other
 passes need a few float32 copies of the matrix, so the peak grows with rows x dims at roughly
-four times the matrix size. The peak tracked by Python for the audit itself (NumPy only, single
-process; the process needs the input matrix on top of that):
+four times the matrix size. Measured on an 8-vCPU AMD EPYC 7R13 with 8 BLAS threads (NumPy
+only, single process, clustered synthetic corpus, k=10); memory is the peak the audit itself
+allocates, the input matrix comes on top. A three-run median in separate processes agreed with
+these single runs within 2%, and the OS peak memory within 0.04 GiB:
 
-| rows | dim | peak memory |
-|---|---|---|
-| 10,000 | 384 | 0.4 GiB |
-| 10,000 | 1,536 | 0.4 GiB |
-| 50,000 | 384 | 1.6 GiB |
-| 50,000 | 1,536 | 1.8 GiB |
-| 100,000 | 768 | 1.9 GiB |
+| rows | dim | seconds | peak memory (input excluded) |
+|---|---|---|---|
+| 10,000 | 384 | 1.3 | 0.40 GiB |
+| 10,000 | 768 | 2.0 | 0.41 GiB |
+| 10,000 | 1,536 | 3.6 | 0.44 GiB |
+| 50,000 | 384 | 17 | 1.63 GiB |
+| 50,000 | 768 | 23 | 1.70 GiB |
+| 50,000 | 1,536 | 36 | 1.84 GiB |
+| 100,000 | 384 | 65 | 1.71 GiB |
+| 100,000 | 768 | 86 | 1.85 GiB |
+| 100,000 | 1,536 | 130 | 3.45 GiB |
+| 200,000 | 768 | 338 | 3.46 GiB |
+| 200,000, default 100k sample | 768 | 85 | 2.14 GiB |
 
-The default 100k-row sample keeps any corpus inside the last row. `--queries` adds one more
+Time grows close to n² (3.5 to 3.9x per doubling from 50k up); memory is flat from 50k rows
+at 384 and 768 dims because the k-NN block shrinks with n, and steps up at 1,536 dims and at
+200k rows. The default 100k-row sample keeps any corpus near the 100k rows. `--queries` adds one more
 pass over the corpus per query batch, and
 `metric_mismatch` adds a second k-NN pass only when vector norms vary. A sampled audit is a
 statement about the sample: use `--sample 0` when you need every island and outlier counted.
+`python examples/benchmark_scale.py --rows 50000 100000 --dim 768` re-measures the table on
+your machine (wall-clock and the peak NumPy allocates inside the audit) at the sizes you
+care about, and `examples/benchmark_sweep.py` does the same for the index sweep; both take
+`--corpus` (clustered, isotropic, anisotropic, duplicates, lowrank, zipf) and record the
+machine in their JSON.
 
 Blocking bounds memory, not work: the exact pass still costs about n² × dim multiply-adds,
 so a million rows at 768 dims is roughly 100 times the 100k-row figure. For corpora that
@@ -445,11 +507,21 @@ for the findings that need every row. Which findings those are:
 
 | finding | what a sample gives | needs every row |
 |---|---|---|
-| hubness, antihubs, anisotropy, effective_rank, rogue_dimensions, norms, metric_mismatch, distance_concentration | a distribution estimate; stable on 100k rows (`--sample-repeats` shows the spread) | no |
-| collapse | the duplicate *share*; pairs outside the sample are not counted | to count or list every duplicate |
-| outliers, connectivity | the *share* of outliers and islands; the ids of the ones in the sample | to find every outlier or island |
+| anisotropy, effective_rank, rogue_dimensions, norms, metric_mismatch, distance_concentration | a distribution estimate: within 2.3% of the full value on 200k x 384 with 100k, 50k and 20k samples, and the verdict holds | no |
+| hubness, antihubs | a *lower bound*: k-occurrence concentrates with density, so the same corpus scores less hubness on a smaller sample (skewness 2.6 `warn` on all 200k rows, 1.15 on a quarter, 0.16 on a tenth). Verdicts other than `fail` are marked inconclusive | to measure the corpus's own hubness |
+| collapse | the duplicate *share* seen inside the sample: a pair counts only when both rows were drawn, so the sampled share is 0.96 to 1.03 x (sample fraction x full share); the verdict uses the estimated full share | to count or list every duplicate |
+| outliers | an estimate that over-counts on small samples (3.9x at a tenth); verdicts other than `ok` are marked inconclusive | to find every outlier |
+| connectivity | the islands of the sample's own k-NN graph, which miss most islands of the corpus (37% of rows in islands scored 0.08% on a quarter sample); verdicts other than `fail` are marked inconclusive | yes, to judge connectivity at all |
 | ann_recall | not available on a sample: ids must line up with the ANN file | yes (`--sample 0`) |
 | ood_queries, query_hubness | reference distances from the sample; every query is scored | no |
+
+A sampled audit therefore lists `inconclusive_findings` (the verdicts the table marks
+inconclusive), flags them `INCONCLUSIVE (sampled)` in the text output and names them in the
+gate line, takes the collapse verdict from `details.estimated_full_share` (the sampled share
+divided by the sample fraction), and repeats each caveat in the finding's explanation next to
+the number. The 200k-row figures come from the
+[verification](https://github.com/076923/vecscope/blob/main/docs/verification.md);
+`tests/test_regression_injection.py` checks the same properties at 6k rows on every run.
 
 Every number is exact for the rows it saw; vecscope never substitutes an approximate
 neighbor search for the exact one. The only approximation is the choice of rows.
@@ -482,24 +554,26 @@ reproduces it, no model download needed.
 |---|---|---|---|---|---|---|---|---|
 | hubness | 1.47 | 1.16 | 1.56 | 1.21 | 1.59 | 1.85 | 1.43 | 2.28<br>warn |
 | antihubs | 0.009 | 0.005 | 0.013 | 0.005 | 0.022 | 0.026 | 0.019 | 0.013 |
-| anisotropy | 0.333 | 0.228 | 0.692<br>warn | 0.086 | 0.026 | 0.307 | 0.330 | 0.210 |
+| anisotropy | 0.333 | 0.228 | 0.692 | 0.086 | 0.026 | 0.307 | 0.330 | 0.210 |
 | effective_rank | 0.158 | 0.178 | 0.090<br>warn | 0.148 | 0.285 | 0.143 | 0.087<br>warn | 0.136 |
 | collapse | 0.002 | 0.002 | 0.000 | 0.000 | 0.001 | 0.000 | 0.017 | 0.000 |
 | rogue_dimensions | 3.2 | 3.2 | 3.0 | 2.5 | 1.7 | 1.8 | 2.0 | 1.8 |
 | norms | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.007 |
 | metric_mismatch | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 0.952 |
-| distance_concentration | 1.73 | 1.74 | 1.74 | 1.43 | 1.78 | 1.84 | 2.21 | 1.62 |
+| distance_concentration | 1.72 | 1.74 | 1.74 | 1.43 | 1.78 | 1.84 | 2.21 | 1.62 |
 | outliers | 0.001 | 0.001 | 0.000 | 0.000 | 0.001 | 0.002 | 0.003 | 0.000 |
 | connectivity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
 
-Besides hubness on gte-base and `effective_rank` on ada-002 and mxbai-large, the only `warn`
-is ada-002's well-known anisotropy: its mean unit vector has norm 0.83, so unrelated documents
-start from a cosine floor near 0.7. Its successor is
+A re-measurement of this table reproduced all 88 verdicts and corrected one printed value (Cohere ko distance_concentration, 1.73 to 1.72). The only
+`warn`s are hubness on gte-base and `effective_rank` on ada-002 and mxbai-large. ada-002's
+well-known anisotropy (0.692) sat at `warn` under the earlier threshold of 0.5: its mean
+unit vector has norm 0.83, so unrelated documents start from a cosine floor near 0.7. Its
+successor is
 isotropic on the same corpus (norm 0.29). Centering brings every model here to a random-pair
 cosine of 0.00, which is why the finding reports that number. Hubness skewness of 1.2 to 1.9
 is the normal range for text embeddings, so the `warn` threshold sits at 2.0; gte-base on
-arXiv abstracts sits just above it. The anisotropy thresholds (0.5, 0.85) come from the
-retrieval-quality study below, where the best models sit between 0.58 and 0.81.
+arXiv abstracts sits just above it. The anisotropy thresholds (0.85, 0.95) come from the
+retrieval-quality study below.
 
 ## Do the findings predict retrieval quality?
 
@@ -514,7 +588,8 @@ cosine search, for eight public models and for controlled defects injected into 
   drop is monotone in the defect level. Queries embedded with the wrong
   model score `ood_queries` = 1.0.
 - **Across good models the geometry findings do not rank the models.** The best models on both
-  datasets (gte-base, bge, e5) have the *highest* anisotropy (0.58 to 0.81) and ordinary
+  datasets (gte-base, bge, e5) have the *highest* anisotropy (0.58 to 0.82, counting the 19
+  models of the [verification](https://github.com/076923/vecscope/blob/main/docs/verification.md)) and ordinary
   effective rank. What does separate the weak models is `norms` with `metric_mismatch`
   (unnormalized outputs) and `hubness`, at Spearman |rho| of 0.4 to 0.8 with nDCG@10.
 - **Anisotropy alone does not hurt ranking.** Adding a shared offset until the random-pair
@@ -522,7 +597,12 @@ cosine search, for eight public models and for controlled defects injected into 
   thresholds and score calibration break; `distance_concentration` is the finding that moves
   when the signal itself is lost.
 
-The `anisotropy` and `distance_concentration` thresholds were recalibrated from this study.
+The `anisotropy` and `distance_concentration` thresholds were set from this study; the
+[verification](https://github.com/076923/vecscope/blob/main/docs/verification.md) on 19
+models and a Korean dataset then moved `anisotropy`, `ood_queries` and `query_hubness`. What
+neither covers is how well `warn` and `fail` predict a quality drop in other domains or on
+production query logs. Until that is measured for your domain, read a verdict as a reason to
+look and a baseline regression as a reason to compare retrieval, not as a quality score.
 
 ### Calibrating thresholds to your domain
 
@@ -575,6 +655,13 @@ To see how much the sample itself moves a number, pass `--sample-repeats 3` (MCP
 `value_range` (minimum to maximum across samples) and `verdict_stable` to every finding, and
 lists `unstable_findings` at the top level. A finding whose verdict flips between samples
 should be read as borderline, not as a property of the corpus. The cost is three audits.
+`value_range` is the spread between samples, not an interval that contains the full-corpus
+value: hubness is a lower bound on every sample, and even a very stable finding can sit a
+little outside the range of three samples.
+
+Not every finding means the same thing on a sample: hubness is understated, outliers
+overcounted, islands mostly invisible. The [performance](#performance) table says what each
+finding can stand for and which verdicts a sampled audit marks `inconclusive`.
 
 </details>
 
@@ -601,6 +688,7 @@ JSON. The skill file describes both paths.
 
 - [Agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md): when to run the audit and what to do with each verdict
 - [Retrieval-quality study](https://github.com/076923/vecscope/blob/main/docs/retrieval_quality.md): every finding against nDCG@10 on labeled data
+- [Verification](https://github.com/076923/vecscope/blob/main/docs/verification.md): exactness, recall scoring, the sampling claims, performance, and 19 models on 3 labeled datasets
 - [Examples](https://github.com/076923/vecscope/tree/main/examples/): synthetic matrices, the calibration script and the retrieval-quality study
 - [Changelog](https://github.com/076923/vecscope/blob/main/CHANGELOG.md)
 

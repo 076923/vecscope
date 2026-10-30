@@ -1,6 +1,6 @@
 {
  "tool": "vecscope",
- "version": "0.4.0",
+ "version": "0.6.0",
  "n": 3000,
  "dim": 128,
  "k": 10,
@@ -33,7 +33,8 @@
    "suggested_action": "re-rank top-k with mutual k-NN or local scaling; if anisotropy also fails, center first",
    "verify_by": "re-run the audit on the transformed vectors and compare hubness.skewness and details.hub_share_top1pct; check that recall on held-out queries did not drop",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "antihubs",
@@ -56,13 +57,14 @@
    "suggested_action": "inspect a sample of never-retrieved items; drop empty inputs, then apply the hubness fix",
    "verify_by": "antihub_excess (antihub_ratio minus the random baseline) should fall below warn_at after the fix; spot-check that the dropped items were genuinely empty",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "anisotropy",
    "metric": "mean_random_cosine",
    "value": 0.8731670910623341,
-   "verdict": "fail",
+   "verdict": "warn",
    "explanation": "random pairs have mean cosine 0.873 (isotropic ~0); mean unit vector has norm 0.93; centering would bring the cosine to -0.000.",
    "details": {
     "dim": 128,
@@ -74,10 +76,10 @@
     "max_attainable_rank": 128,
     "effective_rank_ratio": 0.5406897068023682
    },
-   "warn_at": 0.5,
-   "fail_at": 0.85,
+   "warn_at": 0.85,
+   "fail_at": 0.95,
    "lower_is_worse": false,
-   "healthy_range": "ok < 0.5, warn >= 0.5, fail >= 0.85",
+   "healthy_range": "ok < 0.85, warn >= 0.85, fail >= 0.95",
    "likely_causes": [
     "model emits a large shared component (common in older text embedding models)",
     "un-normalized vectors with a constant offset"
@@ -85,7 +87,8 @@
    "suggested_action": "subtract the corpus mean vector and re-normalize, applying the same transform to queries; details.mean_random_cosine_after_centering shows the expected result",
    "verify_by": "re-audit the centered vectors; then compare retrieval quality on real queries before and after, because centering changes the ranking",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "effective_rank",
@@ -112,7 +115,8 @@
    "suggested_action": "if rogue_dimensions also fails, standardize dimensions; otherwise consider PCA or Matryoshka truncation to the effective rank to cut index size",
    "verify_by": "re-audit after the transform; recall@k of the truncated index against the full exact k-NN should stay above 0.95",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "collapse",
@@ -145,7 +149,8 @@
    "suggested_action": "read details.largest_near_duplicate_groups: a few huge groups point at an embedding failure or boilerplate (re-embed or fix chunking), many small groups at duplicate items (deduplicate or collapse them at serving time); details.sample_pairs lists row pairs to inspect",
    "verify_by": "near_duplicate_ratio should drop below warn_at; top-k on sample queries should no longer repeat the same item",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "rogue_dimensions",
@@ -174,7 +179,8 @@
    "suggested_action": "z-score each dimension or drop details.rogue_dims before indexing; apply the same transform to queries",
    "verify_by": "top1_dim_variance_ratio falls below warn_at; retrieval quality on real queries does not regress",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "norms",
@@ -200,7 +206,8 @@
    "suggested_action": "drop zero vectors; L2-normalize before indexing if cosine ranking is intended",
    "verify_by": "norm_cv near 0 and zero_norm_ratio 0 on re-audit; metric_mismatch returns to 1.0",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "metric_mismatch",
@@ -225,7 +232,8 @@
    "suggested_action": "decide which metric the index uses; normalize vectors if cosine is intended, or keep norms deliberately if length should carry relevance",
    "verify_by": "topk_overlap above warn_at, or a documented decision to keep inner product",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "distance_concentration",
@@ -255,7 +263,8 @@
    "suggested_action": "try a different model or dimensionality reduction; add a re-ranker over a larger candidate set",
    "verify_by": "contrast_over_noise rises above warn_at; expect ann_recall to improve as well",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "outliers",
@@ -292,7 +301,8 @@
    "suggested_action": "inspect details.sample_ids; remove or re-embed them",
    "verify_by": "outlier_ratio below warn_at; the removed items were confirmed irrelevant",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   },
   {
    "name": "connectivity",
@@ -319,7 +329,8 @@
    "suggested_action": "inspect details.sample_ids; deduplicate or merge; for HNSW raise M / ef_construction",
    "verify_by": "island_ratio below warn_at; ANN recall measured on items from former islands is comparable to the rest",
    "value_range": null,
-   "verdict_stable": null
+   "verdict_stable": null,
+   "inconclusive": false
   }
  ],
  "n_total": 3000,
@@ -336,8 +347,8 @@
    0.2
   ],
   "anisotropy.mean_random_cosine": [
-   0.5,
-   0.85
+   0.85,
+   0.95
   ],
   "anisotropy.effective_rank_ratio": [
    0.1,
@@ -376,17 +387,18 @@
    0.1
   ],
   "queries.ood_query_ratio": [
-   0.05,
-   0.2
+   0.5,
+   0.8
   ],
   "queries.query_hubness_skewness": [
-   2.0,
-   4.0
+   4.0,
+   10.0
   ]
  },
  "sample_repeats": 1,
  "unstable_findings": [],
  "near_dup_cos": 0.99,
+ "inconclusive_findings": [],
  "schema_version": 1,
- "verdict": "fail"
+ "verdict": "warn"
 }

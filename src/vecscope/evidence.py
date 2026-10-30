@@ -26,12 +26,15 @@ from vecscope.diagnostics import (
 )
 
 # Default verdict thresholds: (warn, fail). Calibrated on seven public embedding models
-# (see README "Real embeddings"); they are a starting point for diagnosis, not a universal
-# quality bar. Override per call with ``audit(..., thresholds={key: (warn, fail)})``.
+# (see README "Real embeddings") and re-checked against 19 models x 3 labeled datasets
+# (docs/verification.md); they are a starting point for diagnosis, not a universal quality
+# bar. Override per call with ``audit(..., thresholds={key: (warn, fail)})``.
 THRESHOLDS = {
     "hubness.skewness": (2.0, 4.0),  # real 1k-1.5k-dim text models sit at 1.1-1.6
     "hubness.antihub_excess": (0.05, 0.20),  # share never retrieved, above the exp(-k) baseline
-    "anisotropy.mean_random_cosine": (0.5, 0.85),  # top BEIR models sit at 0.58-0.81 with no nDCG cost
+    # good retrievers sit at 0.58-0.82 with no nDCG cost, so warn starts above them; 0.95 is
+    # where scores are so compressed that absolute thresholds and float32 resolution suffer
+    "anisotropy.mean_random_cosine": (0.85, 0.95),
     "anisotropy.effective_rank_ratio": (0.10, 0.05),  # lower is worse; real models 0.09-0.18
     "collapse.near_duplicate_ratio": (0.02, 0.10),
     "ann_recall.recall_at_k": (0.95, 0.85),  # lower is worse
@@ -41,8 +44,11 @@ THRESHOLDS = {
     "distance_concentration.contrast_over_noise": (1.4, 1.1),  # lower is worse; pure noise 1.0, real 1.43-2.9
     "outliers.outlier_ratio": (0.01, 0.05),
     "connectivity.island_ratio": (0.01, 0.10),
-    "queries.ood_query_ratio": (0.05, 0.20),
-    "queries.query_hubness_skewness": (2.0, 4.0),
+    # short queries against long passages are farther than passages are from each other by
+    # design: good models score 0.0-0.65 on BEIR, a wrong model or language 0.7-1.0
+    "queries.ood_query_ratio": (0.5, 0.8),
+    # good models: 1.5-2.9 on English BEIR, up to 9 on Korean; wrong-language models 11-30
+    "queries.query_hubness_skewness": (4.0, 10.0),
 }
 
 
@@ -61,8 +67,10 @@ class Finding:
     likely_causes: list[str] = field(default_factory=list)
     suggested_action: str = ""
     verify_by: str = ""
-    value_range: list[float] | None = None  # [min, max] over sample repeats, when sampled
+    value_range: list[float] | None = None  # [min, max] over sample repeats: the spread
+    # between samples, not an interval that contains the full-corpus value
     verdict_stable: bool | None = None  # verdict identical on every sample repeat
+    inconclusive: bool = False  # sampled, and this verdict cannot stand for the full corpus
 
 
 SCHEMA_VERSION = 1  # bumped when a key in the JSON is renamed, removed or changes meaning
@@ -86,6 +94,7 @@ class Evidence:
     sample_repeats: int = 1
     unstable_findings: list[str] = field(default_factory=list)
     near_dup_cos: float = 0.99
+    inconclusive_findings: list[str] = field(default_factory=list)
     schema_version: int = SCHEMA_VERSION
 
     @property
@@ -205,6 +214,63 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
         and new.get("near_dup_cos") == old.get("near_dup_cos"),
         "changes": changes,
     }
+
+
+def _apply_sampling(findings: list[Finding], fraction: float, th: dict) -> list[str]:
+    """Make a sampled audit say what each value can stand for, and keep a verdict that the
+    sample cannot support from reading as a clean bill. Measured on synthetic corpora at
+    200k x 384 with 100k/50k/20k samples (docs/verification.md) and in
+    tests/test_regression_injection.py:
+
+    - hubness and antihubs fall as the sample shrinks (k-occurrence concentrates with
+      density), so a sampled value is a lower bound: a full-corpus ``warn`` read ``ok`` on a
+      25% sample. Their verdict is kept but marked ``inconclusive`` unless it is ``fail``.
+    - a duplicate pair is seen only when both rows were drawn, so the sampled collapse share
+      is about ``fraction`` times the full one (0.96 to 1.03 of it in the measurements). The
+      verdict is taken from the estimated full share ``value / fraction`` (in details), so a
+      full-corpus ``fail`` does not read ``warn``.
+    - islands are those of the sample's k-NN graph: a corpus with 37% of its rows in islands
+      scored 0.08% on a 25% sample. connectivity is ``inconclusive`` unless it is ``fail``.
+    - outliers are over-counted on small samples (3.9x at 10%), so a sampled ``warn``/``fail``
+      is ``inconclusive``; ``ok`` holds.
+    - anisotropy, effective_rank, rogue_dimensions, norms, metric_mismatch and
+      distance_concentration stayed within 2.3% of the full value; nothing changes for them.
+
+    Returns the names marked inconclusive."""
+    pct = f"{fraction:.0%}"
+    out = []
+    for f in findings:
+        if f.name in ("hubness", "antihubs"):
+            f.explanation += (f" Measured on a {pct} sample: hubness grows with density, so this "
+                              "is a lower bound for the full corpus (a full-corpus warn can read "
+                              "ok here); compare only runs with the same sample size.")
+            if f.verdict != "fail":
+                f.inconclusive = True
+        elif f.name == "collapse":
+            est = min(1.0, f.value / fraction)
+            f.details["estimated_full_share"] = est
+            f.details["sample_fraction"] = fraction
+            f.verdict = _verdict("collapse.near_duplicate_ratio", est, th)
+            f.explanation += (f" Measured on a {pct} sample: a duplicate pair is seen only when "
+                              f"both rows were sampled, so the full-corpus share is estimated at "
+                              f"{est:.1%} (this value divided by {fraction:.2f}) and the verdict "
+                              "uses that estimate; audit every row (sample=0) to count duplicates.")
+        elif f.name == "outliers":
+            f.explanation += (f" Measured on a {pct} sample: small samples over-count outliers, "
+                              "and details.sample_ids lists only those inside the sample.")
+            if f.verdict != "ok":
+                f.inconclusive = True
+        elif f.name == "connectivity":
+            f.explanation += (f" Measured on a {pct} sample: islands are those of the sample's "
+                              "k-NN graph and most full-corpus islands are not visible in it; "
+                              "audit every row (sample=0) to judge connectivity.")
+            if f.verdict != "fail":
+                f.inconclusive = True
+        if f.inconclusive:
+            f.explanation += (" This verdict is inconclusive for the full corpus and is not "
+                              "evidence that the finding is healthy.")
+            out.append(f.name)
+    return out
 
 
 def _to_original_rows(findings: list[Finding], clusters: list[dict], rows: np.ndarray) -> None:
@@ -635,7 +701,15 @@ def audit(
     ``sample_repeats`` > 1 re-audits that many independent samples (seeds ``seed+1`` ...)
     when sampling applies and attaches ``value_range`` and ``verdict_stable`` to each
     finding, so a verdict that flips between samples is not mistaken for a property of the
-    corpus. Costs ``sample_repeats`` times the audit time; ignored when nothing is sampled.
+    corpus. ``value_range`` is the spread between samples, not an interval that contains the
+    full-corpus value: hubness is a lower bound on every sample, and a finding whose samples
+    agree to three decimals can still sit a little away from the full value. Costs
+    ``sample_repeats`` times the audit time; ignored when nothing is sampled.
+
+    When sampling applies, hubness, antihubs and connectivity verdicts other than ``fail``
+    and outlier verdicts other than ``ok`` are marked ``inconclusive`` (listed in
+    ``inconclusive_findings``), because the sample systematically under- or over-states them;
+    the collapse verdict is taken from the estimated full share ``value / fraction``.
     """
     from vecscope import __version__
 
@@ -738,12 +812,15 @@ def audit(
                 unstable.append(f.name)
 
     report = cluster_report(x, clusters, knn_idx, knn_dist, near_dup_cos, seed) if clusters else []
+    inconclusive: list[str] = []
     if sampled:
         _to_original_rows(findings, report, rows)
+        inconclusive = _apply_sampling(findings, sample / n_total, th)
     return Evidence(
         "vecscope", __version__, int(x.shape[0]), int(x.shape[1]), int(k),
         _attach_thresholds(findings, th),
         n_total=n_total, sampled=sampled, n_queries=n_queries, clusters=report,
         thresholds={k: list(v) for k, v in th.items()},
         sample_repeats=sample_repeats, unstable_findings=unstable, near_dup_cos=near_dup_cos,
+        inconclusive_findings=inconclusive,
     )

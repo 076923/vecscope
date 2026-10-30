@@ -28,6 +28,8 @@ def _render_text(ev) -> str:
             line += f"  repeats {f.value_range[0]:.4f}~{f.value_range[1]:.4f}"
             if not f.verdict_stable:
                 line += "  verdict UNSTABLE"
+        if f.inconclusive:
+            line += "  INCONCLUSIVE (sampled)"
         lines.append(line)
         lines.append(f"{'':31}{f.explanation}")
         if f.verdict != "ok":
@@ -65,8 +67,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="when sampling applies, re-audit this many independent samples and "
                         "report each finding's value range and verdict stability (default 1)")
     a.add_argument("--json", action="store_true", help="emit JSON evidence instead of text")
-    a.add_argument("--fail-on", choices=["warn", "fail"], default="fail",
-                   help="exit 1 when verdict is at least this level")
+    a.add_argument("--fail-on", choices=["warn", "fail", "none"], default="fail",
+                   help="exit 1 when the verdict is at least this level against the absolute "
+                        "thresholds (default fail); 'none' never fails on the thresholds alone, "
+                        "so with --baseline only regressions against the baseline fail the run")
     a.add_argument("--baseline", help="earlier --json output to diff against; prints each "
                                       "finding's change and exits 1 when any verdict got worse")
     a.add_argument("--tolerances", help='JSON file of allowed worsening per finding against the '
@@ -91,6 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--margin", type=float, default=0.02,
                    help="recall headroom over the target below which the recommendation is "
                         "marked tight and a safer setting is named (default 0.02)")
+    s.add_argument("--latency-queries", type=int, default=200,
+                   help="queries searched one at a time per setting for the latency "
+                        "percentiles p50/p95/p99 (default 200, 0 = skip)")
     s.add_argument("--json", action="store_true", help="emit JSON instead of text")
     c = sub.add_parser("compare", help="compare two embeddings of the same rows (no verdicts)")
     c.add_argument("path_a", help="embedding file A, one vector per row")
@@ -98,7 +105,14 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("-k", type=int, default=10, help="neighbors per item (default 10)")
     c.add_argument("--near-dup", type=float, default=0.99, help="cosine threshold for near-dups")
     c.add_argument("--sample", type=int, default=100_000,
-                   help="compare a seeded random subset when n exceeds this (0 = all rows)")
+                   help="compare a seeded random subset when n exceeds this (0 = all rows); "
+                        "without --neighbors-a/-b the neighbors are recomputed inside the "
+                        "sample and the result says neighbor_scope=sample")
+    c.add_argument("--neighbors-a", help="(n x >= k) neighbor ids per row computed on the full "
+                                         "corpus in space A (exact or from the index); with "
+                                         "--neighbors-b, a sampled compare keeps full-corpus "
+                                         "neighbors")
+    c.add_argument("--neighbors-b", help="same for space B; both or neither")
     c.add_argument("--json", action="store_true", help="emit JSON instead of text")
     args = p.parse_args(argv)
     try:
@@ -119,8 +133,13 @@ def _run(args) -> int:
     if args.cmd == "compare":
         if args.sample < 0:
             raise ValueError("--sample must be 0 (all rows) or a positive number")
+        if (args.neighbors_a is None) != (args.neighbors_b is None):
+            raise ValueError("--neighbors-a and --neighbors-b go together")
+        na = load_neighbors(args.neighbors_a) if args.neighbors_a else None
+        nb = load_neighbors(args.neighbors_b) if args.neighbors_b else None
         res = compare(load_vectors(args.path_a), load_vectors(args.path_b), k=args.k,
-                      near_dup_cos=args.near_dup, sample=args.sample)
+                      near_dup_cos=args.near_dup, sample=args.sample, neighbors_a=na,
+                      neighbors_b=nb)
         print(json.dumps(res.to_dict(), indent=2) if args.json else render_compare(res))
         return 0
     x = load_vectors(args.path)
@@ -128,7 +147,8 @@ def _run(args) -> int:
         q = load_vectors(args.queries) if args.queries else None
         res = sweep(x, k=args.k, queries=q, n_queries=args.n_queries,
                     target_recall=args.target_recall, device=args.device,
-                    timing_repeats=args.timing_repeats, margin=args.margin)
+                    timing_repeats=args.timing_repeats, margin=args.margin,
+                    latency_queries=args.latency_queries)
         print(json.dumps(res.to_dict(), indent=2) if args.json else render_sweep(res))
         return 0
 
@@ -140,6 +160,7 @@ def _run(args) -> int:
                sample_repeats=args.sample_repeats)
     if (args.tolerances or args.require_comparable) and not args.baseline:
         raise ValueError("--tolerances and --require-comparable need --baseline")
+    d = None
     if args.baseline:
         tol = _load_json(args.tolerances, "--tolerances") if args.tolerances else None
         d = diff_evidence(ev.to_dict(), _load_json(args.baseline, "--baseline"), tolerances=tol)
@@ -149,17 +170,54 @@ def _run(args) -> int:
                 "dim, k, sampling, thresholds or near-dup cutoff; re-create it with the same "
                 "settings or drop the flag"
             )
-        if args.json:
-            out = ev.to_dict()
+    gate = gate_decision(ev.verdict, args.fail_on, d, ev.inconclusive_findings)
+    if args.json:
+        out = ev.to_dict()
+        if d is not None:
             out["baseline_diff"] = d
-            print(json.dumps(out, indent=2, ensure_ascii=False))
-        else:
-            print(_render_text(ev))
+        out["gate"] = gate
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+    else:
+        print(_render_text(ev))
+        if d is not None:
             print(_render_diff(d, args.baseline))
-        return (1 if d["regressions"] or d["value_regressions"]
-                or WORSE[ev.verdict] >= WORSE[args.fail_on] else 0)
-    print(ev.to_json() if args.json else _render_text(ev))
-    return 1 if WORSE[ev.verdict] >= WORSE[args.fail_on] else 0
+        print(_render_gate(gate))
+    return gate["exit_code"]
+
+
+def gate_decision(verdict: str, fail_on: str, diff: dict | None,
+                  inconclusive: list[str] | None = None) -> dict:
+    """Why the run passes or fails, with the absolute-threshold rule and the baseline rules
+    kept apart: ``absolute`` is the verdict against the thresholds (``fail_on`` = 'none'
+    disables it), ``verdict_regressions`` and ``value_regressions`` come from the baseline.
+    A gate that blocks on the baseline alone (``--fail-on none --baseline``) judges the
+    change, not whether the corpus meets the default thresholds. ``inconclusive`` names the
+    sampled findings whose verdict cannot stand for the full corpus; they never fail the
+    gate, but a pass is reported as not covering them."""
+    absolute = fail_on != "none" and WORSE[verdict] >= WORSE[fail_on]
+    verdict_reg = list(diff["regressions"]) if diff else []
+    value_reg = list(diff["value_regressions"]) if diff else []
+    reasons = []
+    if absolute:
+        reasons.append(f"verdict {verdict} reaches --fail-on {fail_on}")
+    if verdict_reg:
+        reasons.append(f"verdict worse than baseline: {', '.join(verdict_reg)}")
+    if value_reg:
+        reasons.append(f"value worse than baseline beyond tolerance: {', '.join(value_reg)}")
+    return {"fail_on": fail_on, "absolute": absolute, "verdict_regressions": verdict_reg,
+            "value_regressions": value_reg, "baseline": diff is not None,
+            "inconclusive": list(inconclusive or []),
+            "exit_code": 1 if reasons else 0, "reasons": reasons}
+
+
+def _render_gate(gate: dict) -> str:
+    tail = (f"; not covered, inconclusive on this sample: {', '.join(gate['inconclusive'])}"
+            if gate.get("inconclusive") else "")
+    if gate["exit_code"] == 0:
+        rule = ("absolute thresholds" if not gate["baseline"] else
+                "baseline" if gate["fail_on"] == "none" else "absolute thresholds and baseline")
+        return f"  gate: pass ({rule}){tail}"
+    return "  gate: FAIL; " + "; ".join(gate["reasons"]) + tail
 
 
 def _load_json(path: str, option: str):

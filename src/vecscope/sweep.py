@@ -27,6 +27,7 @@ from vecscope.diagnostics.queries import query_knn
 HNSW_GRID = {"M": (8, 16, 32), "ef_construction": (100,), "ef_search": (16, 32, 64, 128, 256)}
 IVF_NPROBE = (1, 2, 4, 8, 16, 32, 64)
 RECALL_MARGIN = 0.02  # below this margin over target_recall the recommendation is marked tight
+LATENCY_QUERIES = 200  # queries timed one at a time per setting for the latency percentiles
 
 
 @dataclass
@@ -37,6 +38,10 @@ class SweepPoint:
     build_seconds: float
     queries_per_second: float
     device: str = "cpu"
+    latency_ms_p50: float | None = None  # single-query search, median over latency_queries
+    latency_ms_p95: float | None = None
+    latency_ms_p99: float | None = None
+    index_bytes: int | None = None  # serialized index size, the memory the index needs at rest
 
 
 @dataclass
@@ -53,6 +58,7 @@ class SweepResult:
     device: str = "cpu"
     gpu_name: str | None = None
     caveats: list[str] = field(default_factory=list)
+    latency_queries: int = 0  # queries searched one at a time for the latency percentiles
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -122,12 +128,15 @@ def sweep(
     device: str = "auto",
     timing_repeats: int = 3,
     margin: float = RECALL_MARGIN,
+    latency_queries: int = LATENCY_QUERIES,
 ) -> SweepResult:
     """Sweep HNSW and IVF settings. ``device`` is 'auto' (GPU when available), 'cpu' or 'gpu'.
 
     ``timing_repeats`` searches are timed per setting and the median qps is reported.
     ``margin`` is the recall headroom over ``target_recall`` below which the recommendation
-    is marked tight and a safer alternative is named.
+    is marked tight and a safer alternative is named. ``latency_queries`` queries are also
+    searched one at a time per setting for ``latency_ms_p50/p95/p99`` (0 = skip), and every
+    point carries ``index_bytes``, the serialized size of its index.
     """
     try:
         import faiss
@@ -145,6 +154,9 @@ def sweep(
         raise ValueError("timing_repeats must be at least 1")
     if not (0.0 <= margin < 1.0):
         raise ValueError("margin must be in [0, 1)")
+    if isinstance(latency_queries, bool) or not isinstance(latency_queries, (int, np.integer)) \
+            or latency_queries < 0:
+        raise ValueError("latency_queries must be a non-negative integer (0 = skip)")
     x = np.asarray(x)
     if x.dtype.kind not in "iufb":
         raise ValueError(f"embeddings must be real numbers, got dtype {x.dtype}")
@@ -201,14 +213,31 @@ def sweep(
     exact_idx = _drop_self(exact_raw, qids, k)
     points: list[SweepPoint] = []
 
-    def measure(index, name, params):
+    n_lat = min(latency_queries, q.shape[0])
+    lat_q = q[:n_lat]  # the first queries of the (already seeded) set
+
+    def measure(index, name, params, build, index_bytes, device):
         times = []
         for _ in range(timing_repeats):
             t = time.perf_counter()
             _, approx = index.search(q, kq)
             times.append(time.perf_counter() - t)
         qps = q.shape[0] / max(float(np.median(times)), 1e-9)
-        return name, params, _recall(_drop_self(approx, qids, k), exact_idx, q, c), qps
+        p50 = p95 = p99 = None
+        if n_lat:
+            one = np.empty(n_lat)
+            for i in range(n_lat):
+                t = time.perf_counter()
+                index.search(lat_q[i : i + 1], kq)
+                one[i] = time.perf_counter() - t
+            one *= 1000.0
+            p50, p95, p99 = (float(v) for v in np.quantile(one, (0.5, 0.95, 0.99)))
+        recall = _recall(_drop_self(approx, qids, k), exact_idx, q, c)
+        return SweepPoint(name, params, recall, build, qps, device, p50, p95, p99, index_bytes)
+
+    def size_of(index) -> int:
+        cpu_index = faiss.index_gpu_to_cpu(index) if dev == "gpu" else index
+        return int(faiss.serialize_index(cpu_index).nbytes)
 
     for m in HNSW_GRID["M"]:
         for efc in HNSW_GRID["ef_construction"]:
@@ -217,12 +246,12 @@ def sweep(
             t = time.perf_counter()
             index.add(c)
             build = time.perf_counter() - t
+            nbytes = size_of(index)
             for efs in HNSW_GRID["ef_search"]:
                 index.hnsw.efSearch = efs
-                name, params, rec, qps = measure(
-                    index, "hnsw", {"M": m, "ef_construction": efc, "ef_search": efs}
-                )
-                points.append(SweepPoint(name, params, rec, build, qps, "cpu"))  # HNSW: CPU only
+                points.append(measure(index, "hnsw",
+                                      {"M": m, "ef_construction": efc, "ef_search": efs},
+                                      build, nbytes, "cpu"))  # HNSW: CPU only
 
     nlist = int(max(1, min(4 * np.sqrt(n), n // 39 or 1)))
     quantizer = faiss.IndexFlatIP(d)
@@ -231,6 +260,7 @@ def sweep(
     index.train(c)
     index.add(c)
     build = time.perf_counter() - t
+    nbytes = size_of(index)
     for nprobe in IVF_NPROBE:
         if nprobe > nlist:
             break
@@ -238,8 +268,7 @@ def sweep(
             faiss.GpuParameterSpace().set_index_parameter(index, "nprobe", nprobe)
         else:
             index.nprobe = nprobe
-        name, params, rec, qps = measure(index, "ivf", {"nlist": nlist, "nprobe": nprobe})
-        points.append(SweepPoint(name, params, rec, build, qps, dev))
+        points.append(measure(index, "ivf", {"nlist": nlist, "nprobe": nprobe}, build, nbytes, dev))
 
     rec = _recommend(points, k, target_recall, margin)
     caveats = [
@@ -247,14 +276,22 @@ def sweep(
          if queries is None else
          f"recall is measured on {q.shape[0]} supplied queries") + "; real query traffic "
         "can differ, pass it as queries when available",
-        ("recall at fixed parameters falls as the corpus grows; a sweep on a sample is "
-         "optimistic for the full corpus, re-run at production size before fixing parameters"),
+        ("HNSW recall at fixed parameters falls as the corpus grows, so a sweep on a sample is "
+         "optimistic for HNSW; IVF nlist is set from the row count (4*sqrt(n)), so its recall "
+         "at a given nprobe can move either way with size. Re-run at production size before "
+         "fixing parameters"),
         (f"queries_per_second is the median of {timing_repeats} runs on this machine with one "
          "query batch; it ranks settings against each other and is not a serving throughput"),
+        (f"latency_ms_p50/p95/p99 time {n_lat} queries one at a time in this process, with no "
+         "network, concurrency or serving stack; compare settings with them, do not quote "
+         "them as service latency" if n_lat else
+         "latency percentiles were skipped (latency_queries=0)"),
+        ("index_bytes is the serialized index (vectors plus graph or lists); the process "
+         "needs more while building, and a product-quantized index would be smaller"),
     ]
     return SweepResult("vecscope", __version__, int(n), int(d), int(k), int(q.shape[0]),
                        target_recall, points, rec, device=dev, gpu_name=gpu_name,
-                       caveats=caveats)
+                       caveats=caveats, latency_queries=int(n_lat))
 
 
 def _recommend(points: list[SweepPoint], k: int, target_recall: float, margin: float) -> dict:
@@ -263,7 +300,8 @@ def _recommend(points: list[SweepPoint], k: int, target_recall: float, margin: f
 
     def as_rec(p):
         return {"index": p.index, "params": p.params, "recall_at_k": p.recall_at_k,
-                "queries_per_second": p.queries_per_second}
+                "queries_per_second": p.queries_per_second, "latency_ms_p95": p.latency_ms_p95,
+                "index_bytes": p.index_bytes}
 
     ok = [p for p in points if p.recall_at_k >= target_recall]
     if not ok:
@@ -298,16 +336,28 @@ def render_sweep(res: SweepResult) -> str:
     if res.gpu_name:
         head += f" ({res.gpu_name}; HNSW stays on CPU)"
     lines = [head]
-    lines.append(f"  {'index':<6}{'params':<44}{'recall':>8}{'build s':>9}{'qps':>10}  dev")
+    lines.append(f"  {'index':<6}{'params':<44}{'recall':>8}{'build s':>9}{'qps':>10}"
+                 f"{'p50 ms':>8}{'p95 ms':>8}{'MiB':>8}  dev")
+
+    def ms(v):
+        return f"{v:>8.3f}" if v is not None else f"{'-':>8}"
+
     for p in res.points:
         params = ", ".join(f"{a}={b}" for a, b in p.params.items())
         mark = "*" if p.recall_at_k >= res.target_recall else " "
+        mib = f"{p.index_bytes / 2**20:>8.1f}" if p.index_bytes is not None else f"{'-':>8}"
         lines.append(f" {mark}{p.index:<6}{params:<44}{p.recall_at_k:>8.3f}"
-                     f"{p.build_seconds:>9.2f}{p.queries_per_second:>10.0f}  {p.device}")
+                     f"{p.build_seconds:>9.2f}{p.queries_per_second:>10.0f}"
+                     f"{ms(p.latency_ms_p50)}{ms(p.latency_ms_p95)}{mib}  {p.device}")
     r = res.recommendation
     params = ", ".join(f"{a}={b}" for a, b in r["params"].items())
+    extra = ""
+    if r.get("latency_ms_p95") is not None:
+        extra += f"  p95={r['latency_ms_p95']:.3f}ms"
+    if r.get("index_bytes") is not None:
+        extra += f"  index={r['index_bytes'] / 2**20:.1f}MiB"
     lines.append(f"  recommendation: {r['index']} ({params})  recall={r['recall_at_k']:.3f}  "
-                 f"qps={r['queries_per_second']:.0f}  margin={r['margin']:+.3f}"
+                 f"qps={r['queries_per_second']:.0f}{extra}  margin={r['margin']:+.3f}"
                  f"{'  TIGHT' if r.get('tight') else ''}  ({r['reason']})")
     for c in res.caveats:
         lines.append(f"  note: {c}")
