@@ -6,7 +6,7 @@
 
 ### 에이전트를 위한 임베딩 공간 진단 도구
 
-**벡터 인덱스를 신뢰하기에 앞서, 에이전트로 검색 공간의 상태부터 점검하세요.**
+**에이전트가 벡터 인덱스를 신뢰하기 전에, 검색하는 공간을 직접 점검하게 하세요.**
 
 [![PyPI version](https://img.shields.io/pypi/v/vecscope?style=flat-square&color=3775a9)](https://pypi.org/project/vecscope/)
 [![Python](https://img.shields.io/pypi/pyversions/vecscope?style=flat-square)](https://pypi.org/project/vecscope/)
