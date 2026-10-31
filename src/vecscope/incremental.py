@@ -99,8 +99,9 @@ def cached_knn(x: np.ndarray, k: int, path: str | Path, metrics: tuple[str, ...]
     cache = None
     if p.exists():
         try:
-            z = np.load(p, allow_pickle=False)
-            cache = {key: z[key] for key in z.files}
+            # read everything and close the file: Windows cannot replace an open file
+            with np.load(p, allow_pickle=False) as z:
+                cache = {key: z[key] for key in z.files}
         except (OSError, ValueError, EOFError) as e:
             raise ValueError(f"{p}: not a readable vecscope k-NN cache ({e})") from None
         if int(cache.get("version", -1)) != CACHE_VERSION:

@@ -45,6 +45,17 @@ def test_is_source():
     assert not is_source("x.npy") and not is_source("s3://bucket/x.npy")
 
 
+def test_windows_paths_are_paths_not_schemes():
+    from vecscope.adapters import local_path, scheme_of
+
+    win = "C:\\Users\\me\\index\\flat.faiss"
+    assert scheme_of(win) == "" and is_source(win)
+    assert scheme_of("D:/data/x.npy") == "" and not is_source("D:/data/x.npy")
+    assert local_path("qdrant+local://C:/data/qd?collection=docs") == "C:/data/qd"
+    assert local_path("qdrant+local:///data/qd?collection=docs") == "/data/qd"
+    assert local_path("faiss:///tmp/h.index") == "/tmp/h.index"
+
+
 def test_faiss_index_files(tmp_path, data):
     faiss = pytest.importorskip("faiss")
     x, ids = data

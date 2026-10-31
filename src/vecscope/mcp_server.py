@@ -90,15 +90,13 @@ def allowed_dirs() -> list[Path]:
 def _open_source(path: str):
     """A faiss index or vector store named by ``path``: local ones go through the directory
     check, network ones need the server started with --allow-network."""
-    from urllib.parse import urlparse
+    from vecscope.adapters import load_source, local_path, scheme_of
 
-    from vecscope.adapters import load_source
-
-    u = urlparse(path)
-    if u.scheme.endswith("+local") or u.scheme in ("", "faiss"):
-        check_path(u.path if u.scheme else path)
+    scheme = scheme_of(path)
+    if scheme.endswith("+local") or scheme in ("", "faiss"):
+        check_path(local_path(path) if scheme else path)
     elif os.environ.get(ALLOW_NETWORK_ENV) != "1":
-        raise PermissionError(f"{u.scheme} sources reach the network; start the server with "
+        raise PermissionError(f"{scheme} sources reach the network; start the server with "
                               f"--allow-network (or {ALLOW_NETWORK_ENV}=1) to read them")
     return load_source(path)
 

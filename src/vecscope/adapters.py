@@ -32,10 +32,24 @@ FAISS_SUFFIXES = (".faiss", ".index")
 _BATCH = 1024
 
 
+def scheme_of(path: str) -> str:
+    """The URI scheme, or "" for a file path. Only ``scheme://`` counts, so a Windows path
+    such as ``C:\\data\\x.faiss`` is a path, not the scheme "c"."""
+    s = str(path)
+    return urlparse(s).scheme if "://" in s else ""
+
+
+def local_path(uri: str) -> str:
+    """The directory or file of a ``faiss://`` or ``+local`` URI: ``qdrant+local:///data/q``
+    and ``qdrant+local://C:/data/q`` both name the path after the ``//``."""
+    u = urlparse(str(uri))
+    return u.netloc + u.path if u.netloc else u.path
+
+
 def is_source(path: str) -> bool:
     """Whether ``path`` names a vector store rather than an embedding file."""
     s = str(path)
-    return urlparse(s).scheme in SCHEMES or Path(s).suffix.lower() in FAISS_SUFFIXES
+    return scheme_of(s) in SCHEMES or Path(s).suffix.lower() in FAISS_SUFFIXES
 
 
 @dataclass
@@ -124,7 +138,7 @@ def _faiss(path: str) -> Source:
         import faiss
     except ImportError as e:
         raise ImportError("reading a faiss index needs faiss: pip install 'vecscope[index]'") from e
-    p = Path(urlparse(path).path if path.startswith("faiss://") else path)
+    p = Path(local_path(path) if path.startswith("faiss://") else path)
     if not p.exists():
         raise FileNotFoundError(f"faiss index not found: {p}")
     index = faiss.read_index(str(p))
@@ -164,7 +178,7 @@ def _qdrant(uri: str) -> Source:
         raise ImportError("reading Qdrant needs qdrant-client: pip install 'vecscope[qdrant]'") from e
     u, o = urlparse(uri), _opts(urlparse(uri))
     if u.scheme == "qdrant+local":
-        client, collection = QdrantClient(path=u.path), o.get("collection")
+        client, collection = QdrantClient(path=local_path(uri)), o.get("collection")
     else:
         client = QdrantClient(host=u.hostname, port=u.port or 6333, https=o.get("https") == "1",
                               api_key=_api_key(o))
@@ -198,7 +212,7 @@ def _chroma(uri: str) -> Source:
         raise ImportError("reading Chroma needs chromadb: pip install 'vecscope[chroma]'") from e
     u, o = urlparse(uri), _opts(urlparse(uri))
     if u.scheme == "chroma+local":
-        client, collection = chromadb.PersistentClient(path=u.path), o.get("collection")
+        client, collection = chromadb.PersistentClient(path=local_path(uri)), o.get("collection")
     else:
         key = _api_key(o)
         client = chromadb.HttpClient(host=u.hostname, port=u.port or 8000,
@@ -233,7 +247,7 @@ def _milvus(uri: str) -> Source:
         raise ImportError("reading Milvus needs pymilvus: pip install 'vecscope[milvus]'") from e
     u, o = urlparse(uri), _opts(urlparse(uri))
     if u.scheme == "milvus+local":
-        client, collection = MilvusClient(uri=u.path), o.get("collection")
+        client, collection = MilvusClient(uri=local_path(uri)), o.get("collection")
     else:
         scheme = "https" if o.get("https") == "1" else "http"
         client = MilvusClient(uri=f"{scheme}://{u.hostname}:{u.port or 19530}",
@@ -330,7 +344,7 @@ def load_source(uri: str) -> Source:
     """Vectors (ascending id order), their ids, and a search function from a vector store."""
     from vecscope.incremental import fingerprint
 
-    scheme = urlparse(str(uri)).scheme
+    scheme = scheme_of(uri)
     if scheme == "faiss" or Path(str(uri)).suffix.lower() in FAISS_SUFFIXES and not scheme:
         src = _faiss(str(uri))
     elif scheme.startswith("qdrant"):

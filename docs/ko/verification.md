@@ -2,16 +2,27 @@
 
 # 검증 결과
 
-vecscope의 주장을 어떻게 확인했고 측정 결과가 무엇을 보여 주는지 정리합니다. 대상은 float64
-기준 정확성, ANN recall 채점기, 표본 감사, 라벨이 있는 데이터에서 검색 품질과 임곗값의 관계,
-질의 항목, 계획(plan)의 조치를 적용했을 때 검색 품질이 어떻게 움직이는지, 그리고 에이전트가
-MCP로 계획을 따라가는 과정입니다. 임곗값과 계획 규칙은 이 결과를 바탕으로 정했습니다.
+vecscope의 주장을 어떻게 확인했고 측정 결과가 무엇을 보여 주는지 정리합니다. 대상은 다음과
+같습니다.
+
+- float64 기준 정확성
+- ANN recall 채점기
+- 표본 감사
+- 라벨이 있는 데이터에서 검색 품질과 임곗값의 관계
+- 질의 항목
+- 계획(plan)의 조치를 적용했을 때 검색 품질이 어떻게 움직이는지
+- 에이전트가 MCP로 계획을 따라가는 과정
+
+임곗값과 계획 규칙은 이 결과를 바탕으로 정했습니다.
 
 - 실행 환경: AMD EPYC 7R13 8 vCPU, RAM 26 GB, NVIDIA L4. Python 3.12.3, numpy 2.2.6,
   faiss 1.15.1, sentence-transformers 3.4.1, torch 2.6.0
-- 데이터: 합성 분포 6종(`examples/bench_common.py`의 clustered, isotropic, anisotropic,
-  duplicates, lowrank, zipf), README 표에 쓰인 공개 임베딩 8종, 모델 19종으로 인코딩한 라벨
-  데이터세트 6개(BEIR SciFact·NFCorpus·ArguAna·SCIDOCS·FiQA-2018, 한국어 ko-strategyqa)
+- 데이터:
+  - 합성 분포 6종(`examples/bench_common.py`의 clustered, isotropic, anisotropic, duplicates,
+    lowrank, zipf)
+  - README 표에 쓰인 공개 임베딩 8종
+  - 모델 19종으로 인코딩한 라벨 데이터세트 6개(BEIR SciFact·NFCorpus·ArguAna·SCIDOCS·FiQA-2018,
+    한국어 ko-strategyqa)
 - 벡터 저장소: faiss 1.15.1, Qdrant client 1.20(로컬 모드), Chroma 1.5, Milvus Lite 3.2,
   Weaviate client 4.24
 
@@ -33,8 +44,9 @@ MCP로 계획을 따라가는 과정입니다. 임곗값과 계획 규칙은 이
 ## 진단값과 nDCG@10의 관계
 
 데이터세트마다 모델 19종에 대해 각 항목의 값과 nDCG@10 사이의 Spearman 상관을 구했습니다.
-음수면 검색이 나빠질수록 값이 커진다는 뜻입니다. ArguAna의 nDCG@10은 BEIR과 같이 질의 자신의
-문서(코퍼스에 들어 있습니다)를 빼고 계산했습니다.
+음수면 검색이 나빠질수록 값이 커진다는 뜻입니다.
+
+ArguAna의 nDCG@10은 BEIR과 같이 질의 자신의 문서(코퍼스에 들어 있습니다)를 빼고 계산했습니다.
 
 | 항목 | SciFact | NFCorpus | ko-strategyqa | ArguAna | SCIDOCS | FiQA |
 |---|---|---|---|---|---|---|
@@ -55,19 +67,21 @@ MCP로 계획을 따라가는 과정입니다. 임곗값과 계획 규칙은 이
   검색 품질 차이를 반영하며, 언어나 도메인을 전혀 다루지 못하는 모델이 섞인 데이터세트
   (ko-strategyqa, ArguAna, SCIDOCS)에서 가장 강합니다.
 - `query_gap`도 6개 모두 음수(−0.02\~−0.81)지만 영어 데이터에서는 약합니다. 쓸 만한 모델은
-  모두 0.9\~2.6에 머물기 때문입니다(ArguAna는 질의가 코퍼스에서 가져온 논증이라 0.05\~0.93). 이 항목의 역할은 다른 공간에서 온 질의를 잡는 것이지
-  모델의 순위를 매기는 것이 아닙니다.
+  모두 0.9\~2.6에 머물기 때문입니다(ArguAna는 질의가 코퍼스에서 가져온 논증이라 0.05\~0.93).
+  이 항목의 역할은 다른 공간에서 온 질의를 잡는 것이지 모델의 순위를 매기는 것이 아닙니다.
 - `anisotropy`와 `rogue_dimensions`는 데이터세트에 따라 부호가 바뀝니다. 품질 점수가 아닙니다.
   `anisotropy`는 114개 조합 모두 `ok`입니다.
-- ArguAna, SCIDOCS, FiQA는 어떤 임곗값을 정하는 데도 쓰지 않았습니다. 여기서 `query_gap`은
-  SCIDOCS의 GloVe(2.90, `warn`)만 잡았고 좋은 모델은 1.59 이하입니다. `query_hubness`는 FiQA에서
-  모델 19개 중 17개에 warn을 냈는데, 좋은 모델은 4.0\~4.2로 `warn` 임곗값 4를 겨우 넘습니다.
-  왜도가 코퍼스 크기를 따라 커지기 때문입니다(영어 모델: 문서 2.6만 개까지 1.5\~3.4, FiQA 5.8만 개에서
-  4.0\~4.8). 홀드아웃에 맞춰 임곗값을 고치면 홀드아웃이 학습 데이터가 되므로 임곗값은 두고 설명문에
-  이 범위를 적었습니다.
-  SCIDOCS에서는 다국어 모델을 fail로 판정했습니다(14\~25, nDCG@10 0.15\~0.17, 가장 좋은 영어
-  모델은 0.23). `hubness`는 SCIDOCS(문서 2.5만 개)와 FiQA(5.7만 개)에서 대부분 warn입니다.
-  왜도는 코퍼스가 클수록 커지므로 절대 `warn`보다 같은 코퍼스의 기준선과 비교해 읽으십시오.
+- ArguAna, SCIDOCS, FiQA는 어떤 임곗값을 정하는 데도 쓰지 않았습니다. 여기서는:
+  - `query_gap`은 SCIDOCS의 GloVe(2.90, `warn`)만 잡았고 좋은 모델은 1.59 이하입니다.
+  - `query_hubness`는 FiQA에서 모델 19개 중 17개에 warn을 냈는데, 좋은 모델은 4.0\~4.2로
+    `warn` 임곗값 4를 겨우 넘습니다. 왜도가 코퍼스 크기를 따라 커지기 때문입니다(영어 모델:
+    문서 2.6만 개까지 1.5\~3.4, FiQA 5.8만 개에서 4.0\~4.8).
+    - 홀드아웃에 맞춰 임곗값을 고치면 홀드아웃이 학습 데이터가 되므로 임곗값은 두고 설명문에
+      이 범위를 적었습니다.
+    - SCIDOCS에서는 다국어 모델을 fail로 판정했습니다(14\~25, nDCG@10 0.15\~0.17, 가장 좋은
+      영어 모델은 0.23).
+  - `hubness`는 SCIDOCS(문서 2.5만 개)와 FiQA(5.7만 개)에서 대부분 warn입니다. 왜도는 코퍼스가
+    클수록 커지므로 절대 `warn`보다 같은 코퍼스의 기준선과 비교해 읽으십시오.
 - 명백히 잘못된 파이프라인(BEIR에 GloVe, 영어 데이터에 한국어 전용 모델, 한국어 데이터에 영어
   전용 모델)은 여러 항목을 동시에 올립니다. 이런 파이프라인을 가르는 것은 경고의 개수이지
   `fail` 하나가 아닙니다.
@@ -75,11 +89,15 @@ MCP로 계획을 따라가는 과정입니다. 임곗값과 계획 규칙은 이
 ## 질의 항목
 
 `query_gap`과 `query_shift`는 SciFact, NFCorpus, ko-strategyqa에서 모델 19종의 임베딩 캐시로
-후보 세 가지를 측정해 골랐습니다. 모든 (모델, 데이터세트) 조합을 자기 질의와 주입한 결함 세 가지로
-채점했습니다. 결함은 질의 접두어 누락(bge, e5, mxbai; 21개), 같은 차원의 다른 모든 모델로
-인코딩한 질의(312개), 한국어 데이터에 쓴 영어 전용 모델(11개)입니다. q_nn은 질의에서 코퍼스로의
-최근접 거리입니다. 임곗값은 재현 파이프라인의 최댓값 바로 위로 정했으므로 이 데이터에 맞춘
-값이고, 홀드아웃 검증은 하지 않았습니다.
+후보 세 가지를 측정해 골랐습니다. 모든 (모델, 데이터세트) 조합을 자기 질의와 주입한 결함 세
+가지로 채점했습니다. 결함은 다음과 같습니다.
+
+- 질의 접두어 누락(bge, e5, mxbai; 21개)
+- 같은 차원의 다른 모든 모델로 인코딩한 질의(312개)
+- 한국어 데이터에 쓴 영어 전용 모델(11개)
+
+q_nn은 질의에서 코퍼스로의 최근접 거리입니다. 임곗값은 재현 파이프라인의 최댓값 바로 위로
+정했으므로 이 데이터에 맞춘 값이고, 홀드아웃 검증은 하지 않았습니다.
 
 | 기준 | query_gap: q_nn 중앙값 / 코퍼스 NN 중앙값 | query_shift: 기준 중앙값 + 3 MAD를 넘는 비율 | mutual: 서로 이웃인 top-k 문서 비율 | ood_queries |
 |---|---|---|---|---|
@@ -93,29 +111,35 @@ MCP로 계획을 따라가는 과정입니다. 임곗값과 계획 규칙은 이
 | 질의 100개 표본 5회에서 판정이 바뀐 비율 | 0.1% | 0.2% | 1.9% | 1.0% |
 
 `query_gap`은 기준선이 필요 없고, `query_shift`는 기준선에 저장한 질의 거리와 비교합니다.
-`ood_queries`는 비교용으로 출력에 남아 있으며 지원 중단(deprecated) 상태입니다. 결함 기준 세
-가지는 질의 쪽 결함이 아닌 다른 것을 가리키는 것으로 드러났습니다.
+`ood_queries`는 비교용으로 출력에 남아 있으며 지원 중단(deprecated) 상태입니다.
+
+결함 기준 세 가지는 질의 쪽 결함이 아닌 다른 것을 가리키는 것으로 드러났습니다.
 
 - **접두어 누락.** bge, e5, mxbai의 질의 접두어를 빼도 SciFact와 NFCorpus에서 nDCG@10은
   −0.014\~+0.007만 바뀌었습니다. 질의 거리는 가까워지기도 하고(SciFact bge-base `query_gap`
-  1.55→1.21) 멀어지기도 했습니다(NFCorpus e5-base 1.64→1.75). 잡을 기하적 신호가 없고, 이
-  데이터에서는 피해도 거의 없습니다.
+  1.55→1.21) 멀어지기도 했습니다(NFCorpus e5-base 1.64→1.75).
+
+  잡을 기하적 신호가 없고, 이 데이터에서는 피해도 거의 없습니다.
 - **다른 모델.** 같은 기반에서 미세 조정한 모델은 공간을 공유합니다. 같은 문서의 평균 코사인이
   mxbai-embed-large와 bge-large는 0.985, gte-base와 bge-base는 0.885입니다(mpnet과 bge-base는
-  0.004). 이런 모델끼리는 질의를 바꿔 넣어도 nDCG@10이 대부분 유지됩니다(bge-base 코퍼스에
-  gte-base 질의: 0.697, 자기 질의는 0.740). `query_gap`과 `query_shift`가 fail로 잡지 못한
-  768차원 교환 두 건이 이 경우입니다.
+  0.004).
+
+  이런 모델끼리는 질의를 바꿔 넣어도 nDCG@10이 대부분 유지됩니다(bge-base 코퍼스에 gte-base
+  질의: 0.697, 자기 질의는 0.740). `query_gap`과 `query_shift`가 fail로 잡지 못한 768차원 교환
+  두 건이 이 경우입니다.
 - **다른 언어.** 영어 전용 모델은 ko-strategyqa의 한국어 질의와 문서를 똑같이 잘못
   인코딩하므로 둘 사이에 비대칭이 없습니다. 이 경우는 `query_hubness`가 11개 중 10개를
   fail(11\~30), 나머지 하나를 warn(8.3)으로 잡습니다.
 
 ## 개입 실험
 
-계획의 단계를 적용하면 검색 품질이 움직일까요? 검증 하네스(이 페이지의 다른 측정과 마찬가지로
-저장소 밖에 있습니다)는 실제 (모델,
-데이터세트) 조합 21개(SciFact 8개, NFCorpus 8개, ko-strategyqa 5개)에 변경을 코퍼스에 적용하고
-같은 변환을 질의에도 적용한 뒤, 전후의 진단 항목, 계획, `retrieval`(nDCG@10, recall@10, 중복
-비율)을 기록합니다.
+계획의 단계를 적용하면 검색 품질이 움직일까요?
+
+검증 하네스(이 페이지의 다른 측정과 마찬가지로 저장소 밖에 있습니다)는 다음과 같이 진행합니다.
+
+- 실제 (모델, 데이터세트) 조합 21개(SciFact 8개, NFCorpus 8개, ko-strategyqa 5개)를 대상으로
+- 변경을 코퍼스에 적용하고 같은 변환을 질의에도 적용한 뒤
+- 전후의 진단 항목, 계획, `retrieval`(nDCG@10, recall@10, 중복 비율)을 기록합니다.
 
 | 개입 | 진단 항목 | 검색 품질 | 계획 |
 |---|---|---|---|
@@ -146,20 +170,23 @@ MCP로 계획을 따라가는 과정입니다. 임곗값과 계획 규칙은 이
 ## 에이전트 연동
 
 - `tests/test_agent_workflow.py`는 MCP 서버를 stdio로 구동합니다. 정규화되지 않은 벡터에 공통
-  오프셋을 더한 코퍼스를 라벨 질의와 함께 감사하고, 주입한 결함이 남지 않을 때까지 계획의 첫
-  단계를 적용하고 다시 감사합니다. 계획은 `metric`(정규화), `shared_direction`(중심화) 순으로
-  요구하고, 그 뒤 `anisotropy`, `metric_mismatch`, `collapse`, `norms`가 `ok`가 되며 nDCG@10은
-  낮아지지 않습니다.
+  오프셋을 더한 코퍼스를 라벨 질의와 함께 감사합니다.
+  - 주입한 결함이 남지 않을 때까지 계획의 첫 단계를 적용하고 다시 감사합니다.
+  - 계획은 `metric`(정규화), `shared_direction`(중심화) 순으로 요구하고, 그 뒤 `anisotropy`,
+    `metric_mismatch`, `collapse`, `norms`가 `ok`가 되며 nDCG@10은 낮아지지 않습니다.
 - 이 테스트는 직전 `audit_id`를 `baseline`으로 넘겨 다시 감사하고, `baseline_diff`가 그 단계의
-  항목을 개선으로 표시하는지, 회귀로 표시하지 않는지, nDCG@10이 떨어지지 않는지 확인합니다. 이
-  과정에서 변환 전 기준선을 `query_shift`의 기준으로 쓰면 안 된다는 것이 드러났습니다(중심화한
-  질의가 모두 이동한 것으로 보였습니다). 지금은 `corpus_fingerprint`로 같은 코퍼스일 때만 씁니다.
+  항목을 개선으로 표시하는지, 회귀로 표시하지 않는지, nDCG@10이 떨어지지 않는지 확인합니다.
+  - 이 과정에서 변환 전 기준선을 `query_shift`의 기준으로 쓰면 안 된다는 것이
+    드러났습니다(중심화한 질의가 모두 이동한 것으로 보였습니다).
+  - 지금은 `corpus_fingerprint`로 같은 코퍼스일 때만 씁니다.
 - 같은 과제를 Claude Code 2.1 헤드리스 모드(vecscope MCP 서버와 `--allow-dir`를 붙인
-  `claude -p`)에 두 번 주었습니다. 10\~11턴, 51\~54초가 걸렸습니다. 계획의 순서대로(metric 다음
-  shared_direction) 진행했고, 지시하지 않았는데도 직전 `audit_id`를 `baseline`으로 넘겨 다시
-  감사했습니다. `metric_mismatch`, `anisotropy`, `hubness`, `antihubs`, `collapse`를 `ok`로 만들었고
-  nDCG@10은 1.0 그대로였습니다. 남은 `outliers` warn(0.011, 임곗값 0.01)은 손대지 않았는데,
-  해당 행이 깨진 벡터가 아니고 그중 하나가 라벨된 정답이었기 때문입니다.
+  `claude -p`)에 두 번 주었습니다. 10\~11턴, 51\~54초가 걸렸습니다.
+  - 계획의 순서대로(metric 다음 shared_direction) 진행했습니다.
+  - 지시하지 않았는데도 직전 `audit_id`를 `baseline`으로 넘겨 다시 감사했습니다.
+  - `metric_mismatch`, `anisotropy`, `hubness`, `antihubs`, `collapse`를 `ok`로 만들었고
+    nDCG@10은 1.0 그대로였습니다.
+  - 남은 `outliers` warn(0.011, 임곗값 0.01)은 손대지 않았는데, 해당 행이 깨진 벡터가 아니고
+    그중 하나가 라벨된 정답이었기 때문입니다.
 
 ## 한계
 
@@ -181,7 +208,8 @@ MCP로 계획을 따라가는 과정입니다. 임곗값과 계획 규칙은 이
   `python examples/benchmark_sweep.py --rows 100000 --dim 768 --corpus clustered zipf --json
   sweep.json`으로 표를 다시 잴 수 있습니다. 실행 환경 정보가 JSON에 함께 기록됩니다.
 - `python examples/retrieval_quality.py`는 SciFact와 NFCorpus로 라벨 데이터 연구를 실행합니다.
-- 모델 19종, 데이터셋 6개, 질의 항목, 개입 실험은 패키지에 포함하지 않은 하네스로 실행했습니다. 그
-  결과로 정한 동작은 테스트로 고정되어 있습니다. `tests/test_query_findings.py`(query_gap,
-  query_shift), `tests/test_plan_incremental.py`(지배 좌표와 중복 사례를 포함한 계획 규칙),
-  `tests/test_regression_injection.py`(결함 주입)입니다.
+- 모델 19종, 데이터셋 6개, 질의 항목, 개입 실험은 패키지에 포함하지 않은 하네스로
+  실행했습니다. 그 결과로 정한 동작은 다음 테스트로 고정되어 있습니다.
+  - `tests/test_query_findings.py`(query_gap, query_shift)
+  - `tests/test_plan_incremental.py`(지배 좌표와 중복 사례를 포함한 계획 규칙)
+  - `tests/test_regression_injection.py`(결함 주입)

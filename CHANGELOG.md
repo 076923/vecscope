@@ -6,61 +6,88 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-31
+
+### Fixed
+
+- Windows paths are paths, not URI schemes: `C:\...\index.faiss` was read as the scheme `c`.
+  - The CLI and Python API refused faiss index files on Windows.
+  - The MCP server refused them as network stores.
+  - Only `scheme://` now counts as a store URI, and `faiss://` and `+local` URIs keep a drive
+    letter (`qdrant+local://C:/data/qd`).
+- The incremental k-NN cache (`--knn-cache`) closes the cache file after reading it.
+  - Windows refused to replace the still-open file ("Access is denied").
+
+### Changed
+
+- README, Korean README, verification pages, skill and changelog: long paragraphs split into
+  short ones and lists; no content changed
+
 ## [0.7.0] - 2026-10-31
 
 ### Added (from the ood_queries redesign run, docs/verification.md)
 
 - `query_gap` finding (`queries.query_gap_ratio`, thresholds (2.6, 3.0)): the median
-  query-to-corpus nearest distance over the median corpus-to-corpus nearest distance. On 19
-  models x SciFact, NFCorpus and ko-strategyqa, the 18 pipelines that reproduce published
-  nDCG@10 score 0.94 to 2.52 and none is flagged (`ood_queries` flagged 4); query sets
-  embedded by another model of the same dimension that lose more than a quarter of nDCG@10
-  are flagged in 250 of 268 cases, at a median of 5 to 8
+  query-to-corpus nearest distance over the median corpus-to-corpus nearest distance
+  - On 19 models x SciFact, NFCorpus and ko-strategyqa, the 18 pipelines that reproduce
+    published nDCG@10 score 0.94 to 2.52 and none is flagged (`ood_queries` flagged 4)
+  - Query sets embedded by another model of the same dimension that lose more than a quarter
+    of nDCG@10 are flagged in 250 of 268 cases, at a median of 5 to 8
 - `query_shift` finding (`queries.shifted_query_ratio`, thresholds (0.20, 0.30)): the share
-  of queries farther from the corpus than the median + 3 MAD of a reference query set. It
-  needs a reference: `audit(..., query_baseline=evidence)`, CLI `--baseline` from a run with
-  `--queries` (used automatically when the baseline has query distances), MCP
-  `query_baseline_path`. In the same run it flagged 266 of 268 harmful model swaps and none
-  of the healthy query sets (0.00 to 0.09)
+  of queries farther from the corpus than the median + 3 MAD of a reference query set
+  - It needs a reference: `audit(..., query_baseline=evidence)`, CLI `--baseline` from a run
+    with `--queries` (used automatically when the baseline has query distances), MCP
+    `query_baseline_path`
+  - In the same run it flagged 266 of 268 harmful model swaps and none of the healthy query
+    sets (0.00 to 0.09)
 - `vecscope.evidence.query_reference(evidence)` returns the (median, MAD) pair a baseline
   provides; `query_audit(..., reference=)` adds the `shifted_*` keys, and its result now
   carries `query_nn_mad` and `query_gap_ratio`
 - Retrieval quality on labeled queries (`vecscope.retrieval`, `audit(..., qrels=, ranked=)`,
-  CLI `--qrels`/`--ranked`, MCP `qrels_path`/`ranked_path`): nDCG@k, recall@k, MRR@k, hit
-  rate and `duplicate_result_share` of exact cosine search over every row (also when the
-  findings are sampled), and of the production top-k with `overlap_with_exact`. The
-  `retrieval` block carries a `qrels_fingerprint`; `diff_evidence` adds `retrieval_changes`
-  and `retrieval_comparable`, and the text diff prints them under the finding changes
+  CLI `--qrels`/`--ranked`, MCP `qrels_path`/`ranked_path`)
+  - nDCG@k, recall@k, MRR@k, hit rate and `duplicate_result_share` of exact cosine search
+    over every row (also when the findings are sampled), and of the production top-k with
+    `overlap_with_exact`
+  - The `retrieval` block carries a `qrels_fingerprint`
+  - `diff_evidence` adds `retrieval_changes` and `retrieval_comparable`, and the text diff
+    prints them under the finding changes
 - `plan` on every Evidence (`vecscope.plan.build_plan`): the non-ok findings grouped by the
-  cause they likely share (input integrity, dominant dimension, metric, shared direction,
-  weak signal, corpus structure, index, query pipeline), in fix order, each with the common cause, the smallest
-  change, what to re-measure and why it comes at that position. Collapse without exact copies
-  next to a non-ok anisotropy is grouped with the shared direction, not with deduplication;
-  norms, metric_mismatch, outliers and hub findings next to a non-ok rogue_dimensions join
-  the dominant-dimension step, whose first change is z-scoring, because normalizing does not
-  remove a dominant coordinate (on 21 real pairs with one coordinate scaled 30x, z-scoring
-  restored a median 98% of nDCG@10);
-  query hubness next to corpus hubness joins the hubness step; query_gap next to a
-  duplicate problem joins the input-integrity step, because near-copies shrink the corpus
-  distance it divides by (60% jittered copies of SciFact raised it to `fail` with the
-  queries unchanged). The text output prints it and
-  the MCP instructions tell the agent to follow it
+  cause they likely share, in fix order
+  - Causes: input integrity, dominant dimension, metric, shared direction, weak signal,
+    corpus structure, index, query pipeline
+  - Each step has the common cause, the smallest change, what to re-measure and why it comes
+    at that position
+  - Collapse without exact copies next to a non-ok anisotropy is grouped with the shared
+    direction, not with deduplication
+  - norms, metric_mismatch, outliers and hub findings next to a non-ok rogue_dimensions join
+    the dominant-dimension step, whose first change is z-scoring, because normalizing does
+    not remove a dominant coordinate (on 21 real pairs with one coordinate scaled 30x,
+    z-scoring restored a median 98% of nDCG@10)
+  - Query hubness next to corpus hubness joins the hubness step
+  - query_gap next to a duplicate problem joins the input-integrity step, because
+    near-copies shrink the corpus distance it divides by (60% jittered copies of SciFact
+    raised it to `fail` with the queries unchanged)
+  - The text output prints it and the MCP instructions tell the agent to follow it
 - Vector store adapters (`vecscope.adapters`, optional extras `qdrant`, `chroma`, `milvus`,
   `weaviate`, `stores`): the audit path can be a faiss index file or a store URI
-  (`qdrant://`, `chroma://`, `milvus://`, `weaviate://`, and `+local` forms). Rows are read in
-  ascending id order with a fingerprint in `Evidence.source`; findings carry
-  `sample_source_ids`; `--ann-from-source` scores the store's own index; `--save-ids` writes
-  the ids in row order; API keys only from `api_key_env=`. Tested against faiss Flat/IVF/HNSW
-  and IDMap files, Qdrant local mode, Chroma persistent mode and Milvus Lite; Weaviate against
-  an embedded server (opt-in test, `VECSCOPE_TEST_WEAVIATE=1`). A Milvus collection that is
-  not loaded is loaded for the read and released again. The MCP server reads network stores
-  only with `--allow-network` (`VECSCOPE_ALLOW_NETWORK=1`)
-- Incremental exact k-NN (`vecscope.incremental`, `audit(..., knn=)`, CLI `--knn-cache`):
-  neighbor lists cached with a SHA-256 fingerprint of their rows, reused for the same rows,
-  extended for appended rows (new rows against all, old rows against the new ones) and
-  rebuilt otherwise; `Evidence.knn_cache` reports which. Equal to a full computation except
-  among exact ties. On 100k x 768, appending 5k rows audits in 15 s against 94 s for a full
-  audit, 20k rows in 47 s against 123 s
+  (`qdrant://`, `chroma://`, `milvus://`, `weaviate://`, and `+local` forms)
+  - Rows are read in ascending id order with a fingerprint in `Evidence.source`; findings
+    carry `sample_source_ids`
+  - `--ann-from-source` scores the store's own index; `--save-ids` writes the ids in row
+    order; API keys only from `api_key_env=`
+  - Tested against faiss Flat/IVF/HNSW and IDMap files, Qdrant local mode, Chroma persistent
+    mode and Milvus Lite; Weaviate against an embedded server (opt-in test,
+    `VECSCOPE_TEST_WEAVIATE=1`)
+  - A Milvus collection that is not loaded is loaded for the read and released again
+  - The MCP server reads network stores only with `--allow-network`
+    (`VECSCOPE_ALLOW_NETWORK=1`)
+- Incremental exact k-NN (`vecscope.incremental`, `audit(..., knn=)`, CLI `--knn-cache`)
+  - Neighbor lists cached with a SHA-256 fingerprint of their rows, reused for the same rows,
+    extended for appended rows (new rows against all, old rows against the new ones) and
+    rebuilt otherwise; `Evidence.knn_cache` reports which
+  - Equal to a full computation except among exact ties
+  - On 100k x 768, appending 5k rows audits in 15 s against 94 s for a full audit, 20k rows
+    in 47 s against 123 s
 - Agent integration: `tests/test_agent_workflow.py` runs audit, plan step, change and
   re-audit over the MCP stdio protocol; README and Korean README give Claude Code, Cursor and
   Codex configurations
@@ -71,59 +98,64 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- ANN recall tie slack reduced from `1e-6 + 1e-5 x distance` to `1e-6 + 2e-6 x distance`:
-  on 100k x 768 clustered vectors the 0.6.0 slack credited 11th neighbors 1.3e-6 to 2.7e-6
-  farther than the 10th (two to six times the measured float32 error of at most 5.9e-7),
-  +0.0003 recall against a strict scorer at IVF nprobe=1. With 2e-6 all 24 settings of the
-  exactness run (six shapes x HNSW and IVF) are within 1e-4 of the strict scorer, the 57
-  real (model, dataset) pairs within 3.1e-4 (0.6.0: 6.2e-4), and exact ties still match
+- ANN recall tie slack reduced from `1e-6 + 1e-5 x distance` to `1e-6 + 2e-6 x distance`
+  - On 100k x 768 clustered vectors the 0.6.0 slack credited 11th neighbors 1.3e-6 to 2.7e-6
+    farther than the 10th (two to six times the measured float32 error of at most 5.9e-7),
+    +0.0003 recall against a strict scorer at IVF nprobe=1
+  - With 2e-6 all 24 settings of the exactness run (six shapes x HNSW and IVF) are within
+    1e-4 of the strict scorer, the 57 real (model, dataset) pairs within 3.1e-4 (0.6.0:
+    6.2e-4), and exact ties still match
 - The query mismatch injection test checks `query_gap` and `query_shift` alongside
   `ood_queries`; `describe_findings` lists the two new findings
 - README, Korean README, skill and verification page: the query section describes
-  `query_gap` and `query_shift`, and states that a missing query prefix is not detected by
-  any query finding (on SciFact and NFCorpus dropping the bge/e5/mxbai prefix moved nDCG@10
-  by -0.014 to +0.007 and the query distances in either direction), and that models
-  fine-tuned from the same base (bge-large and mxbai, bge-base and gte-base, bge-m3 and its
-  Korean fine-tunes) share a space, so swapping them is not always a fault
+  `query_gap` and `query_shift`
+  - It states that a missing query prefix is not detected by any query finding (on SciFact
+    and NFCorpus dropping the bge/e5/mxbai prefix moved nDCG@10 by -0.014 to +0.007 and the
+    query distances in either direction)
+  - It states that models fine-tuned from the same base (bge-large and mxbai, bge-base and
+    gte-base, bge-m3 and its Korean fine-tunes) share a space, so swapping them is not always
+    a fault
 - Verification page: correlations of every finding with nDCG@10 for 19 models on six labeled
-  datasets (ArguAna, SCIDOCS and FiQA added, none used to set a threshold), the intervention
-  study (centering, deduplication, z-scoring a dominant coordinate, ef_search against
-  retrieval quality on 21 real pairs) and the agent run; `docs/retrieval_quality.md`
-  regenerated with `query_gap`
+  datasets, the intervention study and the agent run
+  - Datasets: ArguAna, SCIDOCS and FiQA added, none used to set a threshold
+  - Intervention study: centering, deduplication, z-scoring a dominant coordinate, ef_search
+    against retrieval quality on 21 real pairs
+  - `docs/retrieval_quality.md` regenerated with `query_gap`
 - `examples/retrieval_quality.py` loads models without the `dtype` keyword, which
   transformers before 4.56 rejects
 - Korean documents: ranges written with `~` are escaped so GitHub does not render them as
   strikethrough
-
 - `query_hubness` explanation, README row and skill state the measured healthy range and
-  that it grows with corpus size (good English models 1.5 to 3.4 up to 26k documents, 4.0 to
-  4.8 on FiQA's 58k); the thresholds stay (4, 10), since FiQA was held out from calibration
-
+  that it grows with corpus size
+  - Good English models 1.5 to 3.4 up to 26k documents, 4.0 to 4.8 on FiQA's 58k
+  - The thresholds stay (4, 10), since FiQA was held out from calibration
 - The hubness action and the corpus-structure plan step name CSLS against the queries
   (2 cos(q, d) minus d's mean cosine to its 10 nearest queries) instead of "mutual k-NN or
-  local scaling": on 21 real pairs it raised nDCG@10 on all 4 with `query_hubness` not ok,
-  while the same scaling by corpus neighbors lowered nDCG@10 on 16 of 21
-
+  local scaling"
+  - On 21 real pairs it raised nDCG@10 on all 4 with `query_hubness` not ok, while the same
+    scaling by corpus neighbors lowered nDCG@10 on 16 of 21
 - CI runs the vector store adapter and agent workflow tests against local Qdrant, Chroma and
   Milvus Lite in a separate Linux job with the `stores` extra
-
-- MCP `audit_embeddings`: every response carries an `audit_id` (a content hash); `baseline`
-  takes an id from this server session (the last 32 audits are kept in memory) or an
-  evidence file and adds `baseline_diff` with `tolerances`, as `--baseline` does in the CLI.
-  `summary` names retrieval nDCG, the first plan step and the baseline comparison;
-  `verbose=false` also drops explanations of ok findings and the thresholds table
-- `corpus_fingerprint` on every Evidence (SHA-256 of the rows). `--baseline` (CLI) and
-  `baseline` (MCP) are the `query_shift` reference only for the same corpus or an unchanged
-  prefix of it; after a transform the earlier query distances are in another space and
-  flagged every query as shifted, so `query_shift` is skipped with a `query_reference_note`
+- MCP `audit_embeddings`: every response carries an `audit_id` (a content hash)
+  - `baseline` takes an id from this server session (the last 32 audits are kept in memory)
+    or an evidence file and adds `baseline_diff` with `tolerances`, as `--baseline` does in
+    the CLI
+  - `summary` names retrieval nDCG, the first plan step and the baseline comparison
+  - `verbose=false` also drops explanations of ok findings and the thresholds table
+- `corpus_fingerprint` on every Evidence (SHA-256 of the rows)
+  - `--baseline` (CLI) and `baseline` (MCP) are the `query_shift` reference only for the same
+    corpus or an unchanged prefix of it
+  - After a transform the earlier query distances are in another space and flagged every
+    query as shifted, so `query_shift` is skipped with a `query_reference_note`
 - qrels files that are not text, or have another extension, are refused with the file name
   instead of a decoding error
 
 ### Deprecated
 
 - `ood_queries` (`queries.ood_query_ratio`): its cutoff also counts the normal distance
-  between short queries and long passages. It stays in 0.7.0 with a deprecation note in its
-  explanation and is removed in 0.8.0; read `query_gap` instead
+  between short queries and long passages
+  - It stays in 0.7.0 with a deprecation note in its explanation and is removed in 0.8.0;
+    read `query_gap` instead
 
 ## [0.6.0] - 2026-10-30
 

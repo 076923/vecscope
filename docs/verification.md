@@ -3,17 +3,25 @@
 # Verification
 
 This page records how vecscope's claims were checked and what the measurements show:
-exactness against float64, the ANN recall scorer, sampled audits, the thresholds against
-retrieval quality on labeled data, the query findings, what happens to retrieval when a fix
-from the plan is applied, and an agent following the plan over MCP. The thresholds and the
-plan rules are set from these results.
+
+- exactness against float64
+- the ANN recall scorer
+- sampled audits
+- the thresholds against retrieval quality on labeled data
+- the query findings
+- what happens to retrieval when a fix from the plan is applied
+- an agent following the plan over MCP
+
+The thresholds and the plan rules are set from these results.
 
 - Environment: AMD EPYC 7R13, 8 vCPU, 26 GB RAM, NVIDIA L4; Python 3.12.3, numpy 2.2.6,
   faiss 1.15.1, sentence-transformers 3.4.1, torch 2.6.0
-- Corpora: six synthetic shapes (`examples/bench_common.py`: clustered, isotropic,
-  anisotropic, duplicates, lowrank, zipf), the eight public pre-computed embedding sets of
-  the README table, and six labeled datasets encoded with 19 models: BEIR SciFact, NFCorpus,
-  ArguAna, SCIDOCS and FiQA-2018, and ko-strategyqa (Korean)
+- Corpora:
+  - six synthetic shapes (`examples/bench_common.py`: clustered, isotropic, anisotropic,
+    duplicates, lowrank, zipf)
+  - the eight public pre-computed embedding sets of the README table
+  - six labeled datasets encoded with 19 models: BEIR SciFact, NFCorpus, ArguAna, SCIDOCS
+    and FiQA-2018, and ko-strategyqa (Korean)
 - Vector stores: faiss 1.15.1, Qdrant client 1.20 (local mode), Chroma 1.5, Milvus Lite 3.2,
   Weaviate client 4.24
 
@@ -35,8 +43,10 @@ plan rules are set from these results.
 ## Finding values against nDCG@10
 
 Spearman correlation between each finding's value and nDCG@10 across the 19 models, per
-dataset. A negative value means the finding rises as retrieval gets worse. ArguAna nDCG@10 is
-computed as BEIR does, without the query's own document, which is in the corpus.
+dataset. A negative value means the finding rises as retrieval gets worse.
+
+ArguAna nDCG@10 is computed as BEIR does, without the query's own document, which is in the
+corpus.
 
 | finding | SciFact | NFCorpus | ko-strategyqa | ArguAna | SCIDOCS | FiQA |
 |---|---|---|---|---|---|---|
@@ -62,16 +72,18 @@ What this supports:
   to rank models.
 - `anisotropy` and `rogue_dimensions` change sign between datasets; they are not quality
   scores. `anisotropy` is `ok` on all 114 pairs.
-- ArguAna, SCIDOCS and FiQA were not used to set any threshold. On them `query_gap` flags only
-  GloVe on SCIDOCS (2.90, `warn`); good models stay at or below 1.59. `query_hubness` warns on
-  17 of the 19 models on FiQA, the good ones at 4.0 to 4.2, just above the `warn` threshold
-  of 4 because the skewness grows with corpus size (English models: 1.5 to 3.4 up to 26k
-  documents, 4.0 to 4.8 on FiQA's 58k). The thresholds were kept, since refitting them on a
-  held-out set would make it a training set; the explanation states the range instead. It also
-  fails the multilingual models on SCIDOCS (14 to 25, nDCG@10 0.15 to 0.17 against
-  0.23 for the best English models). `hubness` warns on most models on SCIDOCS (25k
-  documents) and FiQA (57k): skewness grows with corpus size, so compare it against a
-  baseline of the same corpus rather than read the absolute `warn`.
+- ArguAna, SCIDOCS and FiQA were not used to set any threshold. On them:
+  - `query_gap` flags only GloVe on SCIDOCS (2.90, `warn`); good models stay at or below 1.59.
+  - `query_hubness` warns on 17 of the 19 models on FiQA, the good ones at 4.0 to 4.2, just
+    above the `warn` threshold of 4 because the skewness grows with corpus size (English
+    models: 1.5 to 3.4 up to 26k documents, 4.0 to 4.8 on FiQA's 58k).
+    - The thresholds were kept, since refitting them on a held-out set would make it a
+      training set; the explanation states the range instead.
+    - It also fails the multilingual models on SCIDOCS (14 to 25, nDCG@10 0.15 to 0.17
+      against 0.23 for the best English models).
+  - `hubness` warns on most models on SCIDOCS (25k documents) and FiQA (57k): skewness grows
+    with corpus size, so compare it against a baseline of the same corpus rather than read the
+    absolute `warn`.
 - A pipeline that is wrong in an obvious way (GloVe on BEIR, a Korean-only model on English,
   an English-only model on Korean) raises several findings at once. The count of warnings
   separates such pipelines; a single `fail` does not.
@@ -80,11 +92,14 @@ What this supports:
 
 `query_gap` and `query_shift` were chosen from three candidates measured on the cached
 embeddings of the 19 models on SciFact, NFCorpus and ko-strategyqa. Every (model, dataset)
-pair was scored on its own queries and on three injected faults: the query prefix dropped
-(bge, e5, mxbai; 21 sets), queries embedded by every other model of the same dimension
-(312 sets), and English-only models on Korean data (11 sets). q_nn is the nearest
-query-to-corpus distance. The thresholds sit just above the worst reproduced pipeline, so
-they are fitted to this data without a held-out split.
+pair was scored on its own queries and on three injected faults:
+
+- the query prefix dropped (bge, e5, mxbai; 21 sets)
+- queries embedded by every other model of the same dimension (312 sets)
+- English-only models on Korean data (11 sets)
+
+q_nn is the nearest query-to-corpus distance. The thresholds sit just above the worst
+reproduced pipeline, so they are fitted to this data without a held-out split.
 
 | criterion | query_gap: median q_nn / median corpus NN | query_shift: share beyond reference median + 3 MAD | mutual: top-k documents that neighbor each other | ood_queries |
 |---|---|---|---|---|
@@ -98,29 +113,38 @@ they are fitted to this data without a held-out split.
 | verdict changes on 5 samples of 100 queries | 0.1% | 0.2% | 1.9% | 1.0% |
 
 `query_gap` needs no reference; `query_shift` compares against the query distances stored in
-a baseline. `ood_queries` stays in the output for comparison and is deprecated. Three of the
-fault criteria turned out to describe something other than a query-side fault:
+a baseline. `ood_queries` stays in the output for comparison and is deprecated.
+
+Three of the fault criteria turned out to describe something other than a query-side fault:
 
 - **Missing prefix.** Dropping the bge, e5 or mxbai query prefix changed nDCG@10 by −0.014
   to +0.007 on SciFact and NFCorpus, and moved the query distances closer (bge-base
-  `query_gap` 1.55 to 1.21 on SciFact) or farther (e5-base 1.64 to 1.75 on NFCorpus). There
-  is no geometric signal to detect, and on this data little harm.
+  `query_gap` 1.55 to 1.21 on SciFact) or farther (e5-base 1.64 to 1.75 on NFCorpus).
+
+  There is no geometric signal to detect, and on this data little harm.
 - **Another model.** Models fine-tuned from the same base share a space: the mean cosine of
   the same document under mxbai-embed-large and bge-large is 0.985, under gte-base and
-  bge-base 0.885 (0.004 for mpnet and bge-base). Their swapped queries keep most of the
-  nDCG@10 (gte-base queries on the bge-base corpus: 0.697 against 0.740), and they are the
-  two 768-dim swaps that `query_gap` and `query_shift` did not fail.
+  bge-base 0.885 (0.004 for mpnet and bge-base).
+
+  Their swapped queries keep most of the nDCG@10 (gte-base queries on the bge-base corpus:
+  0.697 against 0.740), and they are the two 768-dim swaps that `query_gap` and `query_shift`
+  did not fail.
 - **Another language.** An English-only model on ko-strategyqa encodes the Korean queries
   and documents equally badly, so nothing is asymmetric between them; `query_hubness`
   fails 10 of the 11 (11 to 30) and warns on the last (8.3).
 
 ## Interventions
 
-Does retrieval quality move when a plan step is applied? The verification harness (kept
-outside this repository, like the other measurements on this page) takes 21
-real (model, dataset) pairs (8 models on SciFact, 8 on NFCorpus, 5 on ko-strategyqa), applies
-each change to the corpus and the same transform to the queries, and records the findings,
-the plan and `retrieval` (nDCG@10, recall@10, duplicate share) before and after.
+Does retrieval quality move when a plan step is applied?
+
+The verification harness (kept outside this repository, like the other measurements on this
+page):
+
+- takes 21 real (model, dataset) pairs (8 models on SciFact, 8 on NFCorpus, 5 on
+  ko-strategyqa)
+- applies each change to the corpus and the same transform to the queries
+- records the findings, the plan and `retrieval` (nDCG@10, recall@10, duplicate share) before
+  and after
 
 | intervention | finding | retrieval | plan |
 |---|---|---|---|
@@ -153,22 +177,24 @@ What this supports:
 ## Agent integration
 
 - `tests/test_agent_workflow.py` drives the MCP server over stdio: a corpus with
-  unnormalized vectors and a shared offset, audited with labeled queries. The loop applies
-  the first plan step and re-audits until no injected defect is left. The plan asks for
-  `metric` (normalize) and then `shared_direction` (center), after which `anisotropy`,
-  `metric_mismatch`, `collapse` and `norms` are `ok` and nDCG@10 is not lower.
+  unnormalized vectors and a shared offset, audited with labeled queries.
+  - The loop applies the first plan step and re-audits until no injected defect is left.
+  - The plan asks for `metric` (normalize) and then `shared_direction` (center), after which
+    `anisotropy`, `metric_mismatch`, `collapse` and `norms` are `ok` and nDCG@10 is not lower.
 - The test also re-audits with `baseline` set to the previous `audit_id` and checks that
   `baseline_diff` lists the step's findings as improved, none of them as regressions, and no
-  loss of nDCG@10. It found that a baseline made before a transform must not be the
-  reference for `query_shift` (the centered queries all looked shifted); the reference is now
-  used only for the same corpus, checked by `corpus_fingerprint`.
+  loss of nDCG@10.
+  - It found that a baseline made before a transform must not be the reference for
+    `query_shift` (the centered queries all looked shifted).
+  - The reference is now used only for the same corpus, checked by `corpus_fingerprint`.
 - The same task given to Claude Code 2.1 in headless mode (`claude -p` with the vecscope MCP
-  server and `--allow-dir`), twice: 10 to 11 turns, 51 to 54 seconds. It followed the plan in
-  order (metric, then shared_direction), re-audited with `baseline` set to the previous
-  `audit_id` without being told to, took `metric_mismatch`, `anisotropy`, `hubness`,
-  `antihubs` and `collapse` to `ok` with nDCG@10 unchanged at 1.0, and left the remaining
-  `outliers` warn (0.011, threshold 0.01) alone: the rows were not broken vectors and one was
-  a labeled answer.
+  server and `--allow-dir`), twice: 10 to 11 turns, 51 to 54 seconds.
+  - It followed the plan in order (metric, then shared_direction).
+  - It re-audited with `baseline` set to the previous `audit_id` without being told to.
+  - It took `metric_mismatch`, `anisotropy`, `hubness`, `antihubs` and `collapse` to `ok`
+    with nDCG@10 unchanged at 1.0.
+  - It left the remaining `outliers` warn (0.011, threshold 0.01) alone: the rows were not
+    broken vectors and one was a labeled answer.
 
 ## Limitations
 
@@ -194,6 +220,7 @@ What this supports:
   NFCorpus.
 - The 19-model, six-dataset, query-finding and intervention runs use a harness that is not
   shipped with the package. The behavior they set is pinned by tests instead:
-  `tests/test_query_findings.py` (query_gap and query_shift), `tests/test_plan_incremental.py`
-  (the plan rules, including the dominant-dimension and duplicate cases) and
-  `tests/test_regression_injection.py` (injected faults).
+  - `tests/test_query_findings.py` (query_gap and query_shift)
+  - `tests/test_plan_incremental.py` (the plan rules, including the dominant-dimension and
+    duplicate cases)
+  - `tests/test_regression_injection.py` (injected faults)
