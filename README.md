@@ -159,14 +159,20 @@ hypotheses, not prescriptions:
 The [agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) spells out
 that loop.
 
-Thresholds are defaults calibrated on [seven public models](#real-embeddings) and re-checked
-against 19 models on nine labeled datasets in two languages ([verification](https://github.com/076923/vecscope/blob/main/docs/verification.md)).
-They are a starting point for diagnosis, not a universal quality bar.
+### Thresholds
 
-Embedding spaces differ by model, language, domain and dimensionality, so a `warn` on a good
-model is normal and a clean audit does not guarantee good search.
+The thresholds are defaults:
 
-Override any pair per run:
+- calibrated on [seven public models](#real-embeddings)
+- re-checked against 19 models on nine labeled datasets in two languages
+  ([verification](https://github.com/076923/vecscope/blob/main/docs/verification.md))
+
+They are a starting point for diagnosis, not a universal quality bar. Embedding spaces
+differ by model, language, domain and dimensionality, so a `warn` on a good model is normal
+and a clean audit does not guarantee good search.
+
+Override any pair per run, or derive them from your own data with
+[`vecscope calibrate`](#calibrating-thresholds-to-your-domain):
 
 ```bash
 vecscope audit vectors.npy --thresholds my_thresholds.json
@@ -375,6 +381,8 @@ change is judged by the finding it was meant to fix *and* by retrieval:
 
 `retrieval_comparable` is false when the two runs used different qrels or k.
 
+### The fix order
+
 Every audit also carries a `plan`: the non-ok findings grouped by the cause they likely
 share, in the order to fix them. Each step lists:
 
@@ -411,18 +419,24 @@ The order follows dependencies between fixes:
 - then corpus structure and the index
 - the query side last, measured against the corrected corpus
 
-A near-duplicate share caused by a shared direction (every cosine above the cutoff, no exact
-copies) is grouped with the direction, not with deduplication. A `query_gap` next to
-duplicates is listed with them: near-copies shrink the corpus distance the gap divides by, so
-it is read again after deduplicating before the queries are blamed. Islands next to a
-near-duplicate group smaller than the island size go with the duplicates too, since the
-copies may be the islands.
+A few findings move to the step whose cause can produce them:
 
-The rules are fixed and listed in `src/vecscope/plan.py`; a step is a hypothesis to test with
-its re-measure line, not a diagnosis. Each finding in a step carries `placed_because`: either
-"this group's cause covers it", or the other finding whose verdict put it there (for example
-"rogue_dimensions is not ok; one coordinate moves this finding too"). The second kind is a
-grouping by co-occurrence, so check it with the step's re-measure numbers.
+- A near-duplicate share caused by a shared direction (every cosine above the cutoff, no
+  exact copies) goes with the direction, not with deduplication.
+- A `query_gap` next to duplicates goes with them. Near-copies shrink the corpus distance the
+  gap divides by, so it is read again after deduplicating before the queries are blamed.
+- Islands next to a near-duplicate group smaller than the island size go with the
+  duplicates, since the copies may be the islands.
+
+The rules are fixed and listed in `src/vecscope/plan.py`. A step is a hypothesis to test with
+its re-measure line, not a diagnosis.
+
+Each finding in a step carries `placed_because`, one of:
+
+- "this group's cause covers it"
+- the other finding whose verdict put it there, for example "rogue_dimensions is not ok; one
+  coordinate moves this finding too". This is a grouping by co-occurrence, so check it with
+  the step's re-measure numbers.
 
 What the fixes did to retrieval on real embeddings is in the
 [verification](https://github.com/076923/vecscope/blob/main/docs/verification.md#interventions).
@@ -430,9 +444,11 @@ What the fixes did to retrieval on real embeddings is in the
 ## Read from a vector store
 
 The path can name a faiss index file or a vector database instead of an embedding file.
-Rows are read in ascending id order, so two reads of unchanged contents give the same matrix,
-and the evidence records the source with a fingerprint of what was read. Row ids in
-`details.sample_ids` come with `sample_source_ids`, the store's own ids.
+
+- Rows are read in ascending id order, so two reads of unchanged contents give the same
+  matrix.
+- The evidence records the source with a fingerprint of what was read.
+- Row ids in `details.sample_ids` come with `sample_source_ids`, the store's own ids.
 
 ```bash
 pip install "vecscope[qdrant]"     # or [chroma], [milvus], [weaviate], [index] for faiss, [stores] for all
@@ -458,8 +474,10 @@ Options go in the query string:
   are not used)
 
 Reading is read-only, except that a Milvus collection that is not loaded is loaded for the
-read and released again. The MCP server reads local stores under `--allow-dir`, and network
-stores only when started with `--allow-network`.
+read and released again.
+
+The MCP server reads local stores inside its [allowed directories](#what-the-server-may-read),
+and network stores only when started with `--allow-network`.
 
 ## Large corpora: incremental audits
 
@@ -515,6 +533,61 @@ command = "vecscope-mcp"
 args = ["--allow-dir", "/data/embeddings"]
 ```
 
+Then ask:
+
+```text
+Audit the embeddings in data/chunks.npy before we tune the retriever, and tell me
+which finding to fix first.
+```
+
+### Tools and responses
+
+- `audit_embeddings` runs the audit, with the same inputs as the CLI.
+- `sweep_index` runs the [index sweep](#index-sweep).
+- `compare_embeddings` runs the [comparison](#compare-two-embeddings).
+- `describe_findings` lists every finding with its thresholds, causes and actions.
+
+Responses start with a one-line `summary` and an `audit_id`. The summary names the non-ok
+findings, retrieval nDCG, the first plan step and, on a re-audit, the comparison with the
+baseline.
+
+Pass that id as `baseline` when re-auditing after a change. The response then carries
+`baseline_diff` (verdict and value changes, `regressions`, `improvements`, retrieval
+changes), as `--baseline` does in the CLI, without the agent saving the earlier response.
+The server keeps its last 32 audits in memory; a saved response or `--json` file works too.
+
+`verbose=false` drops the details, explanations and actions of findings that are ok. Agents
+without MCP can run the CLI with `--json` and read the same evidence.
+
+The agent skill in [`.agents/skills/vecscope/SKILL.md`](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md)
+tells the agent when to run the audit and what to do about each verdict: center or swap the
+model, deduplicate, re-rank, or rebuild the index. The server also carries those
+instructions, so an agent that only has the MCP connection follows the same loop.
+
+### What the server may read
+
+The tools are read-only, but they read whatever path the agent names, so the server limits
+where that can be. A path outside the allowed directories (after resolving `..` and
+symlinks) is refused before it is opened.
+
+- By default, only the directory it was started in and below.
+- `--allow-dir DIR` names the directories instead, as in the setup above. It can be
+  repeated; the environment variable `VECSCOPE_ALLOWED_DIRS` (paths separated by `:` on Unix,
+  `;` on Windows) does the same.
+- `--allow-any` (or `VECSCOPE_ALLOW_ANY=1`) lifts the restriction, so every file the server
+  process can read is reachable. Use it only on your own machine.
+- Network vector stores need `--allow-network` on top. Read-only does not make reaching them
+  harmless, so grant it only where the server's network access is what you intend.
+
+Each file is read through one handle that is checked after opening: it must be a regular
+file, and the same file the path resolves to inside the allowed directories. A symlink
+swapped between the check and the read, a FIFO or a directory is refused.
+
+Local database directories (`qdrant+local://` and the like) are checked by path only,
+because their client opens the files itself.
+
+### Tested clients
+
 The diagnose, change and re-verify loop is tested over the MCP stdio protocol
 (`tests/test_agent_workflow.py`), and was run end to end by Claude Code in headless mode
 (`claude -p` with the server above).
@@ -523,65 +596,13 @@ It audited a corpus with a shared offset, normalized, centered and re-audited as
 said, and stopped at the remaining step it was not asked to fix. Cursor and Codex use the
 same protocol and were not run.
 
-Then ask:
+### If the server stops connecting
 
-```text
-Audit the embeddings in data/chunks.npy before we tune the retriever, and tell me
-which finding to fix first.
-```
+"vecscope-mcp not found" usually means the Python environment it was installed into has
+been replaced. This happens on hosted notebooks and clusters that rebuild their environment.
 
-The tools are read-only, but they read whatever path the agent names. On a machine that holds
-data the agent should not see, restrict the server to the directories with embeddings; any
-path outside them (after resolving `..` and symlinks) is refused before it is opened:
-
-```json
-{ "mcpServers": { "vecscope": { "command": "vecscope-mcp", "args": ["--allow-dir", "/data/embeddings"] } } }
-```
-
-What the server may read:
-
-- By default, only the directory it was started in and below.
-- `--allow-dir DIR` names the directories instead. It can be repeated; the environment
-  variable `VECSCOPE_ALLOWED_DIRS` (paths separated by `:` on Unix, `;` on Windows) does the
-  same.
-- `--allow-any` (or `VECSCOPE_ALLOW_ANY=1`) lifts the restriction, so every file the server
-  process can read is reachable. Use it only on your own machine.
-- Network vector stores need `--allow-network` on top; read-only does not make reaching
-  them harmless, so grant it only where the server's network access is what you intend.
-
-Each file is read through one handle that is checked after opening: it must be a regular
-file, and the same file the path resolves to inside the allowed directories. A symlink
-swapped between the check and the read, a FIFO or a directory is refused. Local database
-directories (`qdrant+local://` and the like) are checked by path only, because their client
-opens the files itself.
-
-The agent skill in [`.agents/skills/vecscope/SKILL.md`](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) tells
-the agent when to run the audit and what to do about each verdict: center or swap the model,
-deduplicate, re-rank, or rebuild the index. The server also carries those instructions, so an
-agent that only has the MCP connection follows the same loop.
-
-- `sweep_index` runs the [index sweep](#index-sweep).
-- `compare_embeddings` runs the [comparison](#compare-two-embeddings).
-- `describe_findings` lists every finding with its thresholds, causes and actions.
-
-Responses start with a one-line `summary` (the non-ok findings, retrieval nDCG, the first
-plan step and, on a re-audit, the comparison with the baseline) and an `audit_id`.
-
-Pass that id as `baseline` when re-auditing after a change: the response then carries
-`baseline_diff` (verdict and value changes, `regressions`, `improvements`, retrieval
-changes), as `--baseline` does in the CLI, without the agent saving the earlier response. The
-server keeps its last 32 audits in memory, and a saved response or `--json` file works too.
-
-`verbose=false` drops the details, explanations and actions of findings that are ok. Agents
-without MCP can run the CLI with `--json` and read the same evidence.
-
-If the server stops connecting ("vecscope-mcp not found"), the Python environment it was
-installed into has usually been replaced; this happens on hosted notebooks and clusters that
-rebuild their environment.
-
-Check with `pip show vecscope` in the interpreter the client uses, reinstall there, and
-prefer registering the server through that interpreter so the error names the right
-environment:
+Check with `pip show vecscope` in the interpreter the client uses and reinstall there. Then
+register the server through that interpreter, so the error names the right environment:
 
 ```json
 { "mcpServers": { "vecscope": { "command": "/path/to/env/bin/python", "args": ["-m", "vecscope.mcp_server"] } } }
@@ -604,9 +625,11 @@ ev.to_dict()                              # the full evidence, same as --json
 ## Use in CI
 
 The JSON output is stable across runs and carries `schema_version`, so it can be committed
-as a baseline and diffed on every index rebuild. `--baseline` prints each finding's change
-and exits 1 when any verdict got worse (or when `--fail-on` trips), so the pipeline fails on
-a regression and not on a `warn` that was already there.
+as a baseline and diffed on every index rebuild.
+
+`--baseline` prints each finding's change and exits 1 when any verdict got worse (or when
+`--fail-on` trips). The pipeline then fails on a regression, not on a `warn` that was
+already there.
 
 ```bash
 vecscope audit embeddings.npy --json > baseline.json          # once, reviewed and committed
@@ -636,6 +659,8 @@ rows. When both runs pass `--queries`, the baseline's query distances also give
 `query_shift` (see [Queries and clusters](#queries-and-clusters)); it shows up under
 `only_in_new` in the diff because the baseline itself had no reference.
 
+### Tolerances for drift
+
 A verdict is a coarse signal: a value can drift toward the threshold for months without
 crossing it. Every change row therefore carries:
 
@@ -659,10 +684,13 @@ The tolerance is a budget per rebuild against the committed baseline, so re-comm
 baseline when a change was reviewed and accepted.
 
 The run also reports `comparable`: false when n, dim, k, sampling, thresholds or the
-near-duplicate cutoff differ from the baseline. `--require-comparable` makes that an error
-(exit 2) instead of a note, which is the right policy for a gate, since a diff across
-different settings measures the settings, not the corpus. The library call is
-`diff_evidence(new, old, tolerances={...})`.
+near-duplicate cutoff differ from the baseline.
+
+`--require-comparable` makes that an error (exit 2) instead of a note. That is the right
+policy for a gate, since a diff across different settings measures the settings, not the
+corpus. The library call is `diff_evidence(new, old, tolerances={...})`.
+
+### Which rule failed the run
 
 Two different rules can fail a run, and the output keeps them apart:
 
@@ -672,7 +700,7 @@ Two different rules can fail a run, and the output keeps them apart:
   worsened beyond its tolerance).
 
 The defaults are calibrated on public models, so a domain whose healthy corpus sits at `warn`
-or `fail` on some finding should not be blocked by the absolute rule at all:
+or `fail` on some finding should not be blocked by the absolute rule at all.
 `--fail-on none --baseline baseline.json` judges only the change against the reviewed
 baseline.
 
@@ -724,9 +752,12 @@ vecscope compare a.npy b.npy --neighbors-a a_knn.npy --neighbors-b b_knn.npy   #
 ## Input formats
 
 The embedding file holds one vector per row. Every format is converted to a 2-D `float32` array
-of shape `(n, dim)` before the audit. Values must be finite: NaN, Inf and magnitudes above 1e16
-(whose squares overflow `float32`) are rejected with a message. In the examples `embeddings` is
-that array, for instance the output of a model's `encode`:
+of shape `(n, dim)` before the audit.
+
+Values must be finite: NaN, Inf and magnitudes above 1e16 (whose squares overflow `float32`)
+are rejected with a message.
+
+In the examples `embeddings` is that array, for instance the output of a model's `encode`:
 
 ```python
 embeddings = model.encode(texts)        # shape (n, dim), e.g. (3000, 128)
@@ -743,25 +774,23 @@ embeddings[0]                           # the vector of the first item
 | `.json` | a JSON array of objects (as above) or an array of lists | `[[0.1, -0.3, ...], [0.2, 0.5, ...]]` |
 | `.csv`, `.tsv`, `.txt` | one vector per line, numbers only, no header or id column | `0.1,-0.3,0.8,...` |
 
-The optional `--ann` file (or `ann_path` in MCP) is an integer array of shape `(n, k)`: row `i`
-holds the ids of the `k` neighbors an ANN index returned for item `i`, in the same row order as
-the embedding file. Any of the formats above works.
+The optional inputs:
 
-Ids refer to row positions, so the file must come from an index built on exactly these rows,
-so every row has to be audited: above the `--sample` size (100k rows by default) pass
-`--sample 0`, or the audit refuses.
+- **`--ann`** (`ann_path` in MCP): an integer array of shape `(n, k)`. Row `i` holds the ids
+  of the `k` neighbors an ANN index returned for item `i`, in the same row order as the
+  embedding file. Any of the formats above works.
+- **`--queries`** (`queries_path` in MCP): query embeddings in any of the same formats, with
+  the same `dim` as the corpus.
+- **The `query_shift` reference**: an earlier `--json` output of an audit run with
+  `--queries` (`--baseline`, or in MCP `baseline` or `query_baseline_path`).
 
-Ids that point at the item itself are ignored, so an index that returns self first should be
-queried with k + 1.
+ANN ids refer to row positions, so the file must come from an index built on exactly these
+rows, and every row has to be audited. Above the `--sample` size (100k rows by default) pass
+`--sample 0`, or the audit refuses. Ids that point at the item itself are ignored, so an
+index that returns self first should be queried with k + 1.
 
-The optional `--queries` file (`queries_path` in MCP) holds query embeddings in any of the
-same formats, with the same `dim` as the corpus.
-
-The reference for `query_shift` is an earlier `--json` output of an audit run with
-`--queries` (`--baseline`, or in MCP `baseline` or `query_baseline_path`).
-
-`--baseline` and `baseline` use it only when it was audited on the same corpus or an
-unchanged prefix of it (checked with `corpus_fingerprint`, a SHA-256 of the rows): after
+The `query_shift` reference is used only when it was audited on the same corpus or an
+unchanged prefix of it (checked with `corpus_fingerprint`, a SHA-256 of the rows). After
 normalizing or centering, the earlier query distances are in another space, so
 `query_shift` is skipped and `query_reference_note` says why.
 
@@ -771,13 +800,13 @@ Exact k-NN is quadratic in the number of rows: doubling the rows roughly quadrup
 and a full audit (`--sample 0`) of 100k rows takes minutes on a laptop.
 
 The k-NN pass works in row blocks sized to keep its distance matrix near 1 GiB whatever the
-row count; the other passes need a few float32 copies of the matrix, so the peak grows with
+row count. The other passes need a few float32 copies of the matrix, so the peak grows with
 rows x dims at roughly four times the matrix size.
 
 Measured on an 8-vCPU AMD EPYC 7R13 with 8 BLAS threads (NumPy only, single process,
-clustered synthetic corpus, k=10); memory is the peak the audit itself allocates, the input
+clustered synthetic corpus, k=10). Memory is the peak the audit itself allocates; the input
 matrix comes on top. A three-run median in separate processes agreed with these single runs
-within 2%, and the OS peak memory within 0.04 GiB:
+within 2%, and the OS peak memory within 0.04 GiB.
 
 | rows | dim | seconds | peak memory (input excluded) |
 |---|---|---|---|
@@ -793,24 +822,31 @@ within 2%, and the OS peak memory within 0.04 GiB:
 | 200,000 | 768 | 338 | 3.46 GiB |
 | 200,000, default 100k sample | 768 | 85 | 2.14 GiB |
 
-Time grows close to n² (3.5 to 3.9x per doubling from 50k up); memory is flat from 50k rows
-at 384 and 768 dims because the k-NN block shrinks with n, and steps up at 1,536 dims and at
-200k rows. The default 100k-row sample keeps any corpus near the 100k rows.
+- Time grows close to n² (3.5 to 3.9x per doubling from 50k up).
+- Memory is flat from 50k rows at 384 and 768 dims because the k-NN block shrinks with n,
+  and steps up at 1,536 dims and at 200k rows.
+- The default 100k-row sample keeps any corpus near the 100k rows.
+- `--queries` adds one more pass over the corpus per query batch, and `metric_mismatch` adds
+  a second k-NN pass only when vector norms vary.
 
-`--queries` adds one more pass over the corpus per query batch, and `metric_mismatch` adds a
-second k-NN pass only when vector norms vary. A sampled audit is a statement about the
-sample: use `--sample 0` when you need every island and outlier counted.
+To re-measure on your machine at the sizes you care about:
 
-`python examples/benchmark_scale.py --rows 50000 100000 --dim 768` re-measures the table on
-your machine (wall-clock and the peak NumPy allocates inside the audit) at the sizes you
-care about, and `examples/benchmark_sweep.py` does the same for the index sweep; both take
-`--corpus` (clustered, isotropic, anisotropic, duplicates, lowrank, zipf) and record the
-machine in their JSON.
+```bash
+python examples/benchmark_scale.py --rows 50000 100000 --dim 768   # the audit table above
+python examples/benchmark_sweep.py                                 # the index sweep
+```
+
+Both take `--corpus` (clustered, isotropic, anisotropic, duplicates, lowrank, zipf) and
+record the machine in their JSON.
+
+### Sampled audits
 
 Blocking bounds memory, not work: the exact pass still costs about n² × dim multiply-adds,
-so a million rows at 768 dims is roughly 100 times the 100k-row figure. For corpora that
-size, audit the default sample (or several with `--sample-repeats`) and reserve `--sample 0`
-for the findings that need every row. Which findings those are:
+so a million rows at 768 dims is roughly 100 times the 100k-row figure.
+
+For corpora that size, audit the default sample (or several with `--sample-repeats`) and
+reserve `--sample 0` for the findings that need every row. A sampled audit is a statement
+about the sample. Which findings need every row:
 
 | finding | what a sample gives | needs every row |
 |---|---|---|
@@ -826,12 +862,14 @@ A sampled audit therefore:
 
 - lists `inconclusive_findings` (the verdicts the table marks inconclusive)
 - flags them `INCONCLUSIVE (sampled)` in the text output and names them in the gate line
-- takes the collapse verdict from `details.estimated_full_share`: the sampled share divided
-  by the sample fraction, or the share of rows with an exact copy counted over every row
-  (`details.full_corpus_exact_copy_share`) when that is larger. Counting exact copies over
-  the whole corpus is cheap (one digest per row), so rare copies the sample missed still
-  count; near-duplicates that are not exact copies are only seen in the sample
+- takes the collapse verdict from `details.estimated_full_share` (see below)
 - repeats each caveat in the finding's explanation next to the number
+
+`estimated_full_share` is the sampled share divided by the sample fraction, or the share of
+rows with an exact copy counted over every row (`details.full_corpus_exact_copy_share`) when
+that is larger. Counting exact copies over the whole corpus is cheap (one digest per row), so
+rare copies the sample missed still count. Near-duplicates that are not exact copies are only
+seen in the sample.
 
 The 200k-row figures come from the
 [verification](https://github.com/076923/vecscope/blob/main/docs/verification.md);
@@ -973,15 +1011,19 @@ vecscope audit vectors.npy --thresholds th.json
 For each finding it reports:
 
 - the Spearman correlation with the retrieval metric across the states (`--metric`, nDCG@k by
-  default), and whether the sign is the one the finding implies;
-- the worst value among acceptable states and the best among the others;
+  default), and whether the sign is the one the finding implies
+- the worst value among acceptable states and the best among the others
 - a (warn, fail) pair only when the finding tracks quality and separates the two groups,
-  placed a third and two thirds of the way across the gap.
+  placed a third and two thirds of the way across the gap
 
 A finding that does not move with quality on your data, or moves the other way, gets no
-pair: keep its default as a reason to look. The holdout line counts the unacceptable states
-the proposal catches and the false alarms on acceptable ones. It needs at least three states
-on both sides of `--min-quality` together; five or more make the correlations worth reading.
+pair: keep its default as a reason to look.
+
+The holdout line counts the unacceptable states the proposal catches and the false alarms on
+acceptable ones.
+
+Calibration needs at least three states, with some on each side of `--min-quality`; five or
+more make the correlations worth reading.
 
 The same procedure applies to a `suggested_action`: it is a hypothesis about the cause, and
 centering, standardizing or truncating vectors changes rankings.
