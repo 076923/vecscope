@@ -4,7 +4,50 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.9.0] - 2026-10-31
+
+### Changed
+
+- `vecscope calibrate` gates only on statistically supported pairs.
+  - Each finding gets a one-sided permutation p-value in the direction it implies (exact up
+    to eight states, 20,000 seeded orderings above), Holm-adjusted over every finding tested,
+    and a 95% bootstrap interval for its Spearman correlation.
+  - A pair whose adjusted p-value is 0.05 or more is `exploratory`: reported, listed under
+    `exploratory_thresholds`, and left out of `thresholds` and `--out` unless
+    `--include-low-confidence` is given. On five states nothing can be supported; the report
+    recommends ten or more and says when there are fewer.
+  - `leave_one_out` judges every state with thresholds fitted on the others.
+  - States scored on different qrels or k are refused (`--allow-mixed-qrels` overrides).
+- The k-NN cache (`--knn-cache`) stores a digest per row (cache format 2) and updates rows
+  re-embedded in place.
+  - Changed rows, and rows whose cached list held one, are recomputed against every row; the
+    other rows only look at the changed and appended rows. Status `updated`, with
+    `changed_rows` and `recomputed_rows`.
+  - It rebuilds when the rows to recompute would be more than half of all rows, rows were
+    removed, or `dim` changed, and says why in `knn_cache.reason`. A format-1 cache is
+    rebuilt once.
+  - On 100k x 768, re-embedding 1,000 rows recomputed 10,625 of them: 19 s against 95 s for
+    a full audit, same verdicts. 10,000 changed rows would take 83 s against 89 s, hence the
+    rebuild rule.
+- Vector store reads hold float32 arrays as they arrive instead of Python lists of floats.
+
+### Added
+
+- MCP server read limit: files over `--max-read-mb` (default 4096, `VECSCOPE_MAX_READ_MB`,
+  0 = no limit) are refused before they are read, and a store stops being read once its
+  vectors pass that size. `load_source(..., max_bytes=)` does the same in Python.
+- `timeout=` URI option for network stores (default 60 s per request): Qdrant, Milvus and
+  Weaviate take it directly; for Chroma it is set on the client's session after it connects.
+- The recent-audit memory behind MCP `baseline` is guarded by a lock.
+- `examples/agent_case.py` and [docs/agent_case.md](docs/agent_case.md): Claude Code in
+  headless mode diagnosing and fixing two ingestion faults in real SciFact embeddings over
+  MCP, with the tool calls and numbers of the runs.
+
+### Security
+
+- Store URIs in evidence and error messages drop user info and replace every query value
+  other than the known options with `REDACTED`; errors raised by store clients are re-raised
+  with the API key and those values scrubbed.
 
 ## [0.8.0] - 2026-10-31
 

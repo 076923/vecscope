@@ -64,7 +64,10 @@ def _render_text(ev) -> str:
                      f"order, fingerprint {ev.source['fingerprint'][:12]})")
     if ev.knn_cache:
         c = ev.knn_cache
-        lines.append(f"  knn cache {c['path']}: {c['status']}, {c['new_rows']} rows computed")
+        changed = f", {c['changed_rows']} changed" if c.get("changed_rows") else ""
+        why = f" ({c['reason']})" if c.get("reason") else ""
+        lines.append(f"  knn cache {c['path']}: {c['status']}{changed}, "
+                     f"{c.get('recomputed_rows', c['new_rows'])} rows computed{why}")
     if ev.clusters:
         lines.append(f"  clusters ({len(ev.clusters)}):")
         lines.append(f"{'':4}{'id':>3}{'size':>7}{'share':>7}{'cos2ctr':>9}{'neardup':>9}"
@@ -163,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("calibrate", help="propose thresholds from audits of your own pipeline "
                                          "states with labeled queries")
     b.add_argument("states", nargs="+", help="--json audits of pipeline states, each run with the "
-                                             "same --queries and --qrels (3 or more)")
+                                             "same --queries and --qrels (3 or more; 10 or more to "
+                                             "support a threshold)")
     b.add_argument("--min-quality", type=float, required=True,
                    help="a state is acceptable when its retrieval metric reaches this value")
     b.add_argument("--metric", default="ndcg_at_k",
@@ -173,7 +177,13 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--holdout", nargs="+", default=[],
                    help="--json audits not used for fitting (other states, or the same states "
                         "scored on held-out queries) to check the proposal on")
-    b.add_argument("--out", help="write the proposed thresholds here, for audit --thresholds")
+    b.add_argument("--out", help="write the gate thresholds here, for audit --thresholds")
+    b.add_argument("--include-low-confidence", action="store_true",
+                   help="also write exploratory pairs (tracking quality, but not significant "
+                        "after the multiple-comparison correction) to --out")
+    b.add_argument("--allow-mixed-qrels", action="store_true",
+                   help="accept states scored on different qrels or k (their quality values "
+                        "then do not compare)")
     b.add_argument("--json", action="store_true", help="emit JSON instead of text")
     args = p.parse_args(argv)
     try:
@@ -191,7 +201,9 @@ def _run(args) -> int:
         res = calibrate([_load_json(f, "states") for f in args.states], args.min_quality,
                         metric=args.metric, ranking=args.ranking,
                         holdout=[_load_json(f, "--holdout") for f in args.holdout] or None,
-                        names=[Path(f).name for f in args.states])
+                        names=[Path(f).name for f in args.states],
+                        include_low_confidence=args.include_low_confidence,
+                        allow_mixed_qrels=args.allow_mixed_qrels)
         if args.out:
             Path(args.out).write_text(json.dumps(res["thresholds"], indent=2) + "\n",
                                       encoding="utf-8")

@@ -10,7 +10,13 @@ import pytest
 from vecscope import audit
 from vecscope._knn import exact_knn
 from vecscope.cli import main
-from vecscope.incremental import cached_knn, cached_knn_for_audit, extend_knn, fingerprint
+from vecscope.incremental import (
+    cached_knn,
+    cached_knn_for_audit,
+    extend_knn,
+    fingerprint,
+    refresh_knn,
+)
 from vecscope.plan import build_plan
 
 
@@ -186,13 +192,47 @@ def test_cache_reuses_extends_and_rebuilds(tmp_path):
     _, full_d = exact_knn(x, 10)
     np.testing.assert_allclose(out["cosine"][1], full_d, atol=2e-6)
     changed = x.copy()
-    changed[5] += 1.0  # an old row changed: the prefix no longer matches
-    _, info = cached_knn(changed, 10, path)
-    assert info["status"] == "created"
-    _, info = cached_knn(changed[:, :16], 10, path)  # other dim
-    assert info["status"] == "created"
+    changed[5] += 1.0  # one row re-embedded in place: only it and its neighbors are redone
+    out, info = cached_knn(changed, 10, path)
+    assert info["status"] == "updated" and info["changed_rows"] == 1
+    assert 1 <= info["recomputed_rows"] < 100
+    _, full_d = exact_knn(changed, 10)
+    np.testing.assert_allclose(out["cosine"][1], full_d, atol=2e-6)
+    many = changed.copy()
+    many[::10] += 0.5  # a tenth changed, spread out: most lists hold one, so rebuilt
+    _, info = cached_knn(many, 10, path)
+    assert info["status"] == "created" and "130 changed rows would recompute" in info["reason"]
+    _, info = cached_knn(many[:1200], 10, path)
+    assert info["status"] == "created" and info["reason"] == "rows were removed"
+    _, info = cached_knn(many[:1200, :16], 10, path)  # other dim
+    assert info["status"] == "created" and info["reason"] == "other dim"
     z = np.load(path)
-    assert str(z["fingerprint"]) == fingerprint(changed[:, :16]) and int(z["n"]) == 1300
+    assert str(z["fingerprint"]) == fingerprint(many[:1200, :16]) and int(z["n"]) == 1200
+
+
+@pytest.mark.parametrize("metric", ["cosine", "dot"])
+def test_refresh_after_changes_and_appends_equals_full_exact_knn(metric):
+    rng = np.random.default_rng(11)
+    x = _clustered(1300, seed=11) * rng.uniform(0.5, 2, (1300, 1)).astype(np.float32)
+    old_i, old_d = exact_knn(x[:1000], 10, metric=metric)
+    y = x.copy()
+    moved = rng.choice(1000, 40, replace=False)
+    y[moved] = _clustered(40, seed=12) * 1.5  # re-embedded in place
+    y[moved[:5]] = y[moved[5:10]]  # some become copies of other changed rows
+    got_i, got_d = refresh_knn(y, old_i, old_d, 1000, moved, 10, metric=metric)
+    full_i, full_d = exact_knn(y, 10, metric=metric)
+    np.testing.assert_allclose(got_d, full_d, rtol=1e-6, atol=2e-6)
+    assert (got_i == full_i).mean() > 0.995  # identical except float32 near-ties
+    with pytest.raises(ValueError, match="changed rows"):
+        refresh_knn(y, old_i, old_d, 1000, [1000], 10, metric=metric)
+
+
+def test_an_older_cache_is_rebuilt(tmp_path):
+    x = _clustered(500, seed=13)
+    np.savez(tmp_path / "old.npz", version=1, n=500, dim=32, k=10, fingerprint=fingerprint(x))
+    _, info = cached_knn(x, 10, tmp_path / "old.npz")
+    assert info["status"] == "created" and info["reason"] == "older cache format"
+    assert int(np.load(tmp_path / "old.npz")["version"]) == 2
 
 
 def test_cache_rejects_a_foreign_file(tmp_path):
@@ -233,5 +273,10 @@ def test_cli_knn_cache(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["knn_cache"]["status"] == "created"
     main(["audit", str(tmp_path / "b.npy"), "--knn-cache", str(cache)])
     assert "extended, 300 rows computed" in capsys.readouterr().out
+    y = np.load(tmp_path / "b.npy")
+    y[3] += 2.0
+    np.save(tmp_path / "c.npy", y)
+    main(["audit", str(tmp_path / "c.npy"), "--knn-cache", str(cache)])
+    assert "updated, 1 changed," in capsys.readouterr().out
     assert main(["audit", str(tmp_path / "b.npy"), "--knn-cache", str(cache),
                  "--sample", "500"]) == 2

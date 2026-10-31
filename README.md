@@ -472,29 +472,48 @@ Options go in the query string:
 - `pk=` (Milvus primary key)
 - `api_key_env=NAME` (the key is read from that environment variable; keys in the URI itself
   are not used)
+- `timeout=` seconds per request to a network store (default 60)
 
 Reading is read-only, except that a Milvus collection that is not loaded is loaded for the
 read and released again.
+
+Secrets stay out of the output:
+
+- The evidence records the URI without user info, and with every query value other than the
+  options above replaced by `REDACTED`.
+- An error from a store client is re-raised with the API key and those values scrubbed.
+- Chroma's HTTP client takes no timeout of its own, so `timeout=` is set on its session after
+  it connects; the connection check the client makes when it is created has none.
 
 The MCP server reads local stores inside its [allowed directories](#what-the-server-may-read),
 and network stores only when started with `--allow-network`.
 
 ## Large corpora: incremental audits
 
-An audit of every row is quadratic in the rows. When a corpus grows by appending,
-`--knn-cache` keeps the exact neighbor lists between runs and computes only what the new
-rows change: the new rows against all rows and the old rows against the new ones.
+An audit of every row is quadratic in the rows. When a corpus grows by appending or has
+rows re-embedded in place, `--knn-cache` keeps the exact neighbor lists between runs and
+computes only what those rows change.
 
 ```bash
 vecscope audit day1.npy --sample 0 --knn-cache knn.npz    # created: all rows
 vecscope audit day2.npy --sample 0 --knn-cache knn.npz    # extended: only the appended rows
+vecscope audit day3.npy --sample 0 --knn-cache knn.npz    # updated: changed rows and their neighbors
 ```
 
-The cache holds a SHA-256 fingerprint of the rows it was computed on. It is:
+The cache holds a digest of every row it was computed on. It is:
 
 - reused for the same rows
-- extended when its rows are an unchanged prefix of the input
-- rebuilt otherwise (changed or reordered rows, another `dim`)
+- extended when rows were appended and the cached rows are unchanged
+- updated when some cached rows hold new vectors: those rows, and the rows whose neighbor
+  list contained one of them, are recomputed against every row; every other row only looks
+  at the changed and appended rows
+- rebuilt otherwise: the rows to recompute would be more than half of all rows (an update
+  would then cost about what a rebuild does), rows were removed, or `dim` changed.
+  `knn_cache.reason` says which.
+
+A change spreads: with k=10 every changed row sits in about ten other lists. Changing 1% of
+the rows at random recomputes about 10% of them, and changing 5% about half, so an update
+pays off for small, scattered re-embeddings and for appends.
 
 The neighbor lists equal a full computation except among exactly tied distances, and the
 findings agree to float32 rounding. In Python,
@@ -509,6 +528,11 @@ On 100,000 rows x 768 dims (the machine of the [performance](#performance) table
 
 Every verdict matched the full audit and the largest relative value difference was 7e-5.
 Creating the cache costs about what a full audit does (83 s here).
+
+Re-embedding 1,000 of the 100,000 rows in place recomputed 10,625 rows: 15 s to update the
+cache and 5 s to audit from it, against 95 s for a full audit, with the same verdicts. With
+10,000 rows changed an update would recompute 68,933 rows in 83 s, about as long as the full
+audit's 89 s, so the cache is rebuilt there instead.
 
 ## Use with an agent
 
@@ -586,6 +610,15 @@ swapped between the check and the read, a FIFO or a directory is refused.
 Local database directories (`qdrant+local://` and the like) are checked by path only,
 because their client opens the files itself.
 
+One request cannot exhaust the server's memory:
+
+- A file larger than `--max-read-mb` (default 4096; `VECSCOPE_MAX_READ_MB`; 0 for no limit)
+  is refused before it is read.
+- A store stops being read once its vectors pass the same size.
+
+The recent audits that `baseline` refers to are kept behind a lock. A stdio server serves the
+one client that started it; agents that run in parallel each start their own server.
+
 ### Tested clients
 
 The diagnose, change and re-verify loop is tested over the MCP stdio protocol
@@ -595,6 +628,12 @@ The diagnose, change and re-verify loop is tested over the MCP stdio protocol
 It audited a corpus with a shared offset, normalized, centered and re-audited as the plan
 said, and stopped at the remaining step it was not asked to fix. Cursor and Codex use the
 same protocol and were not run.
+
+[docs/agent_case.md](https://github.com/076923/vecscope/blob/main/docs/agent_case.md) records
+a run on real SciFact embeddings with two ingestion faults: a batch ingested twice and a
+worker that skipped normalization. From the symptom alone, the agent found both, fixed the
+corpus and re-audited against its first `audit_id`. Production nDCG@10 went from 0.100 to
+0.713.
 
 ### If the server stops connecting
 
@@ -729,7 +768,7 @@ vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv   # add nDCG/recall
 vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --ranked topk.npy   # and of the production ranking
 vecscope audit index.faiss --ann-from-source --sample 0     # read a faiss index or store; score its own neighbors
 vecscope audit "qdrant://host:6333/docs" --save-ids ids.json   # vector store URI; write ids in row order
-vecscope audit vectors.npy --sample 0 --knn-cache knn.npz   # reuse / extend exact neighbor lists between runs
+vecscope audit vectors.npy --sample 0 --knn-cache knn.npz   # reuse / extend / update exact neighbor lists between runs
 vecscope audit vectors.npy --clusters 10               # append a per-cluster report (at most n/10 clusters)
 vecscope audit vectors.npy --thresholds th.json         # override (warn, fail) pairs
 vecscope audit vectors.npy --fail-on warn              # exit 1 on WARN as well
@@ -747,6 +786,8 @@ vecscope sweep vectors.npy --n-queries 2000 --timing-repeats 5   # queries to ti
 vecscope sweep vectors.npy --latency-queries 0         # skip the single-query latency percentiles (default 200 queries)
 vecscope compare a.npy b.npy -k 10                     # agreement between two embeddings of the same rows
 vecscope compare a.npy b.npy --neighbors-a a_knn.npy --neighbors-b b_knn.npy   # full-corpus neighbors on a sample of rows
+vecscope calibrate fit_*.json --min-quality 0.45 --out th.json   # gate thresholds from your own pipeline states
+vecscope calibrate fit_*.json --min-quality 0.45 --holdout hold_*.json --include-low-confidence   # check on held-out states; also write exploratory pairs
 ```
 
 ## Input formats
@@ -1011,7 +1052,8 @@ vecscope audit vectors.npy --thresholds th.json
 For each finding it reports:
 
 - the Spearman correlation with the retrieval metric across the states (`--metric`, nDCG@k by
-  default), and whether the sign is the one the finding implies
+  default), its 95% bootstrap interval, and whether the sign is the one the finding implies
+- a one-sided permutation p-value in that direction, Holm-adjusted over every finding tested
 - the worst value among acceptable states and the best among the others
 - a (warn, fail) pair only when the finding tracks quality and separates the two groups,
   placed a third and two thirds of the way across the gap
@@ -1019,11 +1061,25 @@ For each finding it reports:
 A finding that does not move with quality on your data, or moves the other way, gets no
 pair: keep its default as a reason to look.
 
-The holdout line counts the unacceptable states the proposal catches and the false alarms on
-acceptable ones.
+With about fifteen findings tested at once, one of them tracks quality by chance on a few
+states. So a pair goes into `--out` only when its adjusted p-value is below 0.05:
 
-Calibration needs at least three states, with some on each side of `--min-quality`; five or
-more make the correlations worth reading.
+- The other pairs are reported as `exploratory` and left out of the gate file.
+  `--include-low-confidence` writes them too.
+- On five states nothing can reach that bar (the smallest one-sided p-value is 1/120 before
+  the adjustment). Ten or more states are recommended, and the report says when there are
+  fewer.
+
+Two checks judge the proposal on states it was not fitted on:
+
+- `leave_one_out` fits on all states but one and judges the one left out, for every state.
+- The holdout line counts the unacceptable `--holdout` states the gate catches and the false
+  alarms on acceptable ones. Holdout states from another dataset check whether the
+  thresholds carry over.
+
+Calibration needs at least three states, with some on each side of `--min-quality`. States
+scored on different qrels or k are refused, because their quality values do not compare
+(`--allow-mixed-qrels` overrides).
 
 The same procedure applies to a `suggested_action`: it is a hypothesis about the cause, and
 centering, standardizing or truncating vectors changes rankings.
@@ -1100,6 +1156,7 @@ JSON. The skill file describes both paths.
 - [Agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md): when to run the audit and what to do with each verdict
 - [Retrieval-quality study](https://github.com/076923/vecscope/blob/main/docs/retrieval_quality.md): every finding against nDCG@10 on labeled data
 - [Verification](https://github.com/076923/vecscope/blob/main/docs/verification.md): exactness, recall scoring, the sampling claims, the query findings, interventions, agent integration, and 19 models on 9 labeled datasets
+- [Agent case](https://github.com/076923/vecscope/blob/main/docs/agent_case.md): an agent finding and fixing two ingestion faults over MCP, with the tool calls and numbers
 - [Examples](https://github.com/076923/vecscope/tree/main/examples/): synthetic matrices, the calibration script and the retrieval-quality study
 - [Changelog](https://github.com/076923/vecscope/blob/main/CHANGELOG.md)
 

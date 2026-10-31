@@ -1261,6 +1261,44 @@ def test_mcp_read_refuses_a_path_swapped_while_it_is_opened(tmp_path, monkeypatc
         mcp_server.audit_embeddings(str(inside), k=5)
 
 
+def test_mcp_refuses_files_over_the_read_limit(tmp_path, monkeypatch):
+    pytest.importorskip("mcp")
+    from vecscope import mcp_server
+
+    x = np.random.default_rng(0).standard_normal((2000, 64)).astype(np.float32)  # 512 KB
+    np.save(tmp_path / "x.npy", x)
+    monkeypatch.setenv(mcp_server.ALLOWED_DIRS_ENV, str(tmp_path))
+    monkeypatch.setenv(mcp_server.MAX_READ_ENV, "0.25")
+    with pytest.raises(Exception, match="over the 0 MiB|--max-read-mb"):
+        mcp_server.audit_embeddings(str(tmp_path / "x.npy"), k=5)
+    monkeypatch.setenv(mcp_server.MAX_READ_ENV, "0")  # no limit
+    assert mcp_server.audit_embeddings(str(tmp_path / "x.npy"), k=5, sample=500)["n"] == 500
+    monkeypatch.delenv(mcp_server.MAX_READ_ENV)
+    assert mcp_server.max_read_bytes() == mcp_server.DEFAULT_MAX_READ_MB * 2**20
+    monkeypatch.setenv(mcp_server.MAX_READ_ENV, "lots")
+    with pytest.raises(ValueError, match="MiB"):
+        mcp_server.max_read_bytes()
+
+
+def test_mcp_recent_audits_survive_concurrent_calls():
+    pytest.importorskip("mcp")
+    from concurrent.futures import ThreadPoolExecutor
+
+    from vecscope import mcp_server
+
+    def work(i):
+        mcp_server._remember(f"{i:016x}", {"findings": [], "i": i})
+        try:
+            return mcp_server._load_baseline(f"{i:016x}")["i"]
+        except ValueError:  # evicted by 32 newer audits in between
+            return None
+
+    with ThreadPoolExecutor(8) as pool:
+        got = list(pool.map(work, range(400)))
+    assert all(g in (i, None) for i, g in enumerate(got))
+    assert len(mcp_server._RECENT) == mcp_server._RECENT_MAX
+
+
 def test_mcp_server_round_trip_over_stdio(tmp_path):
     """Start the server as a subprocess and call tools through the mcp client, so the
     version-specific server class, the tool schema and the error path run end to end."""

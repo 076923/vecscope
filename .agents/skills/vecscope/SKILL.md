@@ -22,7 +22,7 @@ vecscope audit <embeddings> --queries <query embeddings> --json   # adds query-s
 vecscope audit <embeddings> --queries <today's queries> --baseline good.json --json   # + query_shift
 vecscope audit <embeddings> --queries <q> --qrels <qrels.tsv> --json   # + nDCG/recall/MRR on labels
 vecscope audit <index.faiss | qdrant://host:6333/coll | ...> --ann-from-source --sample 0 --json
-vecscope audit <embeddings> --sample 0 --knn-cache knn.npz --json   # appended rows only
+vecscope audit <embeddings> --sample 0 --knn-cache knn.npz --json   # appended or changed rows only
 vecscope audit <embeddings> --clusters 10 --json                  # adds a per-cluster map
 vecscope sweep <embeddings>                # MCP: sweep_index; picks HNSW/IVF parameters
 vecscope compare <embeddings A> <embeddings B>   # MCP: compare_embeddings; same rows, two spaces
@@ -69,9 +69,10 @@ Vector stores:
   does.
 - Never put an API key in the URI; use `api_key_env=NAME`.
 
-Large corpora that grow by appending: `--knn-cache knn.npz` with `--sample 0` reuses the
-exact neighbor lists and computes only the new rows; `knn_cache.status` says whether the cache
-was reused, extended or rebuilt.
+Large corpora that grow by appending or re-embed some rows in place: `--knn-cache knn.npz`
+with `--sample 0` reuses the exact neighbor lists and computes only what the new or changed
+rows affect; `knn_cache.status` says whether the cache was reused, extended, updated or
+created, and `knn_cache.reason` why it was rebuilt.
 
 MCP only:
 
@@ -126,8 +127,11 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
     own baseline, and derive that baseline from labeled queries split into a tuning and a
     held-out part; a threshold chosen to make the current corpus pass predicts nothing.
   - `vecscope calibrate` proposes that file from audits of several pipeline states run with
-    `--qrels`. Use only the pairs it proposes; a finding it marks as not tracking quality (or
-    tracking it the other way) should not gate on that data. Quote its holdout line.
+    `--qrels`. Gate only on the pairs it writes to `--out` (`confidence: supported`); a pair
+    marked `exploratory` tracked quality on too few states to rule out chance, so report it
+    as a lead and ask for more states (ten or more). A finding it marks as not tracking
+    quality (or tracking it the other way) should not gate on that data. Quote its
+    leave-one-out and holdout lines.
 - A `fail` does not prove retrieval is bad and all-`ok` does not prove it is good: the audit
   measures the vector space and the index, not relevance. Say so when reporting.
 

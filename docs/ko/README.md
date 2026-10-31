@@ -464,28 +464,45 @@ vecscope audit "weaviate://localhost:8080/Docs?grpc_port=50051"
 - `https=1`
 - `pk=`(Milvus 기본 키)
 - `api_key_env=NAME`(키는 그 환경 변수에서 읽고, URI에 직접 적은 키는 쓰지 않음)
+- `timeout=`(네트워크 저장소 요청 하나의 제한 시간, 초 단위, 기본값 60)
 
 읽기만 하며, 로드되지 않은 Milvus 컬렉션만 읽는 동안 로드했다가 다시 해제합니다.
+
+비밀값은 출력에 남지 않습니다.
+
+- 결과에는 사용자 정보를 지우고, 위 옵션이 아닌 질의 값은 `REDACTED`로 바꾼 URI가 기록됩니다.
+- 저장소 클라이언트의 오류는 API 키와 그 값들을 지운 뒤 다시 던집니다.
+- Chroma HTTP 클라이언트는 자체 제한 시간 설정이 없어서, 연결한 뒤 세션에 `timeout=`을
+  겁니다. 클라이언트를 만들 때 하는 연결 확인에는 제한 시간이 없습니다.
 
 MCP 서버는 로컬 저장소를 [허용된 디렉터리](#서버가-읽을-수-있는-범위) 안에서 읽고, 네트워크
 저장소는 `--allow-network`로 시작했을 때만 읽습니다.
 
 ## 대규모 코퍼스: 증분 감사
 
-전체 행 감사는 행 수의 제곱에 비례합니다. 코퍼스가 뒤에 행을 덧붙이는 식으로 커질 때
-`--knn-cache`는 실행 사이에 정확한 이웃 목록을 보관하고, 새 행이 바꾸는 부분만 계산합니다. 새
-행과 전체 행 사이, 기존 행과 새 행 사이만 계산합니다.
+전체 행 감사는 행 수의 제곱에 비례합니다. 코퍼스가 뒤에 행을 덧붙이거나 일부 행을 제자리에서
+다시 임베딩할 때, `--knn-cache`는 실행 사이에 정확한 이웃 목록을 보관하고 그 행들이 바꾸는
+부분만 계산합니다.
 
 ```bash
 vecscope audit day1.npy --sample 0 --knn-cache knn.npz    # created: 전체 행 계산
 vecscope audit day2.npy --sample 0 --knn-cache knn.npz    # extended: 덧붙인 행만 계산
+vecscope audit day3.npy --sample 0 --knn-cache knn.npz    # updated: 바뀐 행과 그 이웃만 계산
 ```
 
-캐시에는 계산에 쓴 행의 SHA-256 지문이 들어 있습니다.
+캐시에는 계산에 쓴 행마다 해시가 들어 있습니다.
 
-- 같은 행이면 그대로 씁니다.
-- 캐시의 행이 입력 앞부분과 그대로 같으면 확장합니다.
-- 그 밖의 경우(행이 바뀌거나 순서가 바뀌었거나 `dim`이 다른 경우)에는 새로 만듭니다.
+- 같은 행이면 그대로 씁니다(reused).
+- 행이 덧붙고 캐시의 행은 그대로이면 확장합니다(extended).
+- 캐시의 행 일부가 새 벡터로 바뀌었으면 갱신합니다(updated). 바뀐 행과, 이웃 목록에 바뀐 행이
+  들어 있던 행은 전체 행과 다시 계산합니다. 나머지 행은 바뀐 행과 덧붙인 행만 봅니다.
+- 그 밖의 경우에는 새로 만듭니다. 다시 계산할 행이 전체의 절반을 넘거나(갱신 비용이 새로
+  만드는 것과 비슷해짐), 행이 지워졌거나, `dim`이 다른 경우입니다. 이유는
+  `knn_cache.reason`에 적힙니다.
+
+변경은 퍼집니다. k=10이면 바뀐 행 하나가 다른 행 약 10개의 이웃 목록에 들어 있습니다. 무작위로
+1%를 바꾸면 약 10%를, 5%를 바꾸면 약 절반을 다시 계산하므로, 갱신은 작고 흩어진 재임베딩과
+행 추가에서 이득이 있습니다.
 
 이웃 목록은 거리가 정확히 같은 동점을 빼면 전체 계산과 같고, 진단 값은 float32 반올림
 범위에서 일치합니다. Python에서는 `vecscope.incremental.cached_knn_for_audit(x, k, path)`가
@@ -499,6 +516,11 @@ vecscope audit day2.npy --sample 0 --knn-cache knn.npz    # extended: 덧붙인 
 
 판정은 모두 전체 감사와 같았고 값의 최대 상대 차이는 7e-5입니다. 캐시를 처음 만드는 비용은
 전체 감사와 비슷합니다(여기서는 83초).
+
+10만 행 중 1,000행을 제자리에서 다시 임베딩하면 10,625행을 다시 계산했습니다. 캐시 갱신에
+15초, 캐시로 감사하는 데 5초가 걸려 전체 감사(95초)보다 빨랐고 판정도 같았습니다. 1만 행을
+바꾸면 갱신이 68,933행을 다시 계산해 83초가 걸려 전체 감사(89초)와 비슷하므로, 이때는 캐시를
+새로 만듭니다.
 
 ## 에이전트와 함께 사용
 
@@ -574,6 +596,15 @@ args = ["--allow-dir", "/data/embeddings"]
 로컬 데이터베이스 디렉터리(`qdrant+local://` 등)는 클라이언트가 파일을 직접 열기 때문에 경로만
 확인합니다.
 
+요청 하나가 서버 메모리를 고갈시키지 못하게 합니다.
+
+- `--max-read-mb`(기본값 4096, `VECSCOPE_MAX_READ_MB`, 0이면 제한 없음)보다 큰 파일은 읽기 전에
+  거부합니다.
+- 저장소도 벡터가 같은 크기를 넘으면 읽기를 멈춥니다.
+
+`baseline`이 가리키는 최근 감사 기록은 락으로 보호합니다. stdio 서버는 자신을 시작한 클라이언트
+하나만 상대하므로, 에이전트를 여럿 병렬로 돌리면 각자 서버를 띄웁니다.
+
 ### 테스트한 클라이언트
 
 진단, 변경, 재검증으로 이어지는 흐름은 MCP stdio 프로토콜 위에서 테스트하고
@@ -583,6 +614,11 @@ args = ["--allow-dir", "/data/embeddings"]
 Claude Code는 공통 오프셋이 있는 코퍼스를 감사한 뒤 계획대로 정규화와 중심화를 하고 다시
 감사했으며, 요청받지 않은 나머지 단계는 건드리지 않고 멈췄습니다. Cursor와 Codex는 같은
 프로토콜을 쓰지만 직접 돌려 보지는 않았습니다.
+
+[docs/ko/agent_case.md](agent_case.md)에는 실제 SciFact 임베딩에 적재 결함 두 가지(한 배치를 두
+번 적재, 정규화를 빠뜨린 작업자)를 넣은 실행 기록이 있습니다. 에이전트는 증상만 듣고 두 결함을
+찾아 코퍼스를 고쳤고, 첫 `audit_id`를 기준으로 다시 감사했습니다. 운영 nDCG@10은 0.100에서
+0.713이 됐습니다.
 
 ### 서버가 연결되지 않을 때
 
@@ -714,7 +750,7 @@ vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv   # 정확한 검�
 vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --ranked topk.npy   # 운영 랭킹도 함께 채점
 vecscope audit index.faiss --ann-from-source --sample 0     # faiss 인덱스나 저장소를 읽고 자체 이웃을 채점
 vecscope audit "qdrant://host:6333/docs" --save-ids ids.json   # 벡터 저장소 URI, 행 순서대로 id 저장
-vecscope audit vectors.npy --sample 0 --knn-cache knn.npz   # 실행 사이에 정확한 이웃 목록을 재사용/확장
+vecscope audit vectors.npy --sample 0 --knn-cache knn.npz   # 실행 사이에 정확한 이웃 목록을 재사용/확장/갱신
 vecscope audit vectors.npy --clusters 10               # 군집별 요약 추가 (최대 n/10개)
 vecscope audit vectors.npy --thresholds th.json         # (warn, fail) 임곗값 덮어쓰기
 vecscope audit vectors.npy --fail-on warn              # warn 판정도 종료 코드 1로 처리
@@ -732,6 +768,8 @@ vecscope sweep vectors.npy --n-queries 2000 --timing-repeats 5   # 시간을 잴
 vecscope sweep vectors.npy --latency-queries 0         # 단일 질의 지연 백분위수 생략 (기본값 200개 질의)
 vecscope compare a.npy b.npy -k 10                     # 같은 행을 가진 두 임베딩의 이웃 일치도
 vecscope compare a.npy b.npy --neighbors-a a_knn.npy --neighbors-b b_knn.npy   # 행은 표본, 이웃은 전체 코퍼스
+vecscope calibrate fit_*.json --min-quality 0.45 --out th.json   # 자신의 파이프라인 상태들로 게이트 임곗값 산출
+vecscope calibrate fit_*.json --min-quality 0.45 --holdout hold_*.json --include-low-confidence   # 홀드아웃 상태로 확인, 탐색용 쌍도 함께 저장
 ```
 
 ## 입력 형식
@@ -990,8 +1028,9 @@ vecscope audit vectors.npy --thresholds th.json
 
 항목마다 다음을 보여 줍니다.
 
-- 상태들에 걸친 검색 지표(`--metric`, 기본값 nDCG@k)와의 Spearman 상관, 그리고 부호가 그
-  항목이 뜻하는 방향과 맞는지
+- 상태들에 걸친 검색 지표(`--metric`, 기본값 nDCG@k)와의 Spearman 상관, 그 95% 부트스트랩
+  구간, 그리고 부호가 그 항목이 뜻하는 방향과 맞는지
+- 그 방향의 단측 순열 검정 p값. 검정한 모든 항목에 대해 Holm 방식으로 보정합니다.
 - 허용 상태 중 가장 나쁜 값과 나머지 상태 중 가장 좋은 값
 - 항목이 품질을 따라가고 두 묶음을 가를 때만 제안하는 (warn, fail) 쌍. 두 값 사이 간격의 3분의
   1과 3분의 2 지점에 둡니다.
@@ -999,10 +1038,23 @@ vecscope audit vectors.npy --thresholds th.json
 자신의 데이터에서 품질과 함께 움직이지 않거나 반대로 움직이는 항목에는 쌍을 제안하지 않습니다.
 기본값은 들여다볼 계기로만 쓰십시오.
 
-홀드아웃 줄은 제안한 임곗값이 잡은 불합격 상태와 합격 상태에 낸 오경보 수를 셉니다.
+항목 약 15개를 한꺼번에 검정하면, 상태가 적을 때 그중 하나는 우연히 품질을 따라가는 것처럼
+보입니다. 그래서 보정한 p값이 0.05 미만인 쌍만 `--out`에 씁니다.
 
-상태는 3개 이상이어야 하고 `--min-quality` 양쪽에 모두 있어야 합니다. 상관을 읽을 만하려면
-5개 이상이 좋습니다.
+- 나머지 쌍은 `exploratory`(탐색용)로 보고하고 게이트 파일에서는 뺍니다.
+  `--include-low-confidence`를 주면 함께 씁니다.
+- 상태가 5개면 어떤 항목도 이 기준을 넘을 수 없습니다(보정 전 단측 p값의 최솟값이 1/120).
+  상태는 10개 이상을 권장하며, 그보다 적으면 보고서에 그렇게 적힙니다.
+
+제안을 맞추는 데 쓰지 않은 상태로 두 가지를 확인합니다.
+
+- `leave_one_out`은 상태마다 그 하나를 빼고 맞춘 임곗값으로 뺀 상태를 판정합니다.
+- 홀드아웃 줄은 `--holdout` 상태 중 게이트가 잡은 불합격 상태와 합격 상태에 낸 오경보 수를
+  셉니다. 다른 데이터세트의 상태를 홀드아웃으로 넘기면 임곗값이 그 데이터에도 통하는지 볼 수
+  있습니다.
+
+상태는 3개 이상이어야 하고 `--min-quality` 양쪽에 모두 있어야 합니다. 서로 다른 qrels나 k로
+채점한 상태들은 품질 값을 비교할 수 없으므로 거부합니다(`--allow-mixed-qrels`로 허용).
 
 `suggested_action`에도 같은 절차가 적용됩니다. 권장 조치는 원인에 대한 가설이고, 중심화,
 표준화, 차원 절단은 검색 순위를 바꿉니다.
@@ -1079,6 +1131,7 @@ vecscope audit vectors.npy --thresholds th.json
 - [에이전트 스킬](../../.agents/skills/vecscope/SKILL.md): 감사를 실행할 시점과 판정별 조치
 - [검색 품질 연구](retrieval_quality.md): 라벨 데이터의 nDCG@10과 모든 진단 항목을 대조한 결과
 - [검증 결과](verification.md): 정확성, recall 채점, 표본 감사, 질의 항목, 개입 실험, 에이전트 연동, 라벨 데이터세트 9개에서 모델 19종을 측정한 결과
+- [에이전트 사례](agent_case.md): 에이전트가 MCP로 적재 결함 두 가지를 찾고 고친 과정, 도구 호출과 숫자
 - [예제](../../examples/): 합성 행렬 생성 스크립트, 보정 스크립트, 검색 품질 연구 스크립트
 - [변경 이력](../../CHANGELOG.md)
 

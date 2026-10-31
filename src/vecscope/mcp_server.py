@@ -15,7 +15,13 @@ directories after it is opened, so a symlink swapped between the check and the r
 refused. A local database directory (``qdrant+local://`` and the like) is checked by path
 only, because its client opens the files itself. Vector stores reached over the network
 (qdrant://, chroma://, milvus://, weaviate://) are refused unless the server is started with
-``--allow-network`` (or ``VECSCOPE_ALLOW_NETWORK=1``); they are then read, never written.
+``--allow-network`` (or ``VECSCOPE_ALLOW_NETWORK=1``); they are then read, never written,
+with a per-request timeout (``timeout=`` in the URI, default 60 s).
+
+A file larger than ``--max-read-mb`` (default 4096, ``VECSCOPE_MAX_READ_MB``, 0 = no limit)
+is refused before it is read, and a store stops being read once its vectors pass that size,
+so one request cannot exhaust the server's memory. The recent-audit memory that ``baseline``
+refers to is guarded by a lock.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ import json
 import os
 import stat
 import sys
+import threading
 from collections import OrderedDict
 from pathlib import Path
 
@@ -49,10 +56,13 @@ _USER_ERRORS = (ValueError, TypeError, FileNotFoundError, ImportError, OSError)
 ALLOWED_DIRS_ENV = "VECSCOPE_ALLOWED_DIRS"
 ALLOW_NETWORK_ENV = "VECSCOPE_ALLOW_NETWORK"
 ALLOW_ANY_ENV = "VECSCOPE_ALLOW_ANY"
+MAX_READ_ENV = "VECSCOPE_MAX_READ_MB"
+DEFAULT_MAX_READ_MB = 4096
 # recent audits of this server process by audit_id, so a re-audit can name its baseline
 # without the agent writing the earlier response to a file; held in memory only
 _RECENT: OrderedDict[str, dict] = OrderedDict()
 _RECENT_MAX = 32
+_RECENT_LOCK = threading.Lock()
 
 
 def _audit_id(ev: dict) -> str:
@@ -62,16 +72,18 @@ def _audit_id(ev: dict) -> str:
 
 
 def _remember(audit_id: str, ev: dict) -> None:
-    _RECENT[audit_id] = ev
-    _RECENT.move_to_end(audit_id)
-    while len(_RECENT) > _RECENT_MAX:
-        _RECENT.popitem(last=False)
+    with _RECENT_LOCK:
+        _RECENT[audit_id] = ev
+        _RECENT.move_to_end(audit_id)
+        while len(_RECENT) > _RECENT_MAX:
+            _RECENT.popitem(last=False)
 
 
 def _load_baseline(ref: str) -> dict:
     """An audit_id returned earlier by this server, or a JSON evidence file."""
-    if ref in _RECENT:
-        return _RECENT[ref]
+    with _RECENT_LOCK:
+        if ref in _RECENT:
+            return _RECENT[ref]
     if len(ref) == 16 and all(c in "0123456789abcdef" for c in ref) and not Path(ref).exists():
         raise ValueError(f"baseline {ref!r} is not an audit_id of this server session (the "
                          f"server keeps the last {_RECENT_MAX}); pass the evidence JSON path")
@@ -99,6 +111,16 @@ def allowed_dirs() -> list[Path]:
     return [Path.cwd().resolve()]
 
 
+def max_read_bytes() -> int | None:
+    """The most one file or store may contribute, from VECSCOPE_MAX_READ_MB (0 = no limit)."""
+    raw = os.environ.get(MAX_READ_ENV, "")
+    try:
+        mb = float(raw) if raw.strip() else DEFAULT_MAX_READ_MB
+    except ValueError:
+        raise ValueError(f"{MAX_READ_ENV}={raw!r} is not a number of MiB") from None
+    return None if mb <= 0 else int(mb * 2**20)
+
+
 def read_checked(path: str, what: str = "path") -> bytes:
     """The content of ``path`` read through one handle that is verified to be a regular file
     inside the allowed directories.
@@ -119,6 +141,11 @@ def read_checked(path: str, what: str = "path") -> bytes:
         opened = os.fstat(fd)
         if not stat.S_ISREG(opened.st_mode):
             raise ValueError(f"{what} {path!r} is not a regular file")
+        limit = max_read_bytes()
+        if limit is not None and opened.st_size > limit:
+            raise ValueError(f"{what} {path!r} is {opened.st_size / 2**20:.0f} MiB, over the "
+                             f"{limit / 2**20:.0f} MiB this server reads; start it with "
+                             "--max-read-mb to raise the limit")
         if allowed_dirs():
             check_path(path, what)
             now = os.stat(Path(path).resolve(strict=True))
@@ -127,7 +154,10 @@ def read_checked(path: str, what: str = "path") -> bytes:
                                       "refusing to read it")
         with os.fdopen(fd, "rb") as fh:
             fd = None
-            return fh.read()
+            data = fh.read() if limit is None else fh.read(limit + 1)
+        if limit is not None and len(data) > limit:  # grew after the size check
+            raise ValueError(f"{what} {path!r} grew past {limit / 2**20:.0f} MiB while being read")
+        return data
     finally:
         if fd is not None:
             os.close(fd)
@@ -155,7 +185,8 @@ def _open_source(path: str):
 
     scheme = scheme_of(path)
     if scheme in ("", "faiss"):  # one index file: read through a verified handle
-        return load_source(path, read_checked(local_path(path) if scheme else path))
+        return load_source(path, read_checked(local_path(path) if scheme else path),
+                           max_bytes=max_read_bytes())
     if scheme.endswith("+local"):
         # a local database directory: its client opens the files itself, so only the
         # directory is checked
@@ -163,7 +194,7 @@ def _open_source(path: str):
     elif os.environ.get(ALLOW_NETWORK_ENV) != "1":
         raise PermissionError(f"{scheme} sources reach the network; start the server with "
                               f"--allow-network (or {ALLOW_NETWORK_ENV}=1) to read them")
-    return load_source(path)
+    return load_source(path, max_bytes=max_read_bytes())
 
 
 def check_path(path: str | None, what: str = "path") -> str | None:
@@ -531,7 +562,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--allow-network", action="store_true",
                    help="let the tools read network vector stores (qdrant://, chroma://, "
                         f"milvus://, weaviate://); same as {ALLOW_NETWORK_ENV}=1")
+    p.add_argument("--max-read-mb", type=float, default=None, metavar="MB",
+                   help="refuse files larger than this and stop reading a store past it "
+                        f"(default {DEFAULT_MAX_READ_MB}; 0 = no limit); same as {MAX_READ_ENV}")
     args = p.parse_args(argv)
+    if args.max_read_mb is not None:
+        if args.max_read_mb < 0:
+            p.error("--max-read-mb must be 0 (no limit) or positive")
+        os.environ[MAX_READ_ENV] = str(args.max_read_mb)
     if args.allow_network:
         os.environ[ALLOW_NETWORK_ENV] = "1"
     if args.allow_any:
@@ -544,8 +582,11 @@ def main(argv: list[str] | None = None) -> None:
         os.environ[ALLOWED_DIRS_ENV] = os.pathsep.join(
             [*([current] if current else []), *(str(Path(d).resolve()) for d in args.allow_dir)])
     roots = allowed_dirs()
-    print("vecscope-mcp: reading files under " + ", ".join(map(str, roots)) if roots else
-          "vecscope-mcp: reading any file this process can read (--allow-any)", file=sys.stderr)
+    limit = max_read_bytes()
+    print(("vecscope-mcp: reading files under " + ", ".join(map(str, roots)) if roots else
+           "vecscope-mcp: reading any file this process can read (--allow-any)")
+          + (f"; at most {limit / 2**20:.0f} MiB per file or store" if limit else "; no size limit"),
+          file=sys.stderr)
     mcp.run()
 
 

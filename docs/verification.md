@@ -38,7 +38,7 @@ The thresholds and the plan rules are set from these results.
 | `sample_repeats` | `value_range` is the spread between samples; it often does not contain the full-corpus value, so it is not an interval estimate |
 | thresholds | on the 18 pipelines that reproduce published nDCG@10 within 0.007, no `anisotropy`, `query_gap` or `query_hubness` verdict is worse than `ok`; all 11 English-only models on Korean data raise `hubness` or `query_hubness` |
 | README "Real embeddings" table | all 88 values and verdicts reproduced on the first 40k rows of each set |
-| incremental audit (`--knn-cache`) | on 100k x 768 with 5k or 20k appended rows, verdicts identical to a full audit and values within 7e-5 relative; 15 s and 47 s against 94 s and 123 s for the full audit |
+| incremental audit (`--knn-cache`) | on 100k x 768 with 5k or 20k appended rows, verdicts identical to a full audit and values within 7e-5 relative; 15 s and 47 s against 94 s and 123 s for the full audit. With 1,000 rows re-embedded in place, 10,625 rows recomputed, same verdicts, values within 4e-5, 19 s against 95 s; with 10,000 the update took 83 s against 89 s, which is why the cache rebuilds once more than half the rows would be recomputed |
 | sweep | recommendations identical across three seeds; IVF recall at a fixed nprobe can rise or fall with corpus size depending on how the data's clusters line up with nlist |
 
 ## Finding values against nDCG@10
@@ -233,6 +233,15 @@ What this supports:
     with nDCG@10 unchanged at 1.0.
   - It left the remaining `outliers` warn (0.011, threshold 0.01) alone: the rows were not
     broken vectors and one was a labeled answer.
+- A case on real data ([agent_case.md](agent_case.md)): SciFact with bge-small-en-v1.5, a
+  batch ingested twice and a worker that skipped normalization, labeled queries and an
+  inner-product production top-10. Two runs of Claude Code with the model claude-opus-5-5,
+  8 and 11 turns, 58 and 75 seconds.
+  - Told only the symptom, both runs found the 600 copies and the 2,581 unnormalized rows,
+    checked them in the data, removed the copies while keeping the qrels positions, and
+    normalized.
+  - Both re-audited with `baseline` and got `ok` on every finding. Production nDCG@10 went
+    from 0.100 to 0.713, and exact search from 0.689 to 0.713.
 
 ## Limitations
 
@@ -249,7 +258,9 @@ What this supports:
   distribution findings. Exact copies are counted over every row instead.
 - The Weaviate adapter was tested only against an embedded server in opt-in tests
   (`VECSCOPE_TEST_WEAVIATE=1`); remote Qdrant, Milvus and Weaviate servers were not tested.
-- The agent run is one model on one task; it shows the tools and the plan are usable, not
+  The `timeout=` option and the scrubbing of client errors were tested against an unreachable
+  Qdrant port and a stubbed client, not against a slow server.
+- The agent runs are one model on two tasks; they shows the tools and the plan are usable, not
   that every agent follows them.
 
 ## Reproducing

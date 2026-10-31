@@ -155,7 +155,56 @@ def test_api_key_comes_from_the_environment_only(monkeypatch):
     monkeypatch.delenv("VS_KEY")
     with pytest.raises(ValueError, match="empty"):
         _api_key({"api_key_env": "VS_KEY"})
-    assert _redact("qdrant://user:pw@host:6333/c?x=1") == "qdrant://host:6333/c?x=1"
+    # user info and every query value that is not a known option stay out of the evidence
+    assert (_redact("qdrant://user:pw@host:6333/c?x=1&vector=dense&api_key=abc")
+            == "qdrant://host:6333/c?x=REDACTED&vector=dense&api_key=REDACTED")
+    assert _redact("/data/x.faiss") == "/data/x.faiss"
+
+
+def test_client_errors_are_scrubbed_of_secrets(monkeypatch):
+    from vecscope import adapters
+
+    monkeypatch.setenv("VS_KEY", "s3cret-key")
+
+    def leaky(uri, max_bytes=None):
+        raise RuntimeError("401 for api-key s3cret-key, token tok-1234, user alice:pw1234")
+
+    monkeypatch.setattr(adapters, "_qdrant", leaky)
+    with pytest.raises(ValueError) as err:
+        load_source("qdrant://alice:pw1234@host:6333/docs?api_key_env=VS_KEY&token=tok-1234")
+    msg = str(err.value)
+    assert "RuntimeError" in msg and "qdrant://host:6333/docs" in msg
+    for secret in ("s3cret-key", "tok-1234", "pw1234"):
+        assert secret not in msg
+
+
+def test_timeout_option_and_an_unreachable_store():
+    from vecscope.adapters import _timeout
+
+    assert _timeout({}) == 60.0 and _timeout({"timeout": "2.5"}) == 2.5
+    for bad in ("x", "0", "-1"):
+        with pytest.raises(ValueError, match="timeout"):
+            _timeout({"timeout": bad})
+    pytest.importorskip("qdrant_client")
+    with pytest.raises(ValueError, match="qdrant://127.0.0.1:1/docs"):
+        load_source("qdrant://127.0.0.1:1/docs?timeout=1")
+
+
+def test_reads_stop_at_the_byte_limit(tmp_path, data):
+    x, ids = data  # 300 x 16 float32 = 19,200 bytes
+    chromadb = pytest.importorskip("chromadb")
+    col = chromadb.PersistentClient(path=str(tmp_path / "ch")).create_collection("docs")
+    col.add(ids=[f"d{i}" for i in ids], embeddings=x.tolist())
+    uri = f"chroma+local://{tmp_path / 'ch'}?collection=docs"
+    with pytest.raises(ValueError, match="MiB of vectors"):
+        load_source(uri, max_bytes=10_000)
+    assert load_source(uri, max_bytes=19_200).vectors.dtype == np.float32
+    faiss = pytest.importorskip("faiss")
+    index = faiss.IndexFlatIP(16)
+    index.add(x)
+    faiss.write_index(index, str(tmp_path / "f.faiss"))
+    with pytest.raises(ValueError, match="exceed"):
+        load_source(str(tmp_path / "f.faiss"), max_bytes=10_000)
 
 
 def test_unknown_scheme_and_missing_index():
