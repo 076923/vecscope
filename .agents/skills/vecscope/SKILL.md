@@ -18,6 +18,10 @@ labeled queries.
 pip install vecscope                       # or "vecscope[mcp]" / "vecscope[index]"
 vecscope audit <embeddings> --json         # MCP: audit_embeddings
 vecscope audit <embeddings> --queries <query embeddings> --json   # adds query-side findings
+vecscope audit <embeddings> --queries <today's queries> --baseline good.json --json   # + query_shift
+vecscope audit <embeddings> --queries <q> --qrels <qrels.tsv> --json   # + nDCG/recall/MRR on labels
+vecscope audit <index.faiss | qdrant://host:6333/coll | ...> --ann-from-source --sample 0 --json
+vecscope audit <embeddings> --sample 0 --knn-cache knn.npz --json   # appended rows only
 vecscope audit <embeddings> --clusters 10 --json                  # adds a per-cluster map
 vecscope sweep <embeddings>                # MCP: sweep_index; picks HNSW/IVF parameters
 vecscope compare <embeddings A> <embeddings B>   # MCP: compare_embeddings; same rows, two spaces
@@ -41,9 +45,25 @@ with `--fail-on none --baseline` so only the change is judged, and say that is t
 
 MCP server on a shared machine: start it with `--allow-dir DIR` (or `VECSCOPE_ALLOWED_DIRS`)
 so the tools can only read embeddings under those directories; a refused path says so.
+Network vector stores are refused unless the server runs with `--allow-network`.
 
-MCP only: `describe_findings` lists every finding with thresholds, causes and actions; pass
-`verbose=false` to `audit_embeddings` to keep the response short when most findings are ok.
+Vector stores: the path can be a faiss index file or a store URI (`qdrant://`, `chroma://`,
+`milvus://`, `weaviate://`, or `+local` forms with a directory). Rows come in ascending id
+order and findings carry `sample_source_ids` (the store's ids) next to `sample_ids`; report
+those to the user. `--ann-from-source` (MCP `ann_from_source`) scores the store's own index
+the way `--ann` does. Never put an API key in the URI; use `api_key_env=NAME`.
+
+Large corpora that grow by appending: `--knn-cache knn.npz` with `--sample 0` reuses the
+exact neighbor lists and computes only the new rows; `knn_cache.status` says whether the cache
+was reused, extended or rebuilt.
+
+MCP only: `describe_findings` lists every finding with thresholds, causes and actions. Every
+`audit_embeddings` response carries an `audit_id`; after a change, re-audit with
+`baseline=<that id>` and read `baseline_diff` (`improvements`, `regressions`,
+`retrieval_changes`) and the "vs baseline" part of `summary` instead of comparing two
+responses by hand. A baseline audited on the same corpus with queries also gives
+`query_shift`; after a transform it does not (`query_reference_note`). Pass `verbose=false`
+to keep the response short when most findings are ok.
 
 Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`. Above 100k rows a
 seeded sample is audited and `sampled: true` is set; pass `--sample 0` to audit every row,
@@ -69,9 +89,10 @@ samples, not an interval that contains the full-corpus value.
 - Quote the numbers and ranges verbatim. Do not describe embedding quality without them.
 - Thresholds are defaults calibrated on seven public models and re-checked on 19 models
   against labeled retrieval data; they are a starting point, not a universal bar. `warn` on
-  hubness is common for good models; `ood_queries` measures query-to-corpus shift, which
-  short queries against long passages always show, so read it with the model's query
-  prefix in mind and never as a quality score. Override with
+  hubness is common for good models; `query_gap` is a distance ratio that short queries
+  against long passages keep at 1 to 2.5 for good pipelines, so read it as "same space or
+  not", never as a quality score. `ood_queries` is deprecated: report
+  `query_gap` instead. Override with
   `--thresholds file.json` (MCP: `thresholds`) when the user's domain has its own baseline,
   and derive that baseline from labeled queries split into a tuning and a held-out part; a
   threshold chosen to make the current corpus pass predicts nothing.
@@ -81,17 +102,26 @@ samples, not an interval that contains the full-corpus value.
 ## Act on it: diagnose, change one thing, re-verify
 
 1. **Report the evidence**: the failing findings with values and ranges, plus the sampled flag.
+   Start from `plan`: the non-ok findings grouped by shared cause, in fix order, each with
+   `first_change` and `re_measure`. Work through it one step at a time and re-audit after each;
+   a step whose findings are all `inconclusive` (`only_inconclusive`) needs `--sample 0`
+   before anything is changed.
 2. **Separate the causes**: use `likely_causes` and the other findings to decide whether the
    problem is the model (anisotropy, effective_rank, rogue_dimensions, distance_concentration),
    the corpus (collapse, outliers, connectivity, antihubs), the metric (norms, metric_mismatch),
-   the index (ann_recall) or the query pipeline (ood_queries, query_hubness). `--clusters`
+   the index (ann_recall) or the query pipeline (query_gap, query_shift, query_hubness).
+   `--clusters`
    shows where in the corpus a problem lives.
 3. **Try the smallest change first**: `suggested_action` names it. Any transform applied to
    the corpus (centering, standardizing, normalizing, truncating) must be applied to the
    queries too, and the index rebuilt.
 4. **Re-audit and compare**: `verify_by` says which number should move. Then compare retrieval
-   on real queries before and after (recall@k against exact search, and relevance if labels
-   exist). A finding turning `ok` is not proof that search got better.
+   on real queries before and after: when labels exist pass `--qrels` (MCP `qrels_path`) on
+   both runs and `--baseline` on the second; quote `retrieval_changes` next to the finding
+   changes, and only when `retrieval_comparable` is true. Pass the production top-k as
+   `--ranked` to see the index's effect (`overlap_with_exact`). A finding turning `ok` is not
+   proof that search got better, and a change that fixes a finding but lowers `ndcg_at_k` is
+   not an improvement.
 5. **Adopt only confirmed improvements**; otherwise revert and try the next cause. Measure
    latency and memory alongside quality: a transform that fixes a finding can cost more at
    serving time than the finding did.
@@ -105,7 +135,12 @@ Finding-specific notes:
   ranking. Suspect the model only when `distance_concentration`, `effective_rank` or
   `rogue_dimensions` move with it.
 - **hubness / antihubs**: hubness often follows anisotropy; fix anisotropy first, then re-rank
-  with mutual k-NN or local scaling if hubs remain.
+  with local scaling against the queries if hubs remain (CSLS: 2 cos(q, d) minus d's mean
+  cosine to its 10 nearest queries). On 21 real pairs it lowered query hub skewness in 19 and
+  raised nDCG@10 on all 4 with `query_hubness` not ok (+0.002 to +0.022); where
+  `query_hubness` was ok it moved nDCG@10 by −0.015 to +0.018, so keep it only if labeled
+  queries confirm it. Scaling by corpus neighbors instead raised hub skewness and lowered
+  nDCG@10 on 16 of 21; do not use it.
 - **collapse**: read `details.largest_near_duplicate_groups` before blaming the model. Many
   small groups (pairs, triples) are duplicate items: the same image or text under several ids;
   deduplicate or collapse them at serving time. A few huge groups are an embedding failure
@@ -130,9 +165,28 @@ Finding-specific notes:
   weigh a setting's memory and tail latency against its recall, and pass real query traffic
   as `--queries` whenever a log exists, because corpus-drawn queries can pick a different
   setting. Confirm the pick in the serving environment before fixing it.
-- **ood_queries**: check that queries use the same model and the model's query prefix before
-  suspecting the corpus; `details.ood_sample_ids` lists the farthest queries. It measures
-  distribution shift, not failure: good models score 0 to 0.65 on short-query benchmarks,
-  and queries from a closely related model can score 1.0 and still retrieve well, so confirm
-  with real queries (step 4). A wrong-language model can score 0 when both sides are encoded
-  equally badly; `query_hubness` and `hubness` catch that case.
+- **query_hubness**: skewness grows with corpus size. Good English models measured 1.5 to 3.4
+  on corpora up to 26k documents and 4.0 to 4.8 on 58k (FiQA), so a `warn` just above 4 on a
+  large corpus is not by itself a query fault; compare against a baseline of the same corpus
+  and read it with `hubness`. Values of 11 or more meant a model that does not cover the
+  language.
+- **query_gap**: a `fail` most often means the queries were embedded by a different model or
+  model version than the corpus; check that before suspecting the corpus, unless `collapse`
+  is also not ok: near-copies shrink the corpus distance the gap divides by, so the plan lists
+  it with the duplicates and it is read again after deduplicating. Models fine-tuned
+  from the same base (bge-large and mxbai-embed-large, bge-base and gte-base, bge-m3 and its
+  Korean fine-tunes) share a space and can be swapped with little nDCG loss, so a low
+  `query_gap` with a mismatched model name is not proof of a fault, and confirm with real
+  queries (step 4). It does not detect a missing query prefix (bge, e5): on SciFact and
+  NFCorpus dropping the prefix moved nDCG@10 by -0.014 to +0.007 and the distances in either
+  direction, so check the prefix in code. A wrong-language model scores normally here when
+  both sides are encoded equally badly; `query_hubness` (and `hubness`) catch that case.
+- **query_shift**: only present with a reference (CLI `--baseline` from a run with
+  `--queries`, MCP `query_baseline_path`). It answers "did today's queries move away from
+  the corpus compared with a run known to be healthy"; `details.shifted_sample_ids` are the
+  farthest moved queries. Most queries moved: diff the query pipeline. A few moved: check
+  their topics against the corpus. The reference must come from the same corpus and sample
+  size, otherwise the distances are not comparable.
+- **ood_queries** (deprecated): same question as `query_gap` with a cutoff that also counts
+  the normal query/passage distance; it false-alarmed on 4 of 18 pipelines that reproduce
+  published nDCG. Quote `query_gap` instead.

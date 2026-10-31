@@ -3,79 +3,77 @@
 # 진단 항목이 검색 품질을 따라가는가?
 
 BEIR SciFact와 NFCorpus에서 정확한 코사인 검색으로 측정했으므로 인덱스 재현율은 영향을 주지
-않습니다. `examples/retrieval_quality.py`로 vecscope 0.3.0 기본값에서 생성한 표이며, 판정 열은
-그 시점의 임곗값을 따릅니다. 이후 anisotropy, ood_queries, query_hubness 임곗값이 바뀌었으니
-[검증 결과](verification.md)를 함께 보십시오. 결론은 README의 "진단 항목이 검색 품질을
-예측합니까?" 절에 있습니다. 수치는 영문 문서와 같습니다.
+않습니다. `examples/retrieval_quality.py`로 생성한 표이며, 판정 열은 기본 임곗값을 따릅니다.
+결론은 README의 "진단 항목이 검색 품질을 예측합니까?" 절에 있습니다. 수치는 영문 문서와 같습니다.
 
 ## 모델 간 비교: scifact (문서 5183개, 질의 300개)
 
-| 모델 | 차원 | nDCG@10 | hubness | antihubs | anisotropy | effective_rank | collapse | rogue_dimensions | norms | metric_mismatch | distance_concentration | outliers | connectivity | ood_queries | query_hubness |
+| 모델 | 차원 | nDCG@10 | hubness | antihubs | anisotropy | effective_rank | collapse | rogue_dimensions | norms | metric_mismatch | distance_concentration | outliers | connectivity | query_gap | query_hubness |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| gte-base | 768 | 0.762 | 1.18 | 0.0042 | 0.72 | 0.142 | 0 | 1.8 | 4.06e-08 | 1 | 2.02 | 0.000193 | 0 | 0.00333 | 2.18 |
-| bge-base-en-v1.5 | 768 | 0.740 | 1.49 | 0.0218 | 0.58 | 0.103 | 0 | 1.97 | 4.19e-08 | 1 | 2.01 | 0.00347 | 0 | 0.393 | 1.93 |
-| bge-small-en-v1.5 | 384 | 0.713 | 1.6 | 0.0221 | 0.628 | 0.175 | 0 | 1.69 | 4.37e-08 | 1 | 1.98 | 0.00463 | 0 | 0.17 | 1.87 |
-| e5-small-v2 | 384 | 0.687 | 1.54 | 0.0171 | 0.808 | 0.273 | 0 | 1.53 | 3.5e-08 | 1 | 1.67 | 0.00347 | 0 | 0.217 | 2.46 |
-| all-mpnet-base-v2 | 768 | 0.656 | 1.13 | 0.00459 | 0.128 | 0.0833 | 0 | 2.19 | 4.64e-08 | 1 | 2.66 | 0.00289 | 0 | 0.113 | 2.11 |
-| all-MiniLM-L6-v2 | 384 | 0.645 | 1.21 | 0.00844 | 0.131 | 0.17 | 0 | 1.83 | 4.29e-08 | 1 | 2.11 | 0.00328 | 0 | 0.09 | 2.01 |
-| paraphrase-MiniLM-L3-v2 | 384 | 0.513 | 1.73 | 0.0198 | 0.143 | 0.192 | 0 | 1.8 | 0.0799 | 0.716 | 1.95 | 0.000579 | 0 | 0.0467 | 2.21 |
-| glove.6B.300d | 300 | 0.296 | 3.23 | 0.093 | 0.669 | 0.0429 | 0 | 9.22 | 0.1 | 0.0863 | 2.9 | 0.0206 | 0 | 0.697 | 3.19 |
+| gte-base | 768 | 0.762 | 1.18 | 0.0042 | 0.72 | 0.142 | 0 | 1.8 | 4.02e-08 | 1 | 2.02 | 0.000193 | 0 | 0.939 | 2.18 |
+| bge-base-en-v1.5 | 768 | 0.740 | 1.49 | 0.0218 | 0.58 | 0.103 | 0 | 1.97 | 4.16e-08 | 1 | 2.01 | 0.00347 | 0 | 1.55 | 1.93 |
+| bge-small-en-v1.5 | 384 | 0.713 | 1.6 | 0.0221 | 0.628 | 0.175 | 0 | 1.69 | 4.35e-08 | 1 | 1.98 | 0.00463 | 0 | 1.39 | 1.87 |
+| e5-small-v2 | 384 | 0.687 | 1.54 | 0.0171 | 0.808 | 0.273 | 0 | 1.53 | 3.46e-08 | 1 | 1.67 | 0.00347 | 0 | 1.41 | 2.46 |
+| all-mpnet-base-v2 | 768 | 0.656 | 1.13 | 0.00459 | 0.128 | 0.0833 | 0 | 2.19 | 4.55e-08 | 1 | 2.66 | 0.00289 | 0 | 1.18 | 2.11 |
+| all-MiniLM-L6-v2 | 384 | 0.645 | 1.21 | 0.00844 | 0.131 | 0.17 | 0 | 1.83 | 4.12e-08 | 1 | 2.11 | 0.00328 | 0 | 1.17 | 2.01 |
+| paraphrase-MiniLM-L3-v2 | 384 | 0.513 | 1.73 | 0.0198 | 0.143 | 0.192 | 0 | 1.8 | 0.0799 | 0.716 | 1.95 | 0.000579 | 0 | 1.12 | 2.21 |
+| glove.6B.300d | 300 | 0.296 | 3.23 | 0.093 | 0.669 | 0.0429 | 0 | 9.22 | 0.1 | 0.0862 | 2.9 | 0.0206 | 0 | 2.44 | 3.19 |
 
 모델 전체에서 구한 nDCG@10과의 Spearman 상관입니다. 음수는 값이 클수록 검색이 나쁘다는 뜻입니다.
 
-| 항목 | hubness | antihubs | anisotropy | effective_rank | collapse | rogue_dimensions | norms | metric_mismatch | distance_concentration | outliers | connectivity | ood_queries | query_hubness |
+| 항목 | hubness | antihubs | anisotropy | effective_rank | collapse | rogue_dimensions | norms | metric_mismatch | distance_concentration | outliers | connectivity | query_gap | query_hubness |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| rho | -0.52 | -0.36 | +0.33 | +0.12 | 해당 없음 | -0.48 | -0.76 | +0.76 | -0.31 | -0.24 | 해당 없음 | -0.19 | -0.52 |
+| rho | -0.52 | -0.36 | +0.33 | +0.12 | n/a | -0.48 | -0.67 | +0.76 | -0.31 | -0.24 | n/a | -0.19 | -0.52 |
 
 ## 모델 간 비교: nfcorpus (문서 3633개, 질의 323개)
 
-| 모델 | 차원 | nDCG@10 | hubness | antihubs | anisotropy | effective_rank | collapse | rogue_dimensions | norms | metric_mismatch | distance_concentration | outliers | connectivity | ood_queries | query_hubness |
+| 모델 | 차원 | nDCG@10 | hubness | antihubs | anisotropy | effective_rank | collapse | rogue_dimensions | norms | metric_mismatch | distance_concentration | outliers | connectivity | query_gap | query_hubness |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| gte-base | 768 | 0.379 | 0.984 | 0.0107 | 0.74 | 0.128 | 0.0226 | 1.67 | 4.01e-08 | 1 | 2.42 | 0.00165 | 0 | 0.17 | 2.37 |
-| bge-base-en-v1.5 | 768 | 0.374 | 2.06 | 0.0388 | 0.644 | 0.125 | 0.0226 | 1.63 | 4.27e-08 | 1 | 2.3 | 0.00743 | 0 | 0.647 | 1.53 |
-| bge-small-en-v1.5 | 384 | 0.344 | 1.82 | 0.0316 | 0.675 | 0.206 | 0.0226 | 1.78 | 4.35e-08 | 1 | 2.31 | 0.00633 | 0 | 0.523 | 1.77 |
-| all-mpnet-base-v2 | 768 | 0.333 | 1.41 | 0.0145 | 0.252 | 0.0711 | 0.0226 | 2.32 | 4.48e-08 | 1 | 3.51 | 0.0138 | 0 | 0.471 | 2.08 |
-| e5-small-v2 | 384 | 0.325 | 1.46 | 0.025 | 0.814 | 0.277 | 0.0226 | 1.58 | 3.43e-08 | 1 | 1.93 | 0.0033 | 0 | 0.409 | 3.11 |
-| all-MiniLM-L6-v2 | 384 | 0.316 | 1.5 | 0.0162 | 0.207 | 0.161 | 0.0226 | 1.91 | 4.22e-08 | 1 | 2.53 | 0.00495 | 0 | 0.375 | 2.01 |
-| paraphrase-MiniLM-L3-v2 | 384 | 0.272 | 1.66 | 0.02 | 0.158 | 0.208 | 0.022 | 1.57 | 0.0775 | 0.749 | 2.1 | 0.0011 | 0 | 0.223 | 2.23 |
-| glove.6B.300d | 300 | 0.139 | 3.38 | 0.0941 | 0.709 | 0.0749 | 0.0226 | 8.48 | 0.102 | 0.0946 | 2.65 | 0.0284 | 0 | 0.947 | 5.98 |
+| gte-base | 768 | 0.379 | 0.984 | 0.0107 | 0.74 | 0.128 | 0.0226 | 1.67 | 4.04e-08 | 1 | 2.42 | 0.00165 | 0 | 1.5 | 2.37 |
+| bge-base-en-v1.5 | 768 | 0.374 | 2.06 | 0.0388 | 0.644 | 0.125 | 0.0226 | 1.63 | 4.36e-08 | 1 | 2.3 | 0.00743 | 0 | 2.33 | 1.53 |
+| bge-small-en-v1.5 | 384 | 0.344 | 1.82 | 0.0316 | 0.675 | 0.206 | 0.0226 | 1.78 | 4.31e-08 | 1 | 2.31 | 0.00633 | 0 | 2.24 | 1.77 |
+| all-mpnet-base-v2 | 768 | 0.333 | 1.41 | 0.0145 | 0.252 | 0.0711 | 0.0226 | 2.32 | 4.5e-08 | 1 | 3.51 | 0.0138 | 0 | 2.52 | 2.08 |
+| e5-small-v2 | 384 | 0.325 | 1.46 | 0.025 | 0.814 | 0.277 | 0.0226 | 1.58 | 3.44e-08 | 1 | 1.93 | 0.0033 | 0 | 1.76 | 3.11 |
+| all-MiniLM-L6-v2 | 384 | 0.316 | 1.5 | 0.0162 | 0.207 | 0.161 | 0.0226 | 1.91 | 4.14e-08 | 1 | 2.53 | 0.00495 | 0 | 1.91 | 2.01 |
+| paraphrase-MiniLM-L3-v2 | 384 | 0.272 | 1.66 | 0.02 | 0.158 | 0.208 | 0.022 | 1.57 | 0.0775 | 0.749 | 2.1 | 0.0011 | 0 | 1.39 | 2.23 |
+| glove.6B.300d | 300 | 0.139 | 3.39 | 0.0949 | 0.709 | 0.0749 | 0.0226 | 8.48 | 0.102 | 0.0948 | 2.65 | 0.0281 | 0 | 4.7 | 5.97 |
 
 모델 전체에서 구한 nDCG@10과의 Spearman 상관입니다. 음수는 값이 클수록 검색이 나쁘다는 뜻입니다.
 
-| 항목 | hubness | antihubs | anisotropy | effective_rank | collapse | rogue_dimensions | norms | metric_mismatch | distance_concentration | outliers | connectivity | ood_queries | query_hubness |
+| 항목 | hubness | antihubs | anisotropy | effective_rank | collapse | rogue_dimensions | norms | metric_mismatch | distance_concentration | outliers | connectivity | query_gap | query_hubness |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| rho | -0.40 | -0.33 | +0.31 | -0.12 | +0.41 | -0.19 | -0.55 | +0.76 | -0.10 | -0.12 | 해당 없음 | -0.17 | -0.48 |
+| rho | -0.40 | -0.33 | +0.31 | -0.12 | +0.41 | -0.19 | -0.52 | +0.76 | -0.10 | -0.12 | n/a | -0.12 | -0.48 |
 
 ## 결함 주입: scifact, gte-base (기준 nDCG@10 0.762)
 
 | 결함 | 강도 | 대상 항목 | 값 | 판정 | nDCG@10 | 같이 바뀐 항목 |
 |---|---|---|---|---|---|---|
 | rogue_dimension | 0 | rogue_dimensions | 1.8 | ok | 0.762 | - |
-| rogue_dimension | 0.25 | rogue_dimensions | 140 | fail | 0.554 | effective_rank ok->fail, metric_mismatch ok->fail, query_hubness warn->ok |
-| rogue_dimension | 0.5 | rogue_dimensions | 362 | fail | 0.348 | effective_rank ok->fail, norms ok->warn, metric_mismatch ok->fail, query_hubness warn->ok |
-| rogue_dimension | 1 | rogue_dimensions | 600 | fail | 0.232 | hubness ok->warn, anisotropy warn->ok, effective_rank ok->fail, norms ok->warn, metric_mismatch ok->fail |
-| rogue_dimension | 2 | rogue_dimensions | 718 | fail | 0.168 | hubness ok->warn, anisotropy warn->ok, effective_rank ok->fail, collapse ok->warn, norms ok->fail, metric_mismatch ok->fail, outliers ok->warn |
-| shared_offset | 0 | anisotropy | 0.72 | warn | 0.762 | - |
-| shared_offset | 0.5 | anisotropy | 0.787 | warn | 0.760 | metric_mismatch ok->warn |
-| shared_offset | 1 | anisotropy | 0.868 | fail | 0.760 | metric_mismatch ok->fail |
-| shared_offset | 2 | anisotropy | 0.947 | fail | 0.759 | collapse ok->warn, metric_mismatch ok->fail |
+| rogue_dimension | 0.25 | rogue_dimensions | 140 | fail | 0.554 | effective_rank ok->fail, metric_mismatch ok->fail |
+| rogue_dimension | 0.5 | rogue_dimensions | 362 | fail | 0.348 | effective_rank ok->fail, norms ok->warn, metric_mismatch ok->fail |
+| rogue_dimension | 1 | rogue_dimensions | 600 | fail | 0.232 | hubness ok->warn, effective_rank ok->fail, norms ok->warn, metric_mismatch ok->fail |
+| rogue_dimension | 2 | rogue_dimensions | 718 | fail | 0.168 | hubness ok->warn, effective_rank ok->fail, collapse ok->warn, norms ok->fail, metric_mismatch ok->fail, outliers ok->warn |
+| shared_offset | 0 | anisotropy | 0.72 | ok | 0.762 | - |
+| shared_offset | 0.5 | anisotropy | 0.787 | ok | 0.760 | metric_mismatch ok->warn |
+| shared_offset | 1 | anisotropy | 0.868 | warn | 0.760 | metric_mismatch ok->fail |
+| shared_offset | 2 | anisotropy | 0.947 | warn | 0.759 | collapse ok->warn, metric_mismatch ok->fail |
 | shared_offset | 4 | anisotropy | 0.984 | fail | 0.761 | collapse ok->fail, metric_mismatch ok->fail |
 | low_rank | 768 | effective_rank | 0.142 | ok | 0.762 | - |
 | low_rank | 128 | effective_rank | 0.0703 | warn | 0.694 | metric_mismatch ok->warn |
-| low_rank | 32 | effective_rank | 0.0263 | fail | 0.526 | anisotropy warn->fail, collapse ok->fail, metric_mismatch ok->fail |
-| low_rank | 8 | effective_rank | 0.00851 | fail | 0.224 | anisotropy warn->fail, collapse ok->fail, metric_mismatch ok->fail, outliers ok->warn |
-| low_rank | 2 | effective_rank | 0.00239 | fail | 0.007 | anisotropy warn->fail, collapse ok->fail, metric_mismatch ok->fail, outliers ok->fail, query_hubness warn->ok |
+| low_rank | 32 | effective_rank | 0.0263 | fail | 0.526 | anisotropy ok->warn, collapse ok->fail, metric_mismatch ok->fail |
+| low_rank | 8 | effective_rank | 0.00851 | fail | 0.224 | anisotropy ok->warn, collapse ok->fail, metric_mismatch ok->fail, outliers ok->warn |
+| low_rank | 2 | effective_rank | 0.00239 | fail | 0.007 | anisotropy ok->fail, collapse ok->fail, metric_mismatch ok->fail, outliers ok->fail |
 | noise | 0 | distance_concentration | 2.02 | ok | 0.762 | - |
 | noise | 0.5 | distance_concentration | 1.27 | warn | 0.732 | hubness ok->warn, metric_mismatch ok->warn |
-| noise | 1 | distance_concentration | 1.06 | fail | 0.572 | hubness ok->fail, antihubs ok->warn, anisotropy warn->ok, metric_mismatch ok->fail, query_hubness warn->fail |
-| noise | 2 | distance_concentration | 1.01 | fail | 0.121 | hubness ok->warn, antihubs ok->warn, anisotropy warn->ok, metric_mismatch ok->warn, query_hubness warn->fail |
-| noise | 4 | distance_concentration | 1 | fail | 0.012 | anisotropy warn->ok, metric_mismatch ok->warn, query_hubness warn->fail |
+| noise | 1 | distance_concentration | 1.06 | fail | 0.572 | hubness ok->fail, antihubs ok->warn, metric_mismatch ok->fail, query_hubness ok->fail |
+| noise | 2 | distance_concentration | 1.01 | fail | 0.121 | hubness ok->warn, antihubs ok->warn, metric_mismatch ok->warn, query_hubness ok->fail |
+| noise | 4 | distance_concentration | 1 | fail | 0.012 | metric_mismatch ok->warn, query_hubness ok->fail |
 | duplicates | 0 | collapse | 0 | ok | 0.762 | - |
 | duplicates | 0.1 | collapse | 0.182 | fail | 0.749 | - |
 | duplicates | 0.3 | collapse | 0.461 | fail | 0.741 | - |
-| duplicates | 0.6 | collapse | 0.75 | fail | 0.698 | outliers ok->fail |
-| all-mpnet-base-v2로 만든 질의 | - | ood_queries | 1 | fail | 0.000 | query_hubness fail |
-| bge-base-en-v1.5로 만든 질의 | - | ood_queries | 1 | fail | 0.747 | query_hubness warn |
+| duplicates | 0.6 | collapse | 0.75 | fail | 0.698 | outliers ok->fail, query_gap ok->fail |
+| all-mpnet-base-v2의 질의 | - | query_gap | 8.01 | fail | 0.000 | query_hubness warn |
+| bge-base-en-v1.5의 질의 | - | query_gap | 2.94 | warn | 0.747 | query_hubness ok |
 
 ## 결함 주입: nfcorpus, gte-base (기준 nDCG@10 0.379)
 
@@ -84,26 +82,26 @@ BEIR SciFact와 NFCorpus에서 정확한 코사인 검색으로 측정했으므�
 | rogue_dimension | 0 | rogue_dimensions | 1.67 | ok | 0.379 | - |
 | rogue_dimension | 0.25 | rogue_dimensions | 149 | fail | 0.285 | effective_rank ok->fail, collapse warn->ok, metric_mismatch ok->fail |
 | rogue_dimension | 0.5 | rogue_dimensions | 377 | fail | 0.208 | effective_rank ok->fail, collapse warn->ok, norms ok->warn, metric_mismatch ok->fail |
-| rogue_dimension | 1 | rogue_dimensions | 610 | fail | 0.155 | hubness ok->warn, anisotropy warn->ok, effective_rank ok->fail, collapse warn->ok, norms ok->warn, metric_mismatch ok->fail |
-| rogue_dimension | 2 | rogue_dimensions | 722 | fail | 0.132 | hubness ok->warn, anisotropy warn->ok, effective_rank ok->fail, norms ok->fail, metric_mismatch ok->fail, outliers ok->warn, ood_queries warn->ok |
-| shared_offset | 0 | anisotropy | 0.74 | warn | 0.379 | - |
-| shared_offset | 0.5 | anisotropy | 0.802 | warn | 0.379 | metric_mismatch ok->warn |
-| shared_offset | 1 | anisotropy | 0.878 | fail | 0.379 | metric_mismatch ok->fail |
+| rogue_dimension | 1 | rogue_dimensions | 610 | fail | 0.155 | hubness ok->warn, effective_rank ok->fail, collapse warn->ok, norms ok->warn, metric_mismatch ok->fail |
+| rogue_dimension | 2 | rogue_dimensions | 722 | fail | 0.132 | hubness ok->warn, effective_rank ok->fail, norms ok->fail, metric_mismatch ok->fail, outliers ok->warn |
+| shared_offset | 0 | anisotropy | 0.74 | ok | 0.379 | - |
+| shared_offset | 0.5 | anisotropy | 0.802 | ok | 0.379 | metric_mismatch ok->warn |
+| shared_offset | 1 | anisotropy | 0.878 | warn | 0.379 | metric_mismatch ok->fail |
 | shared_offset | 2 | anisotropy | 0.95 | fail | 0.379 | collapse warn->fail, metric_mismatch ok->fail |
 | shared_offset | 4 | anisotropy | 0.985 | fail | 0.378 | collapse warn->fail, metric_mismatch ok->fail |
 | low_rank | 768 | effective_rank | 0.128 | ok | 0.379 | - |
 | low_rank | 128 | effective_rank | 0.0732 | warn | 0.348 | metric_mismatch ok->warn |
-| low_rank | 32 | effective_rank | 0.0293 | fail | 0.232 | anisotropy warn->fail, collapse warn->fail, metric_mismatch ok->fail, ood_queries warn->ok, query_hubness warn->fail |
-| low_rank | 8 | effective_rank | 0.00943 | fail | 0.092 | anisotropy warn->fail, collapse warn->fail, metric_mismatch ok->fail, outliers ok->warn, ood_queries warn->ok, query_hubness warn->fail |
-| low_rank | 2 | effective_rank | 0.00257 | fail | 0.019 | anisotropy warn->fail, collapse warn->fail, metric_mismatch ok->fail, outliers ok->fail, ood_queries warn->ok |
+| low_rank | 32 | effective_rank | 0.0293 | fail | 0.232 | anisotropy ok->warn, collapse warn->fail, metric_mismatch ok->fail, query_hubness ok->warn |
+| low_rank | 8 | effective_rank | 0.00943 | fail | 0.092 | anisotropy ok->warn, collapse warn->fail, metric_mismatch ok->fail, outliers ok->warn, query_hubness ok->warn |
+| low_rank | 2 | effective_rank | 0.00257 | fail | 0.019 | anisotropy ok->fail, collapse warn->fail, metric_mismatch ok->fail, outliers ok->fail |
 | noise | 0 | distance_concentration | 2.42 | ok | 0.379 | - |
-| noise | 0.5 | distance_concentration | 1.32 | warn | 0.354 | collapse warn->ok, metric_mismatch ok->warn, ood_queries warn->ok, query_hubness warn->fail |
-| noise | 1 | distance_concentration | 1.06 | fail | 0.271 | hubness ok->warn, antihubs ok->warn, anisotropy warn->ok, collapse warn->ok, metric_mismatch ok->fail, ood_queries warn->ok, query_hubness warn->fail |
-| noise | 2 | distance_concentration | 1.01 | fail | 0.111 | hubness ok->warn, antihubs ok->warn, anisotropy warn->ok, collapse warn->ok, metric_mismatch ok->warn, ood_queries warn->ok, query_hubness warn->fail |
-| noise | 4 | distance_concentration | 1 | fail | 0.036 | anisotropy warn->ok, collapse warn->ok, metric_mismatch ok->warn, ood_queries warn->ok, query_hubness warn->fail |
+| noise | 0.5 | distance_concentration | 1.32 | warn | 0.354 | collapse warn->ok, metric_mismatch ok->warn, query_hubness ok->warn |
+| noise | 1 | distance_concentration | 1.06 | fail | 0.271 | hubness ok->warn, antihubs ok->warn, collapse warn->ok, metric_mismatch ok->fail, query_hubness ok->fail |
+| noise | 2 | distance_concentration | 1.01 | fail | 0.111 | hubness ok->warn, antihubs ok->warn, collapse warn->ok, metric_mismatch ok->warn, query_hubness ok->fail |
+| noise | 4 | distance_concentration | 1 | fail | 0.036 | collapse warn->ok, metric_mismatch ok->warn, query_hubness ok->fail |
 | duplicates | 0 | collapse | 0.0226 | warn | 0.379 | - |
 | duplicates | 0.1 | collapse | 0.198 | fail | 0.365 | - |
-| duplicates | 0.3 | collapse | 0.473 | fail | 0.331 | ood_queries warn->fail |
-| duplicates | 0.6 | collapse | 0.756 | fail | 0.298 | outliers ok->fail, ood_queries warn->fail |
-| all-mpnet-base-v2로 만든 질의 | - | ood_queries | 1 | fail | 0.012 | query_hubness fail |
-| bge-base-en-v1.5로 만든 질의 | - | ood_queries | 1 | fail | 0.378 | query_hubness ok |
+| duplicates | 0.3 | collapse | 0.473 | fail | 0.331 | query_gap ok->warn |
+| duplicates | 0.6 | collapse | 0.756 | fail | 0.298 | outliers ok->fail, query_gap ok->fail |
+| all-mpnet-base-v2의 질의 | - | query_gap | 10 | fail | 0.012 | query_hubness warn |
+| bge-base-en-v1.5의 질의 | - | query_gap | 3.91 | fail | 0.378 | query_hubness ok |

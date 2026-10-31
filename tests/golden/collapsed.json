@@ -1,6 +1,6 @@
 {
  "tool": "vecscope",
- "version": "0.6.0",
+ "version": "0.7.0",
  "n": 2000,
  "dim": 128,
  "k": 10,
@@ -30,7 +30,7 @@
     "strong shared direction (see anisotropy)",
     "a few generic items close to the corpus mean"
    ],
-   "suggested_action": "re-rank top-k with mutual k-NN or local scaling; if anisotropy also fails, center first",
+   "suggested_action": "re-rank top-k with local scaling against the queries (CSLS: 2 cos(q, d) minus d's mean cosine to its 10 nearest queries; scaling by corpus neighbors raised hubness in the verification); if anisotropy also fails, center first",
    "verify_by": "re-run the audit on the transformed vectors and compare hubness.skewness and details.hub_share_top1pct; check that recall on held-out queries did not drop",
    "value_range": null,
    "verdict_stable": null,
@@ -445,6 +445,14 @@
    0.5,
    0.8
   ],
+  "queries.query_gap_ratio": [
+   2.6,
+   3.0
+  ],
+  "queries.shifted_query_ratio": [
+   0.2,
+   0.3
+  ],
   "queries.query_hubness_skewness": [
    4.0,
    10.0
@@ -454,6 +462,29 @@
  "unstable_findings": [],
  "near_dup_cos": 0.99,
  "inconclusive_findings": [],
+ "plan": [
+  {
+   "order": 1,
+   "group": "input_integrity",
+   "findings": [
+    {
+     "name": "collapse",
+     "value": 0.8,
+     "verdict": "fail",
+     "inconclusive": false
+    }
+   ],
+   "common_cause": "rows that are not real embeddings of distinct items: zero or constant vectors from failed embedding calls, duplicated documents or boilerplate chunks",
+   "first_change": "read norms.details.zero_norm_ratio, collapse.details.largest_near_duplicate_groups and outliers.details.sample_ids; drop zero and constant rows and deduplicate before changing anything else",
+   "re_measure": "zero_norm_ratio 0, near_duplicate_ratio and outlier_ratio below warn_at; retrieval duplicate_result_share falls; pass --qrels to measure retrieval quality as well",
+   "why_this_order": "broken rows distort every other statistic, so later steps would be measured on noise",
+   "only_inconclusive": false
+  }
+ ],
+ "retrieval": {},
+ "source": {},
+ "knn_cache": {},
+ "corpus_fingerprint": "fe7e8eb4f4cfb9f61f7d0ebd3c7881ad636c2315d798d0b5941d3846d7758fc3",
  "schema_version": 1,
  "verdict": "fail"
 }

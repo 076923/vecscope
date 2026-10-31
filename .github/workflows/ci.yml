@@ -27,6 +27,18 @@ jobs:
           vecscope audit examples/healthy.npy
           vecscope --version
 
+  stores:
+    # the vector store adapters against local Qdrant, Chroma and Milvus Lite (Linux only:
+    # Milvus Lite has no Windows build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev,mcp,stores]"
+      - run: pytest -q tests/test_adapters.py tests/test_agent_workflow.py -rs
+
   build:
     runs-on: ubuntu-latest
     steps:

@@ -1,5 +1,4 @@
-"""Checks for what the local copy adds on top of upstream 0.5.0 and upstream has no tests for:
-sweep latency percentiles and index_bytes, compare with supplied neighbors_a / neighbors_b,
+"""Sweep latency percentiles and index_bytes, compare with supplied neighbors_a / neighbors_b,
 and the audit gate (``gate_decision``, ``--fail-on none``)."""
 
 from __future__ import annotations

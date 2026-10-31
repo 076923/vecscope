@@ -35,6 +35,11 @@ Documentation = "https://github.com/076923/vecscope#readme"
 [project.optional-dependencies]
 mcp = ["mcp>=1.2"]
 index = ["faiss-cpu>=1.8"]
+qdrant = ["qdrant-client>=1.10"]
+chroma = ["chromadb>=0.5"]
+milvus = ["pymilvus[milvus_lite]>=2.4"]
+weaviate = ["weaviate-client>=4.4"]
+stores = ["vecscope[index,qdrant,chroma,milvus,weaviate]"]
 dev = ["pytest>=8", "ruff>=0.5", "scipy>=1.10", "pyarrow>=14"]
 
 [project.scripts]

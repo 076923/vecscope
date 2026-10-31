@@ -1,4 +1,4 @@
-"""Exactness and recall scoring beyond the upstream tests' n=1,500 x 32: several corpus
+"""Exactness and recall scoring beyond the n=1,500 x 32 unit tests: several corpus
 shapes, float64 references, the faiss CPU/GPU baselines the sweep uses, and an independent
 recall scorer. ``slow`` tests take minutes (pytest -m slow). The 100k x 768 numbers from an
 independent run are in docs/verification.md."""

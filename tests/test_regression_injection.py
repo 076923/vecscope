@@ -31,20 +31,29 @@ def by_name(ev):
     return {f.name: f for f in ev.findings}
 
 
-def test_query_model_mismatch_trips_ood_queries_only():
+def test_query_model_mismatch_trips_query_findings_only():
     """Queries embedded by another model (here: the corpus space under a random rotation)
-    score ood_queries = fail while the corpus-side findings do not move."""
+    score query_gap, query_shift (against the healthy run) and ood_queries = fail while the
+    corpus-side findings do not move; a fresh healthy query set stays ok against the same
+    reference."""
     rng = np.random.default_rng(7)
     centers = rng.standard_normal((40, 64))
     corpus = unit(centers[rng.integers(0, 40, 3000)] + rng.standard_normal((3000, 64)) * 0.6)
     same_model = unit(centers[rng.integers(0, 40, 300)] + rng.standard_normal((300, 64)) * 0.6)
     rot, _ = np.linalg.qr(rng.standard_normal((64, 64)))
     other_model = unit(same_model @ rot.astype(np.float32))
-    good = by_name(audit(corpus, k=10, queries=same_model))
-    bad = by_name(audit(corpus, k=10, queries=other_model))
-    assert good["ood_queries"].verdict == "ok"
+    good_ev = audit(corpus, k=10, queries=same_model)
+    good = by_name(good_ev)
+    bad = by_name(audit(corpus, k=10, queries=other_model, query_baseline=good_ev.to_dict()))
+    fresh = unit(centers[rng.integers(0, 40, 300)] + rng.standard_normal((300, 64)) * 0.6)
+    healthy = by_name(audit(corpus, k=10, queries=fresh, query_baseline=good_ev.to_dict()))
+    assert good["ood_queries"].verdict == "ok" and good["query_gap"].verdict == "ok"
+    assert "query_shift" not in good  # only with a reference
     assert bad["ood_queries"].verdict == "fail" and bad["ood_queries"].value > 0.9
-    corpus_side = [n for n in good if n not in {"ood_queries", "query_hubness"}]
+    assert bad["query_gap"].verdict == "fail" and bad["query_gap"].value > 3.0
+    assert bad["query_shift"].verdict == "fail" and bad["query_shift"].value > 0.9
+    assert healthy["query_shift"].verdict == "ok" and healthy["query_shift"].value < 0.1
+    corpus_side = [n for n in good if n not in {"ood_queries", "query_gap", "query_hubness"}]
     assert all(good[n].value == bad[n].value for n in corpus_side)  # queries never change the corpus
 
 

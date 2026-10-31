@@ -24,6 +24,7 @@ from vecscope.diagnostics import (
     query_audit,
     rogue_dimensions,
 )
+from vecscope.incremental import fingerprint
 
 # Default verdict thresholds: (warn, fail). Calibrated on seven public embedding models
 # (see README "Real embeddings") and re-checked against 19 models x 3 labeled datasets
@@ -46,7 +47,13 @@ THRESHOLDS = {
     "connectivity.island_ratio": (0.01, 0.10),
     # short queries against long passages are farther than passages are from each other by
     # design: good models score 0.0-0.65 on BEIR, a wrong model or language 0.7-1.0
+    # (deprecated with the ood_queries finding)
     "queries.ood_query_ratio": (0.5, 0.8),
+    # pipelines reproducing published nDCG sit at 0.94-2.52 (NFCorpus highest), queries from a
+    # different model at a median of 5-8 (docs/verification.md, query findings)
+    "queries.query_gap_ratio": (2.6, 3.0),
+    # share beyond the reference median + 3 MAD: healthy query sets 0.00-0.09
+    "queries.shifted_query_ratio": (0.20, 0.30),
     # good models: 1.5-2.9 on English BEIR, up to 9 on Korean; wrong-language models 11-30
     "queries.query_hubness_skewness": (4.0, 10.0),
 }
@@ -95,6 +102,17 @@ class Evidence:
     unstable_findings: list[str] = field(default_factory=list)
     near_dup_cos: float = 0.99
     inconclusive_findings: list[str] = field(default_factory=list)
+    # ordered steps for the non-ok findings (vecscope.plan): shared cause, first change
+    plan: list[dict] = field(default_factory=list)
+    # quality on labeled queries (vecscope.retrieval); empty without qrels
+    retrieval: dict = field(default_factory=dict)
+    # where the vectors came from when read from a vector store (vecscope.adapters)
+    source: dict = field(default_factory=dict)
+    # k-NN cache use for an incremental audit (vecscope.incremental)
+    knn_cache: dict = field(default_factory=dict)
+    # SHA-256 of every input row as float32, so a later run can tell whether a baseline was
+    # made on the same corpus (or on an unchanged prefix of it)
+    corpus_fingerprint: str = ""
     schema_version: int = SCHEMA_VERSION
 
     @property
@@ -199,6 +217,15 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
             value_regressions.append(name)
     order = [f["name"] for f in new["findings"]]
     changes.sort(key=lambda r: order.index(r["name"]))
+    retrieval_changes = []
+    ra, rb = new.get("retrieval") or {}, old.get("retrieval") or {}
+    for part in ("exact", "ranked"):
+        pa, pb = ra.get(part) or {}, rb.get(part) or {}
+        for metric in pa.keys() & pb.keys():
+            retrieval_changes.append({"ranking": part, "metric": metric, "value": pa[metric],
+                                      "baseline_value": pb[metric],
+                                      "delta": pa[metric] - pb[metric]})
+    retrieval_changes.sort(key=lambda r: (r["ranking"], r["metric"]))
     return {
         "verdict": new.get("verdict"),
         "baseline_verdict": old.get("verdict"),
@@ -213,6 +240,9 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
         and new.get("thresholds") == old.get("thresholds")
         and new.get("near_dup_cos") == old.get("near_dup_cos"),
         "changes": changes,
+        "retrieval_changes": retrieval_changes,
+        "retrieval_comparable": bool(ra and rb)
+        and ra.get("qrels_fingerprint") == rb.get("qrels_fingerprint") and ra.get("k") == rb.get("k"),
     }
 
 
@@ -338,7 +368,9 @@ ACTIONS = {
         ["high-dimensional concentration (dim >> effective rank)",
          "strong shared direction (see anisotropy)",
          "a few generic items close to the corpus mean"],
-        "re-rank top-k with mutual k-NN or local scaling; if anisotropy also fails, center first",
+        ("re-rank top-k with local scaling against the queries (CSLS: 2 cos(q, d) minus d's mean "
+         "cosine to its 10 nearest queries; scaling by corpus neighbors raised hubness in the "
+         "verification); if anisotropy also fails, center first"),
         ("re-run the audit on the transformed vectors and compare hubness.skewness and "
         "details.hub_share_top1pct; check that recall on held-out queries did not drop"),
     ),
@@ -424,10 +456,30 @@ ACTIONS = {
         ["queries embedded with a different model than the corpus",
          "asymmetric model used without its query prefix / instruction",
          "questions about topics the corpus does not cover"],
-        ("confirm the same model and prefix on both sides; inspect details.ood_sample_ids "
-        "for uncovered topics"),
+        ("deprecated: read query_gap (and query_shift with a baseline) instead; confirm the "
+        "same model and prefix on both sides; inspect details.ood_sample_ids"),
         ("ood_query_ratio below warn_at after fixing the query pipeline; otherwise extend "
         "the corpus"),
+    ),
+    "query_gap": (
+        ["queries embedded with a different model (or model version) than the corpus",
+         "a weak model for this domain: query and passage distances both grow",
+         "very short queries against very long passages"],
+        ("embed a handful of queries with the corpus model and compare query_gap_ratio; if "
+        "it drops, the query pipeline uses another model. A missing query prefix does not "
+        "move this number reliably, check the prefix in code"),
+        ("query_gap_ratio below warn_at after fixing the query pipeline, and nDCG or recall "
+        "on labeled queries back to the reference"),
+    ),
+    "query_shift": (
+        ["the query pipeline changed since the reference (model, version, preprocessing)",
+         "new query traffic on topics the corpus does not cover",
+         "the corpus changed under the same queries"],
+        ("inspect details.shifted_sample_ids; if most queries moved, diff the query "
+        "pipeline against the one that produced the reference; if a few did, check their "
+        "topics against the corpus"),
+        ("shifted_query_ratio below warn_at against the same reference; labeled retrieval "
+        "quality unchanged"),
     ),
     "query_hubness": (
         ["a few generic items near the query mean", "queries that are too short or generic"],
@@ -451,6 +503,8 @@ _FINDING_KEYS = {
     "outliers": "outliers.outlier_ratio",
     "connectivity": "connectivity.island_ratio",
     "ood_queries": "queries.ood_query_ratio",
+    "query_gap": "queries.query_gap_ratio",
+    "query_shift": "queries.shifted_query_ratio",
     "query_hubness": "queries.query_hubness_skewness",
 }
 
@@ -483,12 +537,46 @@ def _checked_queries(queries, dim: int) -> np.ndarray:
     return np.asarray(qv, dtype=np.float32)
 
 
+def same_corpus(baseline: Mapping, x: np.ndarray) -> bool:
+    """Whether ``baseline`` evidence was audited on ``x`` or on an unchanged prefix of it
+    (rows appended since). Query distances from such a baseline are a valid reference for
+    query_shift; after a transform (normalizing, centering, another model) they are not."""
+    fp = baseline.get("corpus_fingerprint") if isinstance(baseline, Mapping) else None
+    n_base = int(baseline.get("n_total") or baseline.get("n") or 0) if fp else 0
+    if not fp or not 0 < n_base <= x.shape[0]:
+        return False
+    return fingerprint(x[:n_base]) == fp
+
+
+def query_reference(baseline: Mapping) -> tuple[float, float]:
+    """(median, MAD) of the query->corpus nearest distance from earlier evidence (an
+    ``Evidence.to_dict()`` or ``--json`` output of an audit run with queries), for ``audit(..., query_baseline=...)``."""
+    if not isinstance(baseline, Mapping) or not isinstance(baseline.get("findings"), list):
+        raise TypeError("query_baseline must be evidence with a findings list "
+                        "(Evidence.to_dict() or --json output)")
+    for f in baseline["findings"]:
+        if isinstance(f, Mapping) and f.get("name") == "query_gap":
+            d = f.get("details") or {}
+            try:
+                med, mad = float(d["median_query_nn_distance"]), float(d["query_nn_mad"])
+            except (KeyError, TypeError, ValueError):
+                break
+            if np.isfinite(med) and np.isfinite(mad) and med >= 0 and mad >= 0:
+                return med, mad
+            break
+    raise ValueError("query_baseline has no query_gap finding with median_query_nn_distance "
+                     "and query_nn_mad; re-create it with --queries")
+
+
 def _core_findings(
     x: np.ndarray, k: int, near_dup_cos: float, queries: np.ndarray | None, th: dict,
-    seed: int = 0,
+    seed: int = 0, reference: tuple[float, float] | None = None,
+    knn: Mapping | None = None,
 ) -> tuple[list[Finding], np.ndarray, np.ndarray]:
-    """Compute every finding that depends only on the (sampled) matrix and the queries."""
-    knn_idx, knn_dist = exact_knn(x, k)
+    """Compute every finding that depends only on the (sampled) matrix and the queries.
+    ``knn`` supplies exact neighbor lists ({"cosine": (idx, dist), "dot": ...}) computed
+    elsewhere, e.g. by an incremental cache."""
+    knn_idx, knn_dist = knn["cosine"] if knn else exact_knn(x, k)
     findings: list[Finding] = []
 
     h = hubness(x, k, knn=knn_idx)
@@ -585,7 +673,7 @@ def _core_findings(
         mm = {"k": int(k), "topk_overlap": 1.0, "queries_fully_agreeing_ratio": 1.0,
               "min_overlap": 1.0, "skipped": "norms are uniform, cosine == inner product"}
     else:
-        dot_idx, _ = exact_knn(x, k, metric="dot")
+        dot_idx, _ = knn["dot"] if knn and knn.get("dot") is not None else exact_knn(x, k, metric="dot")
         mm = metric_mismatch(knn_idx, dot_idx)
     findings.append(
         Finding(
@@ -645,7 +733,8 @@ def _core_findings(
     if queries is not None:
         qv = np.asarray(queries, dtype=np.float32)
         qa = query_audit(x, qv, k, knn_dist[:, 0],
-                         dup_cutoff=duplicate_cutoff(dc["mean_random_distance"]))
+                         dup_cutoff=duplicate_cutoff(dc["mean_random_distance"]),
+                         reference=reference)
         findings.append(
             Finding(
                 "ood_queries", "ood_query_ratio", qa["ood_query_ratio"],
@@ -654,20 +743,61 @@ def _core_findings(
                 f"their nearest corpus item (median {qa['median_query_nn_distance']:.3f}) than "
                 f"99% of corpus items are from theirs (cutoff {qa['ood_cutoff_distance']:.3f}). "
                 "Out-of-distribution queries: wrong model, missing query prefix, or uncovered "
-                "topics; see details.ood_sample_ids."
+                "topics; see details.ood_sample_ids. Deprecated: this ratio also counts the "
+                "normal query/passage distance of asymmetric models; read query_gap instead."
                 + ("" if qa["corpus_has_distinct_neighbors"] else " No corpus row has a "
                    "neighbor that is not a copy of it, so there is no reference distance and "
                    "nothing is flagged; see collapse."),
-                qa,
+                {key: v for key, v in qa.items() if not key.startswith(("shift", "reference_"))},
             )
         )
+        findings.append(
+            Finding(
+                "query_gap", "query_gap_ratio", qa["query_gap_ratio"],
+                _verdict("queries.query_gap_ratio", qa["query_gap_ratio"], th),
+                f"the median query is {qa['median_query_nn_distance']:.3f} from its nearest "
+                f"corpus item, {qa['query_gap_ratio']:.2f}x the median corpus item's distance to "
+                f"its own nearest neighbor ({qa['median_corpus_nn_distance']:.3f}). Short "
+                "queries against long passages keep healthy pipelines at about 1 to 2.5; queries "
+                "embedded by a different model land at 5 to 10. A missing query prefix does not "
+                "reliably move it."
+                + ("" if qa["corpus_has_distinct_neighbors"] else " No corpus row has a "
+                   "neighbor that is not a copy of it, so there is no reference distance and "
+                   "the ratio is reported as 0; see collapse."),
+                {key: qa[key] for key in ("n_queries", "median_query_nn_distance",
+                                          "query_nn_mad", "median_corpus_nn_distance",
+                                          "corpus_has_distinct_neighbors")},
+            )
+        )
+        if reference is not None:
+            findings.append(
+                Finding(
+                    "query_shift", "shifted_query_ratio", qa["shifted_query_ratio"],
+                    _verdict("queries.shifted_query_ratio", qa["shifted_query_ratio"], th),
+                    f"{qa['shifted_query_ratio']:.1%} of {qa['n_queries']} queries are farther "
+                    f"from the corpus than {qa['shift_cutoff_distance']:.3f}, the reference "
+                    f"query set's median ({qa['reference_median_nn_distance']:.3f}) plus 3 MAD "
+                    f"({qa['reference_nn_mad']:.3f}). Healthy query sets stay below 10%; a "
+                    "query pipeline that changed model moves almost every query. Only "
+                    "meaningful when the reference was audited on the same corpus and sample "
+                    "size; see details.shifted_sample_ids.",
+                    {key: qa[key] for key in ("n_queries", "median_query_nn_distance",
+                                              "shift_cutoff_distance",
+                                              "reference_median_nn_distance",
+                                              "reference_nn_mad", "shifted_sample_ids")},
+                )
+            )
         findings.append(
             Finding(
                 "query_hubness", "query_hubness_skewness", qa["query_hubness_skewness"],
                 _verdict("queries.query_hubness_skewness", qa["query_hubness_skewness"], th),
                 f"k-occurrence skewness over query results {qa['query_hubness_skewness']:.2f} "
                 f"(max {qa['max_query_k_occurrence']} appearances); queries reach "
-                f"{qa['coverage']:.1%} of the corpus in their top-{qa['k']}.",
+                f"{qa['coverage']:.1%} of the corpus in their top-{qa['k']}. Skewness grows "
+                "with corpus size: English models with published retrieval scores measured 1.5 "
+                "to 3.4 on corpora up to 26k documents and 4.0 to 4.8 on 58k, good multilingual "
+                "models on Korean up to 9.1, models that do not cover the language 11 to 30; "
+                "compare against a baseline of the same corpus.",
                 {key: qa[key] for key in ("k", "n_queries", "max_query_k_occurrence", "coverage")},
             )
         )
@@ -686,6 +816,10 @@ def audit(
     clusters: int = 0,
     thresholds: dict | None = None,
     sample_repeats: int = 1,
+    query_baseline: Mapping | None = None,
+    qrels: Mapping | None = None,
+    ranked: np.ndarray | None = None,
+    knn: Mapping | None = None,
 ) -> Evidence:
     """Audit an embedding matrix and return deterministic Evidence.
 
@@ -694,7 +828,16 @@ def audit(
     the rows), so combining it with sampling raises. Pass ``sample=None`` (or 0) to audit
     every row.
 
-    ``queries`` adds query-side findings (out-of-distribution queries, query hubness).
+    ``queries`` adds query-side findings (query gap, query hubness, and the deprecated
+    out-of-distribution ratio). ``query_baseline`` is earlier evidence of the same corpus
+    audited with healthy queries (``Evidence.to_dict()`` or ``--json`` output); it adds
+    ``query_shift``, the share of these queries beyond that reference's median + 3 MAD.
+    ``qrels`` ({query row: {corpus row: grade}}, see ``vecscope.retrieval``) adds the
+    ``retrieval`` block: nDCG, recall, MRR and duplicate share of exact search over every
+    corpus row (also when the findings are sampled), and of ``ranked`` (production top-k
+    row ids per query) when given. ``knn`` supplies the exact cosine (and dot) neighbor
+    lists of every row, e.g. from ``vecscope.incremental.cached_knn``; it needs an unsampled
+    audit. ``plan`` orders the non-ok findings into steps (``vecscope.plan``).
     ``clusters`` > 0 attaches a per-cluster report with sample ids (no verdicts).
     ``thresholds`` overrides default (warn, fail) pairs by key, e.g.
     ``{"anisotropy.mean_random_cosine": (0.4, 0.7)}``.
@@ -770,9 +913,30 @@ def audit(
                 f"ann_neighbors contains id {int(ann_neighbors.max())} but there are only "
                 f"{x.shape[0]} rows; ids must index the same rows as the embedding file"
             )
+    reference = None
+    if query_baseline is not None:
+        if queries is None:
+            raise ValueError("query_baseline needs queries")
+        reference = query_reference(query_baseline)
+        if query_baseline.get("dim") not in (None, x.shape[1]):
+            raise ValueError(f"query_baseline was audited at dim={query_baseline.get('dim')}, "
+                             f"these vectors have dim={x.shape[1]}")
     if queries is not None:
         queries = _checked_queries(queries, x.shape[1])
-    findings, knn_idx, knn_dist = _core_findings(x, k, near_dup_cos, queries, th, seed)
+    if (qrels is not None or ranked is not None) and queries is None:
+        raise ValueError("qrels and ranked need queries")
+    if ranked is not None and qrels is None:
+        raise ValueError("ranked needs qrels to be scored")
+    if knn is not None:
+        if sampled:
+            raise ValueError("precomputed knn needs every row audited; pass sample=None")
+        ci = np.asarray(knn["cosine"][0])
+        if ci.shape[0] != x.shape[0] or ci.shape[1] < min(k, x.shape[0] - 1):
+            raise ValueError(f"knn lists are shaped {ci.shape}; need ({x.shape[0]}, >= {k})")
+        knn = {m: (np.asarray(v[0])[:, :k], np.asarray(v[1])[:, :k])
+               for m, v in knn.items() if v is not None}
+    findings, knn_idx, knn_dist = _core_findings(x, k, near_dup_cos, queries, th, seed,
+                                                 reference, knn)
     n_queries = 0 if queries is None else int(np.asarray(queries).shape[0])
     if ann_neighbors is not None:
         ann_neighbors = ann_neighbors.astype(np.int64)  # ids were checked to fit; -1 marks fillers
@@ -801,7 +965,8 @@ def audit(
         verdicts: dict[str, set[str]] = {f.name: {f.verdict} for f in findings}
         for r in range(1, sample_repeats):
             rows_r = np.sort(np.random.default_rng(seed + r).choice(n_total, sample, replace=False))
-            rep, _, _ = _core_findings(x_full[rows_r], k, near_dup_cos, queries, th, seed)
+            rep, _, _ = _core_findings(x_full[rows_r], k, near_dup_cos, queries, th, seed,
+                                       reference)
             for f in rep:
                 values[f.name].append(f.value)
                 verdicts[f.name].add(f.verdict)
@@ -811,16 +976,27 @@ def audit(
             if not f.verdict_stable:
                 unstable.append(f.name)
 
+    retrieval = {}
+    if qrels is not None:
+        from vecscope.retrieval import evaluate_retrieval, parse_qrels
+
+        retrieval = evaluate_retrieval(x_full, queries, parse_qrels(qrels), k=k, ranked=ranked,
+                                       near_dup_cos=near_dup_cos)
     report = cluster_report(x, clusters, knn_idx, knn_dist, near_dup_cos, seed) if clusters else []
     inconclusive: list[str] = []
     if sampled:
         _to_original_rows(findings, report, rows)
         inconclusive = _apply_sampling(findings, sample / n_total, th)
+    from vecscope.plan import build_plan
+
+    findings = _attach_thresholds(findings, th)
     return Evidence(
-        "vecscope", __version__, int(x.shape[0]), int(x.shape[1]), int(k),
-        _attach_thresholds(findings, th),
+        "vecscope", __version__, int(x.shape[0]), int(x.shape[1]), int(k), findings,
         n_total=n_total, sampled=sampled, n_queries=n_queries, clusters=report,
         thresholds={k: list(v) for k, v in th.items()},
         sample_repeats=sample_repeats, unstable_findings=unstable, near_dup_cos=near_dup_cos,
         inconclusive_findings=inconclusive,
+        plan=build_plan([asdict(f) for f in findings], retrieval or None),
+        retrieval=retrieval,
+        corpus_fingerprint=fingerprint(x_full),
     )

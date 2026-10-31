@@ -2,73 +2,186 @@
 
 # 검증 결과
 
-vecscope 0.5.0과 당시 미공개 변경분(sweep의 지연 시간·인덱스 크기, 이웃 목록을 받는 compare,
-CI 게이트)을 라이브러리 코드는 손대지 않은 채 검증했습니다. 검증 대상은 기존 테스트 전부,
-100k × 768 규모에서 float64 기준 정확성, 별도로 작성한 recall 채점기, README의 표본 감사 설명,
-성능 표, "실제 임베딩" 표, 그리고 라벨이 있는 데이터셋 3개에서 공개 모델 19종의 nDCG@10과
-진단값의 관계입니다. 무엇을 쟀고 그 결과로 vecscope의 무엇이 바뀌었는지 정리합니다. 현재
-릴리스의 임곗값과 문서는 이 결과를 반영한 것입니다.
+vecscope의 주장을 어떻게 확인했고 측정 결과가 무엇을 보여 주는지 정리합니다. 대상은 float64
+기준 정확성, ANN recall 채점기, 표본 감사, 라벨이 있는 데이터에서 검색 품질과 임곗값의 관계,
+질의 항목, 계획(plan)의 조치를 적용했을 때 검색 품질이 어떻게 움직이는지, 그리고 에이전트가
+MCP로 계획을 따라가는 과정입니다. 임곗값과 계획 규칙은 이 결과를 바탕으로 정했습니다.
 
-- 실행 환경: AMD EPYC 7R13 8 vCPU, RAM 26 GB, NVIDIA L4. Python 3.12.3, numpy 2.5.4,
-  faiss-gpu-cu12 1.14.1, sentence-transformers 3.4.1
+- 실행 환경: AMD EPYC 7R13 8 vCPU, RAM 26 GB, NVIDIA L4. Python 3.12.3, numpy 2.2.6,
+  faiss 1.15.1, sentence-transformers 3.4.1, torch 2.6.0
 - 데이터: 합성 분포 6종(`examples/bench_common.py`의 clustered, isotropic, anisotropic,
-  duplicates, lowrank, zipf), README 표에 쓰인 공개 임베딩 8종, 모델 19종으로 인코딩한 BEIR
-  SciFact·NFCorpus·ko-strategyqa
+  duplicates, lowrank, zipf), README 표에 쓰인 공개 임베딩 8종, 모델 19종으로 인코딩한 라벨
+  데이터세트 6개(BEIR SciFact·NFCorpus·ArguAna·SCIDOCS·FiQA-2018, 한국어 ko-strategyqa)
+- 벡터 저장소: faiss 1.15.1, Qdrant client 1.20(로컬 모드), Chroma 1.5, Milvus Lite 3.2,
+  Weaviate client 4.24
 
 ## 결과 요약
 
-| 영역 | 확인한 사실 | 반영한 변경 |
-|---|---|---|
-| 정확한 k-NN (`exact_knn`, `query_knn`, faiss flat CPU·GPU) | 100k × 768 분포 6종, 모델 19종 × 데이터셋 3개, 공개 임베딩 8종 모두에서 float64와 비교해 순위 오류가 없었습니다. float32 거리 오차는 최대 4.1e-7입니다. | 없음 |
-| ANN recall 채점 | 동점 허용 오차 `1e-6 + 1e-4 × 거리`가 float32 반올림 오차의 약 70배였습니다. 그래서 10번째 이웃보다 최대 7e-5 먼 11번째 이웃까지 적중으로 세어, 엄격한 채점기보다 recall이 최대 +0.0016 높게 나왔습니다. | 허용 오차를 `1e-6 + 1e-5 × 거리`로 줄였습니다. `tests/test_scale_exactness.py`가 엄격한 채점기와 대조합니다. |
-| 표본 감사의 값 | 문서 설명과 일치했습니다. 분포형 항목은 전체 값과 2.3% 이내로 같았고, hubness와 antihubs는 모든 경우 전체 값보다 낮았으며, collapse 비율은 표본 비율 × 전체 비율의 0.96~1.03배였습니다. | 없음 |
-| 표본 감사의 판정 | 전체 코퍼스에서 `fail`이나 `warn`인 항목이 표본에서는 `ok`나 `warn`으로 내려갔습니다. zipf 분포의 connectivity는 0.372 fail이 25% 표본에서 0.0008 ok가 됐고, clustered의 hubness는 2.60 warn이 1.15 ok, duplicates의 collapse는 0.200 fail이 0.051 warn이 됐습니다. outliers는 10% 표본에서 3.9배 많게 셌습니다. | hubness·antihubs·connectivity의 `fail`이 아닌 판정과 outliers의 `ok`가 아닌 판정을 `inconclusive`로 표시합니다. collapse 판정은 추정한 전체 비율로 내립니다. 게이트 출력에 inconclusive 항목 이름을 적습니다. |
-| `sample_repeats` | 매우 안정적인 항목에서도 `value_range` 안에 전체 코퍼스 값이 없는 경우가 잦았습니다. | 표본 사이의 흩어짐일 뿐 전체 값의 구간 추정이 아니라고 문서에 적었습니다. |
-| 임곗값 | 공개 nDCG@10을 0.007 이내로 재현한 정상 파이프라인에서도 `ood_queries`는 NFCorpus 모델 19개 중 18개가 fail이었고 `anisotropy`는 최상위 모델에 warn이 붙었습니다. 한국어 데이터에서는 `query_hubness`가 nDCG 0.80인 다국어 모델과 0.04인 영어 전용 모델을 구분하지 못하고 둘 다 fail로 판정했습니다. | `anisotropy` (0.5, 0.85) → (0.85, 0.95), `ood_queries` (0.05, 0.20) → (0.5, 0.8), `query_hubness` (2, 4) → (4, 10) |
-| README "실제 임베딩" 표 | 각 데이터의 앞 4만 행에서 판정 88개가 모두 재현됐습니다. 표기값 하나가 반올림 경계에서 달랐습니다. | Cohere ko의 `distance_concentration` 1.73 → 1.72 |
-| 성능 표 | `benchmark_scale.py` 1회 측정이 별도 프로세스 3회 중앙값과 2% 이내로 같았고, tracemalloc 최대치는 OS 기준 최대 메모리와 0.04 GiB 이내였습니다. | 384·768·1,536차원, 20만 행까지 실측한 시간과 메모리로 표를 바꿨습니다. |
-| sweep | 추천 설정이 seed 3개에서 같았습니다. clustered 분포에서 IVF nprobe=1의 recall이 100k에서 0.696, 500k에서 0.955로 오히려 올랐는데, 군집 수 n/200이 nlist = 4√n과 겹치기 때문입니다. | sweep caveat에 IVF recall은 규모에 따라 어느 쪽으로든 움직일 수 있다고 적었습니다. `benchmark_sweep.py`는 여러 분포를 돌리고 `--centers` 옵션을 받습니다. |
+| 영역 | 확인한 사실 |
+|---|---|
+| 테스트 | `pytest -q`와 `pytest -m slow`가 통과합니다. 벡터 저장소 테스트는 실제 로컬 Qdrant·Chroma·Milvus Lite 인스턴스와 faiss 인덱스 파일로 실행합니다. |
+| 정확한 k-NN (`exact_knn`, `query_knn`, faiss flat CPU·GPU) | 100k × 768 분포 6종과 실제 임베딩 76개 (모델, 데이터세트) 조합에서 float64와 비교한 순위 오류가 0개입니다. float32 거리 오차는 최대 5.9e-7입니다. |
+| ANN recall 채점 | 동점 허용 오차는 `1e-6 + 2e-6 × 거리`로, float32 오차의 약 3배입니다. 100k × 768 인덱스 설정 24개에서 엄격한 float64 채점기와 1e-4 이내(질의 1,000개 중 최대 1개)로 같고, 완전한 복제는 여전히 서로 바꿔도 되는 이웃으로 셉니다. 실제 질의에서는 3.1e-4 이내(질의 323개 중 1개)입니다. |
+| 표본 감사의 값 | 분포형 항목은 전체 값과 2.3% 이내로 같고, hubness와 antihubs는 모든 경우 전체 값보다 낮게 나옵니다(하한). collapse의 `estimated_full_share`는 전체 비율의 1.015\~1.026배입니다. |
+| 표본 감사의 판정 | 전체 코퍼스보다 낮게 나온 표본 판정은 모두 `inconclusive_findings`에 들어 있습니다(clustered·duplicates의 hubness·antihubs, zipf의 antihubs·connectivity). |
+| `sample_repeats` | `value_range`는 표본 사이의 흩어짐입니다. 전체 코퍼스 값이 그 안에 없는 경우가 잦으므로 구간 추정이 아닙니다. |
+| 임곗값 | 공개 nDCG@10을 0.007 이내로 재현한 파이프라인 18개에서 `anisotropy`, `query_gap`, `query_hubness` 판정이 모두 `ok`입니다. 한국어 데이터에 쓴 영어 전용 모델 11개는 모두 `hubness`나 `query_hubness`를 올립니다. |
+| README "실제 임베딩" 표 | 각 데이터의 앞 4만 행에서 값과 판정 88개가 모두 재현됩니다. |
+| 증분 감사 (`--knn-cache`) | 100k × 768에 5천 행이나 2만 행을 덧붙였을 때 판정은 전체 감사와 같고 값은 상대 7e-5 이내입니다. 15초와 47초가 걸려 전체 감사(94초, 123초)보다 빠릅니다. |
+| sweep | 추천 설정이 seed 3개에서 같습니다. nprobe를 고정한 IVF recall은 데이터의 군집이 nlist와 어떻게 겹치는지에 따라 규모가 커질 때 오르기도 내리기도 합니다. |
 
-## 진단값과 nDCG@10의 관계 (모델 19종)
+## 진단값과 nDCG@10의 관계
 
-데이터셋마다 모델 19종에 대해 각 항목의 값과 nDCG@10 사이의 Spearman 상관을 구했습니다.
-음수가 일관되게 나오면 검색이 나빠질수록 값이 커진다는 뜻입니다.
+데이터세트마다 모델 19종에 대해 각 항목의 값과 nDCG@10 사이의 Spearman 상관을 구했습니다.
+음수면 검색이 나빠질수록 값이 커진다는 뜻입니다. ArguAna의 nDCG@10은 BEIR과 같이 질의 자신의
+문서(코퍼스에 들어 있습니다)를 빼고 계산했습니다.
 
-| 항목 | SciFact | NFCorpus | ko-strategyqa |
+| 항목 | SciFact | NFCorpus | ko-strategyqa | ArguAna | SCIDOCS | FiQA |
+|---|---|---|---|---|---|---|
+| query_hubness | −0.57 | −0.46 | −0.90 | −0.85 | −0.71 | −0.46 |
+| hubness | −0.52 | −0.48 | −0.76 | −0.03 | −0.68 | −0.48 |
+| antihubs | −0.27 | −0.12 | −0.72 | −0.72 | −0.60 | −0.40 |
+| query_gap | −0.23 | −0.02 | −0.81 | −0.40 | −0.27 | −0.25 |
+| effective_rank | +0.06 | −0.05 | −0.30 | −0.04 | −0.20 | −0.38 |
+| rogue_dimensions | −0.38 | −0.38 | −0.05 | −0.12 | +0.18 | +0.05 |
+| anisotropy | +0.29 | +0.21 | −0.11 | −0.24 | −0.20 | −0.24 |
+| distance_concentration | +0.19 | +0.34 | −0.82 | −0.14 | +0.41 | +0.16 |
+| outliers | 0.00 | +0.27 | −0.88 | +0.14 | +0.19 | +0.09 |
+| collapse | n/a | +0.31 | −0.50 | +0.09 | +0.31 | −0.35 |
+
+이 결과로 말할 수 있는 것:
+
+- `hubness`와 `query_hubness`는 데이터세트 6개 모두에서 음수입니다(−0.03\~−0.90). 모델 사이의
+  검색 품질 차이를 반영하며, 언어나 도메인을 전혀 다루지 못하는 모델이 섞인 데이터세트
+  (ko-strategyqa, ArguAna, SCIDOCS)에서 가장 강합니다.
+- `query_gap`도 6개 모두 음수(−0.02\~−0.81)지만 영어 데이터에서는 약합니다. 쓸 만한 모델은
+  모두 0.9\~2.6에 머물기 때문입니다(ArguAna는 질의가 코퍼스에서 가져온 논증이라 0.05\~0.93). 이 항목의 역할은 다른 공간에서 온 질의를 잡는 것이지
+  모델의 순위를 매기는 것이 아닙니다.
+- `anisotropy`와 `rogue_dimensions`는 데이터세트에 따라 부호가 바뀝니다. 품질 점수가 아닙니다.
+  `anisotropy`는 114개 조합 모두 `ok`입니다.
+- ArguAna, SCIDOCS, FiQA는 어떤 임곗값을 정하는 데도 쓰지 않았습니다. 여기서 `query_gap`은
+  SCIDOCS의 GloVe(2.90, `warn`)만 잡았고 좋은 모델은 1.59 이하입니다. `query_hubness`는 FiQA에서
+  모델 19개 중 17개에 warn을 냈는데, 좋은 모델은 4.0\~4.2로 `warn` 임곗값 4를 겨우 넘습니다.
+  왜도가 코퍼스 크기를 따라 커지기 때문입니다(영어 모델: 문서 2.6만 개까지 1.5\~3.4, FiQA 5.8만 개에서
+  4.0\~4.8). 홀드아웃에 맞춰 임곗값을 고치면 홀드아웃이 학습 데이터가 되므로 임곗값은 두고 설명문에
+  이 범위를 적었습니다.
+  SCIDOCS에서는 다국어 모델을 fail로 판정했습니다(14\~25, nDCG@10 0.15\~0.17, 가장 좋은 영어
+  모델은 0.23). `hubness`는 SCIDOCS(문서 2.5만 개)와 FiQA(5.7만 개)에서 대부분 warn입니다.
+  왜도는 코퍼스가 클수록 커지므로 절대 `warn`보다 같은 코퍼스의 기준선과 비교해 읽으십시오.
+- 명백히 잘못된 파이프라인(BEIR에 GloVe, 영어 데이터에 한국어 전용 모델, 한국어 데이터에 영어
+  전용 모델)은 여러 항목을 동시에 올립니다. 이런 파이프라인을 가르는 것은 경고의 개수이지
+  `fail` 하나가 아닙니다.
+
+## 질의 항목
+
+`query_gap`과 `query_shift`는 SciFact, NFCorpus, ko-strategyqa에서 모델 19종의 임베딩 캐시로
+후보 세 가지를 측정해 골랐습니다. 모든 (모델, 데이터세트) 조합을 자기 질의와 주입한 결함 세 가지로
+채점했습니다. 결함은 질의 접두어 누락(bge, e5, mxbai; 21개), 같은 차원의 다른 모든 모델로
+인코딩한 질의(312개), 한국어 데이터에 쓴 영어 전용 모델(11개)입니다. q_nn은 질의에서 코퍼스로의
+최근접 거리입니다. 임곗값은 재현 파이프라인의 최댓값 바로 위로 정했으므로 이 데이터에 맞춘
+값이고, 홀드아웃 검증은 하지 않았습니다.
+
+| 기준 | query_gap: q_nn 중앙값 / 코퍼스 NN 중앙값 | query_shift: 기준 중앙값 + 3 MAD를 넘는 비율 | mutual: 서로 이웃인 top-k 문서 비율 | ood_queries |
+|---|---|---|---|---|
+| 재현 파이프라인 18개 중 warn 이상 | **0** | **0** | **0** | 4 |
+| nDCG@10이 25% 넘게 떨어지는 교환 268개 중 잡은 수 | 250 | 266 | 262 | 267 |
+| 75% 이상 유지되는 교환 44개 중 잡은 수 | 16 | 19 | 7 | 24 |
+| SciFact·NFCorpus 768차원 교환 중 fail | 112개 중 108 | 112개 중 110 | 112개 중 92 | 112개 중 110 |
+| 한국어 데이터의 영어 전용 모델 중 fail | 11개 중 4 | 11개 중 0 | 11개 중 4 | 11개 중 2 |
+| 접두어를 빼면 값이 나빠지는 경우 | 21개 중 10 | 21개 중 10 | 21개 중 12 | 21개 중 11 |
+| nDCG@10과의 Spearman (SciFact, NFCorpus, ko) | −0.23, −0.02, −0.81 | 해당 없음(집합마다 기준 하나) | +0.64, +0.74, +0.09 | −0.33, −0.33, +0.23 |
+| 질의 100개 표본 5회에서 판정이 바뀐 비율 | 0.1% | 0.2% | 1.9% | 1.0% |
+
+`query_gap`은 기준선이 필요 없고, `query_shift`는 기준선에 저장한 질의 거리와 비교합니다.
+`ood_queries`는 비교용으로 출력에 남아 있으며 지원 중단(deprecated) 상태입니다. 결함 기준 세
+가지는 질의 쪽 결함이 아닌 다른 것을 가리키는 것으로 드러났습니다.
+
+- **접두어 누락.** bge, e5, mxbai의 질의 접두어를 빼도 SciFact와 NFCorpus에서 nDCG@10은
+  −0.014\~+0.007만 바뀌었습니다. 질의 거리는 가까워지기도 하고(SciFact bge-base `query_gap`
+  1.55→1.21) 멀어지기도 했습니다(NFCorpus e5-base 1.64→1.75). 잡을 기하적 신호가 없고, 이
+  데이터에서는 피해도 거의 없습니다.
+- **다른 모델.** 같은 기반에서 미세 조정한 모델은 공간을 공유합니다. 같은 문서의 평균 코사인이
+  mxbai-embed-large와 bge-large는 0.985, gte-base와 bge-base는 0.885입니다(mpnet과 bge-base는
+  0.004). 이런 모델끼리는 질의를 바꿔 넣어도 nDCG@10이 대부분 유지됩니다(bge-base 코퍼스에
+  gte-base 질의: 0.697, 자기 질의는 0.740). `query_gap`과 `query_shift`가 fail로 잡지 못한
+  768차원 교환 두 건이 이 경우입니다.
+- **다른 언어.** 영어 전용 모델은 ko-strategyqa의 한국어 질의와 문서를 똑같이 잘못
+  인코딩하므로 둘 사이에 비대칭이 없습니다. 이 경우는 `query_hubness`가 11개 중 10개를
+  fail(11\~30), 나머지 하나를 warn(8.3)으로 잡습니다.
+
+## 개입 실험
+
+계획의 단계를 적용하면 검색 품질이 움직일까요? 검증 하네스(이 페이지의 다른 측정과 마찬가지로
+저장소 밖에 있습니다)는 실제 (모델,
+데이터세트) 조합 21개(SciFact 8개, NFCorpus 8개, ko-strategyqa 5개)에 변경을 코퍼스에 적용하고
+같은 변환을 질의에도 적용한 뒤, 전후의 진단 항목, 계획, `retrieval`(nDCG@10, recall@10, 중복
+비율)을 기록합니다.
+
+| 개입 | 진단 항목 | 검색 품질 | 계획 |
 |---|---|---|---|
-| query_hubness | −0.57 | −0.46 | −0.90 |
-| hubness | −0.52 | −0.48 | −0.76 |
-| antihubs | −0.27 | −0.12 | −0.72 |
-| rogue_dimensions | −0.38 | −0.38 | −0.05 |
-| ood_queries | −0.34 | −0.33 | +0.25 |
-| anisotropy | +0.29 | +0.21 | −0.11 |
-| distance_concentration | +0.19 | +0.34 | −0.82 |
+| 중심화: 코퍼스 평균을 빼고 다시 정규화 | `anisotropy` 0.13\~0.82(모두 `ok`)가 0.0003 이하로 떨어짐 | nDCG@10 중앙값 −0.008, 최악 −0.034, 21개 중 3개만 개선. recall@10 중앙값 −0.005(−0.023\~+0.023) | `anisotropy`가 모두 `ok`라 이 조치를 요구한 단계가 없음 |
+| 20% 복제 주입(절반은 완전 복제, 절반은 1e-4 흔들림) 후 중복 제거 | `collapse` 0.33\~0.35, 21개 모두 `fail` | top 10의 중복 비율 0.15(0.13\~0.18)가 0.016으로 감소, recall@10 +0.011, nDCG@10 +0.032(중앙값) | 21개 모두 `input_integrity`가 첫 단계 |
+| 좌표 하나를 30배 키운 뒤 차원별 z-score | `rogue_dimensions` 263\~523, 21개 모두 `fail`, z-score 후 1.0 | nDCG@10이 원래의 57%(중앙값, 7\~68%)로 떨어지고 z-score로 98%(88\~109%) 회복 | 21개 모두 `dominant_dimension`. 자체 중복이 있는 NFCorpus 8개는 `input_integrity` 다음 |
+| 정확 검색 top 10을 질의 기준 CSLS로 재순위화: 2 cos(q, d)에서 d와 가장 가까운 질의 10개의 평균 코사인을 뺌 | 질의 결과의 k-출현 왜도가 21개 중 19개에서 감소(중앙값 −0.73). `query_hubness`가 `ok`가 아닌 4개는 5.4, 9.1, 11.2, 28.5가 4.7, 2.3, 2.5, 17.2로 감소 | 그 4개의 nDCG@10 +0.002, +0.004, +0.016, +0.022. `query_hubness`가 `ok`인 경우 −0.015\~+0.018(중앙값 −0.003) | `corpus_structure`(또는 `query_pipeline`) 단계. 조치 문구가 질의 기준 CSLS를 가리킴. 같은 보정을 코퍼스 이웃으로 하면 왜도가 오르고(중앙값 +1.8) 21개 중 16개에서 nDCG@10이 떨어짐 |
+| HNSW M=16, ef_search 4, 8, 16, 64 | `ann_recall` 중앙값 0.883, 0.958, 0.984, 0.998 | 정확 검색 대비 ranked nDCG@10 비율 0.83, 0.92, 0.96, 0.995. 84회 전체에서 둘의 Spearman 0.94 | `index` 단계가 21개 중 21, 7, 0, 0개 |
 
-여기서 확인되는 점은 다음과 같습니다.
+이 결과로 말할 수 있는 것:
 
-- `hubness`와 `query_hubness`는 모델 사이의 검색 품질 차이를 반영합니다. 한국어 데이터에서
-  좋은 모델(값 2.3~9.1)은 통과하고 영어 전용 모델(11~30)은 fail이 되도록 `query_hubness`
-  임곗값을 조정했습니다.
-- `ood_queries`는 질의와 코퍼스의 분포 차이를 재는 항목이고, 짧은 질의와 긴 문서 사이에는
-  그 차이가 늘 있습니다. 좋은 모델은 0.0~0.65, 모델이나 언어가 잘못된 경우는 0.7~1.0이
-  나오거나, 양쪽이 똑같이 잘못 인코딩되면 0이 나옵니다. 새 임곗값은 큰 차이만 표시하며,
-  이 항목은 품질 점수가 아닙니다.
-- `anisotropy`는 이 범위에서 품질과 관계가 없습니다. 가장 좋은 모델들이 0.58~0.82에 있으므로
-  `warn`은 0.85부터 시작합니다.
-- 누가 봐도 잘못된 조합(BEIR에 GloVe, 영어 데이터에 한국어 전용 모델, 한국어 데이터에 영어
-  전용 모델)은 여러 항목이 한꺼번에 경고를 냅니다. 그런 조합은 경고 개수로 가려낼 수 있지만
-  `fail` 하나만으로는 판단할 수 없습니다.
+- 결함이 실제로 있을 때는 계획이 다루는 진단 항목과 검색 품질이 함께 움직입니다. 중복 제거,
+  지배 좌표의 z-score, ef_search 상향이 각각 검색 품질을 회복시켰고, `ann_recall`은 인덱스
+  설정의 순서를 ranked nDCG@10과 같게 매깁니다.
+- 허브 완화는 진단이 허브가 있다고 할 때 도움이 됩니다. 질의 기준 CSLS는 `query_hubness`가
+  `ok`가 아닌 모든 조합에서 nDCG@10을 올렸고, 나머지에서는 오르내림이 반반이었습니다. 그래서
+  계획은 허브 항목이 `ok`가 아닐 때만 이 조치를 제안하고, 재측정 안내에서 라벨 질의를 요구합니다.
+- 검색 지연 시간: 이 코퍼스(문서 5천 개 이하)에서는 모든 ef_search에서 질의당 0.002\~0.04 ms로
+  측정 잡음보다 작습니다. ef_search 조정의 지연 시간 쪽은 여기가 아니라 100k 행에서 재는
+  `vecscope sweep`(README "인덱스 스윕")으로 확인합니다.
+- 건강한 모델을 중심화해도 나아지지 않습니다. `anisotropy`는 사라졌지만 nDCG@10이 최대 0.034
+  떨어졌습니다. 계획은 `anisotropy`가 `ok`가 아닐 때만 이 조치를 제안하고, 재측정 안내에서
+  라벨이 있는 질의로 검색 품질을 확인하라고 적습니다.
+- 지배 좌표는 노름도 흩뜨리고 코사인과 내적의 순위도 갈라 놓습니다. 정규화로는 그 좌표가
+  사라지지 않으므로, 계획은 이 항목들을 z-score 조치와 함께 `dominant_dimension` 단계에
+  넣습니다.
 
-MCP 서버와 운영 질의 로그는 검증 범위에 들어 있지 않습니다. 실제 모델 측정은 두 언어의
-데이터셋 3개로 했고, 표본 감사와 정확성은 합성 데이터에서, 검색 품질과의 관계는 라벨이 있는
-공개 데이터에서 확인했습니다.
+## 에이전트 연동
+
+- `tests/test_agent_workflow.py`는 MCP 서버를 stdio로 구동합니다. 정규화되지 않은 벡터에 공통
+  오프셋을 더한 코퍼스를 라벨 질의와 함께 감사하고, 주입한 결함이 남지 않을 때까지 계획의 첫
+  단계를 적용하고 다시 감사합니다. 계획은 `metric`(정규화), `shared_direction`(중심화) 순으로
+  요구하고, 그 뒤 `anisotropy`, `metric_mismatch`, `collapse`, `norms`가 `ok`가 되며 nDCG@10은
+  낮아지지 않습니다.
+- 이 테스트는 직전 `audit_id`를 `baseline`으로 넘겨 다시 감사하고, `baseline_diff`가 그 단계의
+  항목을 개선으로 표시하는지, 회귀로 표시하지 않는지, nDCG@10이 떨어지지 않는지 확인합니다. 이
+  과정에서 변환 전 기준선을 `query_shift`의 기준으로 쓰면 안 된다는 것이 드러났습니다(중심화한
+  질의가 모두 이동한 것으로 보였습니다). 지금은 `corpus_fingerprint`로 같은 코퍼스일 때만 씁니다.
+- 같은 과제를 Claude Code 2.1 헤드리스 모드(vecscope MCP 서버와 `--allow-dir`를 붙인
+  `claude -p`)에 두 번 주었습니다. 10\~11턴, 51\~54초가 걸렸습니다. 계획의 순서대로(metric 다음
+  shared_direction) 진행했고, 지시하지 않았는데도 직전 `audit_id`를 `baseline`으로 넘겨 다시
+  감사했습니다. `metric_mismatch`, `anisotropy`, `hubness`, `antihubs`, `collapse`를 `ok`로 만들었고
+  nDCG@10은 1.0 그대로였습니다. 남은 `outliers` warn(0.011, 임곗값 0.01)은 손대지 않았는데,
+  해당 행이 깨진 벡터가 아니고 그중 하나가 라벨된 정답이었기 때문입니다.
+
+## 한계
+
+- 임곗값과 질의 항목은 위 데이터에 맞춰 정했고 홀드아웃 분할은 없습니다. 운영 질의 로그와
+  비공개 코퍼스는 측정하지 않았습니다.
+- 실제 모델 측정은 두 언어의 데이터세트 6개입니다. 2만 행이 넘는 코퍼스의 정확성은 합성
+  데이터로 확인했고, 실제 데이터 정확성 검사는 그보다 작은 76개 조합에서 했습니다.
+- Weaviate 어댑터는 옵트인 테스트(`VECSCOPE_TEST_WEAVIATE=1`)에서 내장 서버로만 확인했습니다.
+  원격 Qdrant·Milvus·Weaviate 서버는 테스트하지 않았습니다.
+- 에이전트 실행은 모델 하나, 과제 하나입니다. 도구와 계획을 쓸 수 있다는 것을 보여 줄 뿐,
+  모든 에이전트가 그대로 따른다는 뜻은 아닙니다.
 
 ## 재현 방법
 
-- `pytest -q`는 검증 과정에서 추가된 테스트(`tests/test_new_features.py`,
-  `tests/test_scale_exactness.py`)를 실행합니다. `pytest -m slow`를 주면 100k × 384 정확성
+- `pytest -q`는 검증 테스트(`tests/test_new_features.py`, `tests/test_scale_exactness.py`,
+  `tests/test_agent_workflow.py`)를 실행합니다. `pytest -m slow`를 주면 100k × 384 정확성
   검사도 실행합니다.
 - `python examples/benchmark_scale.py --rows 10000 50000 100000 --dim 768 --json scale.json`과
   `python examples/benchmark_sweep.py --rows 100000 --dim 768 --corpus clustered zipf --json
   sweep.json`으로 표를 다시 잴 수 있습니다. 실행 환경 정보가 JSON에 함께 기록됩니다.
-- `python examples/retrieval_quality.py`는 공개 데이터셋으로 검색 품질 연구를 실행합니다.
+- `python examples/retrieval_quality.py`는 SciFact와 NFCorpus로 라벨 데이터 연구를 실행합니다.
+- 모델 19종, 데이터셋 6개, 질의 항목, 개입 실험은 패키지에 포함하지 않은 하네스로 실행했습니다. 그
+  결과로 정한 동작은 테스트로 고정되어 있습니다. `tests/test_query_findings.py`(query_gap,
+  query_shift), `tests/test_plan_incremental.py`(지배 좌표와 중복 사례를 포함한 계획 규칙),
+  `tests/test_regression_injection.py`(결함 주입)입니다.

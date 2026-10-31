@@ -1,6 +1,6 @@
 {
  "tool": "vecscope",
- "version": "0.6.0",
+ "version": "0.7.0",
  "n": 3000,
  "dim": 128,
  "k": 10,
@@ -30,7 +30,7 @@
     "strong shared direction (see anisotropy)",
     "a few generic items close to the corpus mean"
    ],
-   "suggested_action": "re-rank top-k with mutual k-NN or local scaling; if anisotropy also fails, center first",
+   "suggested_action": "re-rank top-k with local scaling against the queries (CSLS: 2 cos(q, d) minus d's mean cosine to its 10 nearest queries; scaling by corpus neighbors raised hubness in the verification); if anisotropy also fails, center first",
    "verify_by": "re-run the audit on the transformed vectors and compare hubness.skewness and details.hub_share_top1pct; check that recall on held-out queries did not drop",
    "value_range": null,
    "verdict_stable": null,
@@ -390,6 +390,14 @@
    0.5,
    0.8
   ],
+  "queries.query_gap_ratio": [
+   2.6,
+   3.0
+  ],
+  "queries.shifted_query_ratio": [
+   0.2,
+   0.3
+  ],
   "queries.query_hubness_skewness": [
    4.0,
    10.0
@@ -399,6 +407,35 @@
  "unstable_findings": [],
  "near_dup_cos": 0.99,
  "inconclusive_findings": [],
+ "plan": [
+  {
+   "order": 1,
+   "group": "shared_direction",
+   "findings": [
+    {
+     "name": "anisotropy",
+     "value": 0.8731670910623341,
+     "verdict": "warn",
+     "inconclusive": false
+    },
+    {
+     "name": "antihubs",
+     "value": 0.05228793340357085,
+     "verdict": "warn",
+     "inconclusive": false
+    }
+   ],
+   "common_cause": "a large component shared by all vectors (a mean offset or a few high-variance coordinates) that compresses scores and creates hubs",
+   "first_change": "subtract the corpus mean and re-normalize (anisotropy.details shows the expected cosine after centering); if rogue_dimensions fails, z-score dimensions instead. Apply the same transform to queries and rebuild the index",
+   "re_measure": "anisotropy and rogue_dimensions below warn_at, hubness.skewness down; retrieval ndcg_at_k not lower than before; pass --qrels to measure retrieval quality as well",
+   "why_this_order": "a transform rebuilds the neighbor graph that hubness, connectivity and ann_recall are computed on",
+   "only_inconclusive": false
+  }
+ ],
+ "retrieval": {},
+ "source": {},
+ "knn_cache": {},
+ "corpus_fingerprint": "14b6c27102bad68a22449387293980adbd5b19116153462a512a6f03a886dc3e",
  "schema_version": 1,
  "verdict": "warn"
 }

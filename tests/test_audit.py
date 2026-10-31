@@ -373,16 +373,20 @@ def test_tie_aware_recall_still_counts_a_missed_unique_neighbor():
     from vecscope.diagnostics.ann_recall import tie_aware_hits
 
     assert tie_aware_hits([0.1, 0.2, 0.2, 0.2, 0.3], [0.2, 0.2, 0.2, 0.3, 0.9]) == 4  # 0.1 missed
-    # slots 1e-5 apart are distinct neighbors (tolerance ~2e-6 at this distance): five copies
-    # of 0.10004 fill only its own slot
+    # slots 1e-5 apart are distinct neighbors (tolerance ~1.2e-6 at this distance): five
+    # copies of 0.10004 fill only its own slot
     assert tie_aware_hits([0.1, 0.10001, 0.10002, 0.10003, 0.10004], [0.10004] * 5) == 1
     # slots 1e-6 apart are within float32 rounding and do tie: the copies fill the slots
-    # within tolerance of 0.100004, never the farther ones
-    assert tie_aware_hits([0.1, 0.100001, 0.100002, 0.100003, 0.100004], [0.100004] * 5) == 3
+    # within tolerance of 0.100004 (itself and 0.100003), never the farther ones
+    assert tie_aware_hits([0.1, 0.100001, 0.100002, 0.100003, 0.100004], [0.100004] * 5) == 2
     # an 11th neighbor 1e-5 farther than the 10th is a miss, not a tie (recall inflation seen
     # with the earlier 1e-4 relative slack: docs/verification.md)
     exact = np.array([0.60, 0.62, 0.64, 0.66, 0.68, 0.70, 0.705, 0.708, 0.709, 0.7100])
     assert tie_aware_hits(exact, np.r_[exact[:9], 0.71001]) == 9
+    # nor is one 2.1e-6 farther at distance 0.39, the gap that a 1e-5 relative slack
+    # credited on 100k x 768 clustered vectors (IVF nprobe=1)
+    exact = np.array([0.30, 0.32, 0.34, 0.35, 0.36, 0.37, 0.38, 0.385, 0.387, 0.38757522])
+    assert tie_aware_hits(exact, np.r_[exact[:9], 0.38757733]) == 9
     assert tie_aware_hits([0.1, 0.2, 0.3, 0.4, 0.5], [0.5] * 5) == 1
     # a hit must not be wasted on a slot another id could still fill (maximum matching)
     assert tie_aware_hits([0.1, 0.100005, 0.100010], [0.100010, 0.100005, 0.1]) == 3
@@ -891,7 +895,61 @@ def test_mcp_audit_summary_and_verbose(tmp_path):
     bad = [f for f in small["findings"] if f["verdict"] != "ok"]
     assert all(f["suggested_action"] for f in bad)
     desc = describe_findings()
-    assert set(desc) == {f["name"] for f in full["findings"]} | {"ann_recall", "ood_queries", "query_hubness"}
+    assert set(desc) == {f["name"] for f in full["findings"]} | {
+        "ann_recall", "ood_queries", "query_gap", "query_shift", "query_hubness"}
+
+
+def test_mcp_baseline_by_audit_id_and_summary(tmp_path):
+    import json
+
+    pytest = __import__("pytest")
+    pytest.importorskip("mcp")
+    from vecscope.mcp_server import audit_embeddings
+
+    rng = np.random.default_rng(1)
+    c = rng.standard_normal((20, 16))
+    x = (c[rng.integers(0, 20, 600)] + rng.standard_normal((600, 16)) * 0.5).astype(np.float32)
+    x *= rng.uniform(0.3, 3.0, (600, 1)).astype(np.float32)  # unnormalized
+    q = x[:40] + rng.standard_normal((40, 16)).astype(np.float32) * 0.1
+    np.save(tmp_path / "a.npy", x)
+    np.save(tmp_path / "q.npy", q)
+    (tmp_path / "qrels.json").write_text(json.dumps({str(i): {str(i): 1} for i in range(40)}))
+    args = {"queries_path": str(tmp_path / "q.npy"), "qrels_path": str(tmp_path / "qrels.json")}
+    first = audit_embeddings(str(tmp_path / "a.npy"), k=5, **args)
+    assert first["audit_id"] == audit_embeddings(str(tmp_path / "a.npy"), k=5, **args)["audit_id"]
+    assert "retrieval nDCG@5=" in first["summary"] and "plan step 1 of" in first["summary"]
+    assert first["plan"][0]["group"] in first["summary"]
+    unit = x / np.linalg.norm(x, axis=1, keepdims=True)
+    np.save(tmp_path / "b.npy", unit)
+    np.save(tmp_path / "qb.npy", q / np.linalg.norm(q, axis=1, keepdims=True))
+    second = audit_embeddings(str(tmp_path / "b.npy"), k=5, baseline=first["audit_id"],
+                              **{**args, "queries_path": str(tmp_path / "qb.npy")})
+    d = second["baseline_diff"]
+    assert "metric_mismatch" in d["improvements"] and d["retrieval_comparable"]
+    assert "vs baseline: verdict" in second["summary"]
+    # normalized rows are another corpus: its query distances are no reference for query_shift
+    assert not any(f["name"] == "query_shift" for f in second["findings"])
+    assert "query_shift skipped" in second["query_reference_note"]
+    assert "query_shift skipped" in second["summary"]
+    # the same corpus with new queries takes the baseline as the reference
+    same = audit_embeddings(str(tmp_path / "a.npy"), k=5, baseline=first["audit_id"], **args)
+    assert any(f["name"] == "query_shift" for f in same["findings"])
+    assert "query_reference_note" not in same
+    # a saved response works as a baseline file too
+    (tmp_path / "first.json").write_text(json.dumps(first))
+    again = audit_embeddings(str(tmp_path / "b.npy"), k=5, baseline=str(tmp_path / "first.json"))
+    assert again["baseline_diff"]["baseline_verdict"] == first["verdict"]
+    with pytest.raises(Exception, match="not an audit_id of this server session"):
+        audit_embeddings(str(tmp_path / "b.npy"), baseline="0123456789abcdef")
+    with pytest.raises(Exception, match="tolerances need baseline"):
+        audit_embeddings(str(tmp_path / "b.npy"), tolerances={"collapse": 0.01})
+    (tmp_path / "binary.tsv").write_bytes((tmp_path / "q.npy").read_bytes())
+    with pytest.raises(Exception, match="not a text qrels file"):
+        audit_embeddings(str(tmp_path / "a.npy"), queries_path=str(tmp_path / "q.npy"),
+                         qrels_path=str(tmp_path / "binary.tsv"))
+    with pytest.raises(Exception, match="unsupported qrels file"):
+        audit_embeddings(str(tmp_path / "a.npy"), queries_path=str(tmp_path / "q.npy"),
+                         qrels_path=str(tmp_path / "q.npy"))
 
 
 def test_threshold_override_changes_verdict_and_is_reported():

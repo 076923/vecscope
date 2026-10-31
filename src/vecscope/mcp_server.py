@@ -7,13 +7,18 @@ that hold embeddings with ``vecscope-mcp --allow-dir DIR`` (repeatable) or the e
 variable ``VECSCOPE_ALLOWED_DIRS`` (paths separated by ``os.pathsep``). With a restriction in
 place, a path outside those directories is refused before anything is opened. Without one,
 every file the server process can read is reachable, which is fine on a developer machine
-and not fine on a shared one.
+and not fine on a shared one. Vector stores reached over the network (qdrant://, chroma://,
+milvus://, weaviate://) are refused unless the server is started with ``--allow-network``
+(or ``VECSCOPE_ALLOW_NETWORK=1``); they are then read, never written.
 """
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 import os
+from collections import OrderedDict
 from pathlib import Path
 
 try:  # mcp >= 2.0 renamed FastMCP to MCPServer
@@ -29,11 +34,46 @@ except ImportError:  # mcp 1.x
     except ImportError:  # pragma: no cover
         ToolError = ValueError  # type: ignore[misc,assignment]
 
-from vecscope.evidence import ACTIONS, THRESHOLDS, audit
+from vecscope.evidence import ACTIONS, THRESHOLDS, audit, diff_evidence, same_corpus
 from vecscope.io import load_neighbors, load_vectors
 
 _USER_ERRORS = (ValueError, TypeError, FileNotFoundError, ImportError, OSError)
 ALLOWED_DIRS_ENV = "VECSCOPE_ALLOWED_DIRS"
+ALLOW_NETWORK_ENV = "VECSCOPE_ALLOW_NETWORK"
+# recent audits of this server process by audit_id, so a re-audit can name its baseline
+# without the agent writing the earlier response to a file; held in memory only
+_RECENT: OrderedDict[str, dict] = OrderedDict()
+_RECENT_MAX = 32
+
+
+def _audit_id(ev: dict) -> str:
+    """Content hash of the evidence: the same input and settings give the same id."""
+    blob = json.dumps(ev, sort_keys=True, ensure_ascii=False, default=str).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def _remember(audit_id: str, ev: dict) -> None:
+    _RECENT[audit_id] = ev
+    _RECENT.move_to_end(audit_id)
+    while len(_RECENT) > _RECENT_MAX:
+        _RECENT.popitem(last=False)
+
+
+def _load_baseline(ref: str) -> dict:
+    """An audit_id returned earlier by this server, or a JSON evidence file."""
+    if ref in _RECENT:
+        return _RECENT[ref]
+    if len(ref) == 16 and all(c in "0123456789abcdef" for c in ref) and not Path(ref).exists():
+        raise ValueError(f"baseline {ref!r} is not an audit_id of this server session (the "
+                         f"server keeps the last {_RECENT_MAX}); pass the evidence JSON path")
+    with open(check_path(ref, "baseline"), encoding="utf-8") as fh:
+        try:
+            base = json.load(fh)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"baseline {ref}: not valid JSON ({e})") from None
+    if not isinstance(base, dict) or not isinstance(base.get("findings"), list):
+        raise TypeError(f"baseline {ref}: not vecscope evidence (no findings list)")
+    return base
 
 
 def _user_error(e: Exception) -> ToolError:
@@ -45,6 +85,22 @@ def allowed_dirs() -> list[Path]:
     """Directories the tools may read from, resolved; empty means no restriction."""
     raw = os.environ.get(ALLOWED_DIRS_ENV, "")
     return [Path(p).resolve() for p in raw.split(os.pathsep) if p.strip()]
+
+
+def _open_source(path: str):
+    """A faiss index or vector store named by ``path``: local ones go through the directory
+    check, network ones need the server started with --allow-network."""
+    from urllib.parse import urlparse
+
+    from vecscope.adapters import load_source
+
+    u = urlparse(path)
+    if u.scheme.endswith("+local") or u.scheme in ("", "faiss"):
+        check_path(u.path if u.scheme else path)
+    elif os.environ.get(ALLOW_NETWORK_ENV) != "1":
+        raise PermissionError(f"{u.scheme} sources reach the network; start the server with "
+                              f"--allow-network (or {ALLOW_NETWORK_ENV}=1) to read them")
+    return load_source(path)
 
 
 def check_path(path: str | None, what: str = "path") -> str | None:
@@ -73,10 +129,11 @@ change to try, and how to verify it. It diagnoses the vector search implementati
 geometry, corpus hygiene, metric, index, query pipeline), not relevance.
 
 Workflow: (1) call audit_embeddings and report the failing findings with their values and
-ranges verbatim; (2) separate causes using likely_causes and the other findings; (3) apply the
-smallest change from suggested_action, applying any vector transform to queries too; (4)
-re-audit and compare retrieval on real queries (verify_by says which number should move);
-(5) adopt only confirmed improvements. Thresholds are calibrated defaults, not a universal
+ranges verbatim; (2) follow the response's plan, which groups the non-ok findings by shared
+cause in fix order, one step at a time; (3) apply that step's first_change, applying any
+vector transform to queries too; (4) re-audit with baseline set to the earlier audit_id
+and qrels_path on both runs when labels exist; judge the change by baseline_diff, the step's
+re_measure numbers and retrieval.ndcg_at_k; (5) adopt only confirmed improvements. Thresholds are calibrated defaults, not a universal
 bar: a warn on a good model is common, and neither a fail nor all-ok is a statement about
 relevance; say so. Use sweep_index before choosing HNSW/IVF parameters, and
 compare_embeddings when two models embedded the same items (or the same model before and
@@ -125,9 +182,31 @@ def _summary(ev: dict) -> str:
         head += (f"; inconclusive on this sample (not evidence of health): "
                  f"{', '.join(ev['inconclusive_findings'])}")
     if not bad:
-        return head + "; all findings ok"
-    parts = [f"{f['name']}={f['value']:.3g} {f['verdict']} ({f['healthy_range']})" for f in bad]
-    return head + "; " + "; ".join(parts)
+        head += "; all findings ok"
+    else:
+        head += "; " + "; ".join(f"{f['name']}={f['value']:.3g} {f['verdict']}" for f in bad)
+    r = ev.get("retrieval")
+    if r:
+        head += f"; retrieval nDCG@{r['k']}={r['exact']['ndcg_at_k']:.3f} exact"
+        if r.get("ranked"):
+            head += f", {r['ranked']['ndcg_at_k']:.3f} ranked"
+    if ev.get("plan"):
+        step = ev["plan"][0]
+        head += (f"; plan step 1 of {len(ev['plan'])}: {step['group']} "
+                 f"({', '.join(f['name'] for f in step['findings'])}): {step['first_change']}")
+    d = ev.get("baseline_diff")
+    if d:
+        head += f"; vs baseline: verdict {d['baseline_verdict']} -> {d['verdict']}"
+        head += f", regressions: {', '.join(d['regressions']) or 'none'}"
+        head += f", improved: {', '.join(d['improvements']) or 'none'}"
+        for c in d.get("retrieval_changes") or []:
+            if c["metric"] == "ndcg_at_k":
+                head += f", {c['ranking']} nDCG {c['baseline_value']:.3f} -> {c['value']:.3f}"
+        if not d["comparable"]:
+            head += " (settings differ from the baseline: not comparable)"
+    if ev.get("query_reference_note"):
+        head += "; " + ev["query_reference_note"]
+    return head
 
 
 @mcp.tool(**_TOOL_KW)
@@ -142,18 +221,37 @@ def audit_embeddings(
     sample_repeats: int = 1,
     thresholds: dict | None = None,
     verbose: bool = True,
+    query_baseline_path: str | None = None,
+    qrels_path: str | None = None,
+    ranked_path: str | None = None,
+    ann_from_source: bool = False,
+    baseline: str | None = None,
+    tolerances: dict | None = None,
 ) -> dict:
     """Audit an embedding file: hubness, anisotropy, collapse, rogue dimensions, norms,
     metric mismatch, distance concentration, outliers, k-NN graph islands, and optionally
     ANN recall and query-side findings. Read-only; the file never leaves the machine.
 
-    `path`: local .npy/.npz/.parquet/.jsonl/.json/.csv with one vector per row. When the
-    server was started with --allow-dir or VECSCOPE_ALLOWED_DIRS, paths outside those
-    directories are refused.
+    `path`: local .npy/.npz/.parquet/.jsonl/.json/.csv with one vector per row, a faiss index
+    file, or a vector store URI (qdrant://, chroma://, milvus://, weaviate://, or their
+    +local forms with a directory). When the server was started with --allow-dir or
+    VECSCOPE_ALLOWED_DIRS, paths outside those directories are refused; network stores need
+    the server started with --allow-network. Store rows are in ascending id order and
+    findings carry `sample_source_ids` next to `sample_ids`.
+    `ann_from_source`: query the store's own index for every stored vector and score it as
+    `ann_path` (needs `sample=0` above the sample size).
+    `qrels_path`: relevance judgments for the queries (.json/.jsonl/.tsv of query row, corpus
+    row, grade); adds `retrieval` with nDCG, recall, MRR and duplicate share of exact search.
+    `ranked_path`: (m x k) corpus row ids per query from the production index, scored with
+    `qrels_path` next to exact search.
     `ann_path`: optional (n x k) integer array of neighbor ids from an ANN index (requires
     `sample=0` so row ids line up).
-    `queries_path`: optional (m x dim) file of query embeddings; adds ood_queries and
-    query_hubness.
+    `queries_path`: optional (m x dim) file of query embeddings; adds query_gap,
+    query_hubness and the deprecated ood_queries.
+    `query_baseline_path`: optional JSON evidence (this tool's response or `vecscope audit
+    --json`) from an earlier audit of the same corpus with healthy queries; with
+    `queries_path` it adds query_shift, the share of queries farther from the corpus than
+    that reference's median + 3 MAD.
     `clusters` > 0 attaches a per-cluster map with sample ids (no verdicts); capped at one
     cluster per 10 rows.
     `sample`: rows above this are audited on a seeded random subset (0 = audit every row;
@@ -167,30 +265,80 @@ def audit_embeddings(
     report them as healthy. The collapse verdict uses the estimated full share
     (`details.estimated_full_share`).
     `thresholds`: override default (warn, fail) pairs, e.g. {"hubness.skewness": [2.5, 5]}.
-    `verbose=False` drops details, causes and actions for findings that are ok, which cuts
-    the response roughly in half.
+    `baseline`: the `audit_id` of an earlier call in this session, or a JSON evidence file;
+    adds `baseline_diff` (per-finding value and verdict changes, `regressions`,
+    `improvements`, `retrieval_changes` when both runs had the same qrels) and a "vs
+    baseline" part in `summary`. With `queries_path`, a baseline audited with queries also
+    supplies the reference for query_shift, but only when it was audited on the same corpus
+    or an unchanged prefix of it (`query_reference_note` says when it was skipped). `tolerances` maps a finding to the worsening it
+    may accumulate, e.g. {"collapse": 0.01}; beyond it the finding is a value regression.
+    `verbose=False` drops details, causes, actions and explanations of findings that are ok
+    and the thresholds table; it saves most when most findings are ok.
 
-    The response starts with `summary` (one line) and `verdict`. Each finding carries value,
+    The response starts with `summary` (one line: non-ok findings, retrieval, the first plan
+    step and the baseline comparison), `verdict` and `audit_id`. Each finding carries value,
     healthy_range, warn_at, fail_at, explanation, details, likely_causes, suggested_action and
     verify_by. Treat actions as hypotheses: apply the smallest change, re-audit, and compare
     retrieval on real queries before adopting.
     """
     try:
-        x = load_vectors(check_path(path))
+        from vecscope.adapters import annotate, is_source
+        from vecscope.retrieval import load_qrels
+
+        src = _open_source(path) if is_source(path) else None
+        x = src.vectors if src is not None else load_vectors(check_path(path))
+        if ann_from_source and src is None:
+            raise ValueError("ann_from_source needs a faiss index or store as path")
         ann = load_neighbors(check_path(ann_path, "ann_path")) if ann_path else None
+        if ann_from_source:
+            ann = src.neighbors(k)
+        if src is not None:
+            src.close()
+        qrels = load_qrels(check_path(qrels_path, "qrels_path")) if qrels_path else None
+        ranked = load_neighbors(check_path(ranked_path, "ranked_path")) if ranked_path else None
         q = load_vectors(check_path(queries_path, "queries_path")) if queries_path else None
+        if tolerances is not None and baseline is None:
+            raise ValueError("tolerances need baseline")
+        base = _load_baseline(baseline) if baseline else None
+        qbase, note = None, None
+        if query_baseline_path:
+            with open(check_path(query_baseline_path, "query_baseline_path"),
+                      encoding="utf-8") as fh:
+                qbase = json.load(fh)
+        elif q is not None and base is not None and any(
+                f.get("name") == "query_gap" for f in base["findings"]):
+            if same_corpus(base, x):
+                qbase = base
+            else:
+                note = ("query_shift skipped: the baseline was audited on a different corpus "
+                        "(rows changed or transformed), so its query distances are not a "
+                        "reference here")
         ev = audit(
             x, k=k, ann_neighbors=ann, near_dup_cos=near_dup_cos, sample=sample or None,
             queries=q, clusters=clusters, thresholds=thresholds, sample_repeats=sample_repeats,
-        ).to_dict()
+            query_baseline=qbase, qrels=qrels, ranked=ranked,
+        )
+        if src is not None:
+            annotate(ev, src)
+        ev = ev.to_dict()
+        audit_id = _audit_id(ev)
+        _remember(audit_id, ev)
+        if base is not None:
+            ev["baseline_diff"] = diff_evidence(ev, base, tolerances=tolerances)
+        if note:
+            ev["query_reference_note"] = note
     except _USER_ERRORS as e:
         raise _user_error(e) from e
+    summary = _summary(ev)
     if not verbose:
+        ev = {**ev, "findings": [dict(f) for f in ev["findings"]]}
+        ev.pop("thresholds", None)
         for f in ev["findings"]:
             if f["verdict"] == "ok":
                 f["details"] = {}
                 f["likely_causes"], f["suggested_action"], f["verify_by"] = [], "", ""
-    return {"summary": _summary(ev), "verdict": ev["verdict"], **ev}
+                f["explanation"] = ""
+    return {"summary": summary, "verdict": ev["verdict"], "audit_id": audit_id, **ev}
 
 
 @mcp.tool(**_TOOL_KW)
@@ -314,7 +462,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--allow-dir", action="append", default=[], metavar="DIR",
                    help="only read files under this directory (repeatable); adds to "
                         f"{ALLOWED_DIRS_ENV}. Without it every readable file is reachable")
+    p.add_argument("--allow-network", action="store_true",
+                   help="let the tools read network vector stores (qdrant://, chroma://, "
+                        f"milvus://, weaviate://); same as {ALLOW_NETWORK_ENV}=1")
     args = p.parse_args(argv)
+    if args.allow_network:
+        os.environ[ALLOW_NETWORK_ENV] = "1"
     if args.allow_dir:
         for d in args.allow_dir:
             if not Path(d).is_dir():
