@@ -1,6 +1,5 @@
 {
  "tool": "vecscope",
- "version": "0.7.1",
  "n": 3000,
  "dim": 128,
  "k": 10,

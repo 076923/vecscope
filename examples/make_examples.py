@@ -51,6 +51,7 @@ def main() -> None:
     GOLD.mkdir(parents=True, exist_ok=True)
     for name, x in examples.items():
         ev = audit(x, k=10).to_dict()
+        ev.pop("version")  # pinned values, not the release that wrote them
         (GOLD / f"{name}.json").write_text(json.dumps(ev, indent=1, ensure_ascii=False) + "\n",
                                            encoding="utf-8")
     print("wrote tests/golden/*.json")

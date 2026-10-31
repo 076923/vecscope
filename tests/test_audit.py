@@ -181,7 +181,7 @@ def test_golden_evidence_for_shipped_examples():
         gold = json.loads((root / "tests" / "golden" / f"{name}.json").read_text(encoding="utf-8"))
         assert ev["schema_version"] == gold["schema_version"]
         assert [f["name"] for f in ev["findings"]] == [f["name"] for f in gold["findings"]]
-        assert set(ev) == set(gold)
+        assert set(ev) - {"version"} == set(gold)  # golden files do not pin the release
         for f, g in zip(ev["findings"], gold["findings"]):
             assert f["verdict"] == g["verdict"], (name, f["name"])
             # a different BLAS can flip a near-tied neighbor, which moves the count-based
