@@ -82,7 +82,7 @@ vecscope audit embeddings.npy
 ```
 
 ```text
-vecscope 0.7.1  n=3000 dim=128 k=10  verdict=FAIL
+vecscope x.y.z  n=3000 dim=128 k=10  verdict=FAIL
   [ok  ] hubness                skewness=1.1661  (ok < 2, warn >= 2, fail >= 4)
                                k-occurrence skewness 1.17; top 1% of items take 3.9% of all neighbor slots (max N_k=51, expected 10).
   [WARN] antihubs               antihub_excess=0.0523  (ok < 0.05, warn >= 0.05, fail >= 0.2)
@@ -295,7 +295,7 @@ vecscope compare clip.npy lens.npy -k 10          # 두 파일의 행은 같은 
 ```
 
 ```text
-vecscope 0.7.1  compare  n=3000 dim=128/128 k=10  neighbors=recomputed/full
+vecscope x.y.z  compare  n=3000 dim=128/128 k=10  neighbors=recomputed/full
   nn1_agreement=0.7050  topk_overlap=0.8537  topk_overlap_p10=0.7000  rows_with_no_overlap=0.0000
   near_dup A=0.0400  B=0.0400  both=0.0400  only_A=0.0000  only_B=0.0000  same_nearest_among_both=1.0000
     the two spaces share the nearest neighbor for 70.5% of rows and 85.4% of their top-10 lists
