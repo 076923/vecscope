@@ -14,6 +14,37 @@ def normalize(x: np.ndarray) -> np.ndarray:
     return (x / norms).astype(np.float32)
 
 
+def _copy_keys(x32: np.ndarray, norms: np.ndarray, scale: float) -> np.ndarray:
+    """One byte string per row: the rounded unit vector and the rounded log relative length,
+    the key two rows share when they are the same vector (see ``exact_copy_groups``)."""
+    n, d = x32.shape
+    key = np.empty((n, d + 1), dtype=np.float32)
+    np.divide(x32, np.where(norms > 0, norms, 1.0)[:, None].astype(np.float32), out=key[:, :d])
+    np.round(key[:, :d], 6, out=key[:, :d])
+    with np.errstate(divide="ignore"):  # zero rows: -inf, one group of their own
+        key[:, d] = np.round(np.log10(norms / scale), 6)  # relative length, 2e-6 resolution
+    key += 0.0  # -0.0 and 0.0 must compare equal byte-wise
+    return np.ascontiguousarray(key).view(np.dtype((np.void, key.dtype.itemsize * (d + 1)))).ravel()
+
+
+def exact_copy_counts(x: np.ndarray, block: int = 65536) -> np.ndarray:
+    """Size of each exact-copy group (as ``exact_copy_groups`` defines it) over every row,
+    keeping one 16-byte digest per row instead of a copy of the matrix, so a sampled audit
+    can still count copies in the whole corpus."""
+    import hashlib
+
+    x32 = np.asarray(x, dtype=np.float32)
+    norms = np.sqrt(np.einsum("ij,ij->i", x32, x32, dtype=np.float64))
+    scale = float(np.median(norms[norms > 0])) if (norms > 0).any() else 1.0
+    digests = np.empty(x32.shape[0], dtype="S16")
+    for s in range(0, x32.shape[0], block):
+        e = min(s + block, x32.shape[0])
+        keys = _copy_keys(x32[s:e], norms[s:e], scale)
+        digests[s:e] = [hashlib.blake2b(k.tobytes(), digest_size=16).digest() for k in keys]
+    _, counts = np.unique(digests, return_counts=True)
+    return counts
+
+
 def exact_copy_groups(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Group rows that are the same vector: ``(first, inverse, counts)`` as ``np.unique`` gives.
 
@@ -26,18 +57,10 @@ def exact_copy_groups(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray
     count as near-duplicates through the cosine cutoff; only the exact-copy statistics
     (``exact_duplicate_ratio``, ``largest_exact_duplicate_groups``) undercount them."""
     x32 = np.asarray(x, dtype=np.float32)
-    n, d = x32.shape
     norms = np.sqrt(np.einsum("ij,ij->i", x32, x32, dtype=np.float64))
     scale = float(np.median(norms[norms > 0])) if (norms > 0).any() else 1.0
-    # one float32 key row per vector: rounded direction, then rounded relative length; the
-    # rows are compared as raw bytes, so memory stays at one extra copy of the matrix
-    key = np.empty((n, d + 1), dtype=np.float32)
-    np.divide(x32, np.where(norms > 0, norms, 1.0)[:, None].astype(np.float32), out=key[:, :d])
-    np.round(key[:, :d], 6, out=key[:, :d])
-    with np.errstate(divide="ignore"):  # zero rows: -inf, one group of their own
-        key[:, d] = np.round(np.log10(norms / scale), 6)  # relative length, 2e-6 resolution
-    key += 0.0  # -0.0 and 0.0 must compare equal byte-wise
-    rows = np.ascontiguousarray(key).view(np.dtype((np.void, key.dtype.itemsize * (d + 1)))).ravel()
+    # one key per vector, compared as raw bytes: memory stays at one extra copy of the matrix
+    rows = _copy_keys(x32, norms, scale)
     _, first, inverse, counts = np.unique(rows, return_index=True, return_inverse=True,
                                           return_counts=True)
     return first, np.asarray(inverse).reshape(-1), counts

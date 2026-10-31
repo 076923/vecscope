@@ -6,6 +6,54 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-31
+
+### Changed
+
+- **MCP server reads only its own directory by default.** This changes existing setups.
+  - Without `--allow-dir` (or `VECSCOPE_ALLOWED_DIRS`) it reads the directory it was
+    started in and below; before, every file the process could read was reachable.
+  - `--allow-any` (or `VECSCOPE_ALLOW_ANY=1`) restores unrestricted reads; `--allow-dir` wins
+    when both are given.
+  - On start the server prints to stderr which directories it reads.
+- Sampled audits count exact copies over every row.
+  - One 16-byte digest per row, not a copy of the matrix: 0.5 s for 200k x 128.
+  - `collapse.details.full_corpus_exact_copy_share` and `full_corpus_largest_exact_groups`.
+  - The collapse estimate is never below that share, so rare copies a sample misses still
+    raise the verdict (2.5% copied rows read `ok` on a 2% sample before and `warn` now).
+
+### Added
+
+- MCP reads each file through one verified handle.
+  - The path is checked, opened, and the open handle compared (device and inode) with the
+    file the path resolves to inside the allowed directories; a symlink swapped between the
+    check and the read is refused.
+  - FIFOs and directories are refused without blocking the server.
+  - A local database directory (`qdrant+local://` and the like) is checked by path only,
+    because its client opens the files itself.
+  - `load_vectors`, `load_neighbors`, `load_qrels` and `load_source` take the file's bytes
+    as `data=`.
+- `vecscope calibrate` and `vecscope.calibrate.calibrate`: thresholds from your own pipeline
+  states.
+  - Input: `--json` audits of several states run with the same `--queries` and `--qrels`,
+    and `--min-quality` for the retrieval metric.
+  - Per finding: Spearman with the metric, whether its sign matches the finding's direction,
+    the worst acceptable and best unacceptable values, and a (warn, fail) pair only when the
+    finding tracks quality and separates the states.
+  - `--holdout` audits check the proposal on states or queries it was not fitted on; `--out`
+    writes the pairs for `audit --thresholds`.
+- Plan: every finding in a step carries `placed_because`, the rule that put it there. A
+  reason naming another finding marks a grouping by co-occurrence.
+- Plan rule: islands next to a near-duplicate group smaller than the island size join the
+  input-integrity step.
+- Verification on three more Korean MTEB sets (XPQA kor-kor, AutoRAG, MultiLongDoc ko; 19
+  models each), chosen for document length.
+  - Long documents: `hubness` or `query_hubness` flags all 9 English-only models.
+  - A narrow-domain corpus: `effective_rank` warns on every good model (0.064 to 0.094), a
+    domain effect to calibrate rather than a fault.
+  - Very short templated answers: `collapse`, `effective_rank` and `query_gap` flag every
+    model; documented as a limit of the defaults on such data.
+
 ## [0.7.1] - 2026-10-31
 
 ### Fixed

@@ -2,14 +2,20 @@
 
 Works with mcp 1.x (FastMCP) and 2.x (MCPServer). All tools are read-only: they read local
 files and return JSON; nothing is written or sent anywhere. Read-only is not the same as
-harmless: the tools read whatever path the agent names, so restrict them to the directories
-that hold embeddings with ``vecscope-mcp --allow-dir DIR`` (repeatable) or the environment
-variable ``VECSCOPE_ALLOWED_DIRS`` (paths separated by ``os.pathsep``). With a restriction in
-place, a path outside those directories is refused before anything is opened. Without one,
-every file the server process can read is reachable, which is fine on a developer machine
-and not fine on a shared one. Vector stores reached over the network (qdrant://, chroma://,
-milvus://, weaviate://) are refused unless the server is started with ``--allow-network``
-(or ``VECSCOPE_ALLOW_NETWORK=1``); they are then read, never written.
+harmless: the tools read whatever path the agent names, so they are confined to directories.
+
+- By default only the directory the server was started in (and below) is readable.
+- ``--allow-dir DIR`` (repeatable) or ``VECSCOPE_ALLOWED_DIRS`` (paths separated by
+  ``os.pathsep``) names the directories instead.
+- ``--allow-any`` (or ``VECSCOPE_ALLOW_ANY=1``) lifts the restriction: every file the
+  process can read is reachable, which is fine on a developer machine and not on a shared one.
+
+A file is read through one handle that is checked to be a regular file inside those
+directories after it is opened, so a symlink swapped between the check and the read is
+refused. A local database directory (``qdrant+local://`` and the like) is checked by path
+only, because its client opens the files itself. Vector stores reached over the network
+(qdrant://, chroma://, milvus://, weaviate://) are refused unless the server is started with
+``--allow-network`` (or ``VECSCOPE_ALLOW_NETWORK=1``); they are then read, never written.
 """
 
 from __future__ import annotations
@@ -18,6 +24,8 @@ import hashlib
 import inspect
 import json
 import os
+import stat
+import sys
 from collections import OrderedDict
 from pathlib import Path
 
@@ -40,6 +48,7 @@ from vecscope.io import load_neighbors, load_vectors
 _USER_ERRORS = (ValueError, TypeError, FileNotFoundError, ImportError, OSError)
 ALLOWED_DIRS_ENV = "VECSCOPE_ALLOWED_DIRS"
 ALLOW_NETWORK_ENV = "VECSCOPE_ALLOW_NETWORK"
+ALLOW_ANY_ENV = "VECSCOPE_ALLOW_ANY"
 # recent audits of this server process by audit_id, so a re-audit can name its baseline
 # without the agent writing the earlier response to a file; held in memory only
 _RECENT: OrderedDict[str, dict] = OrderedDict()
@@ -66,11 +75,7 @@ def _load_baseline(ref: str) -> dict:
     if len(ref) == 16 and all(c in "0123456789abcdef" for c in ref) and not Path(ref).exists():
         raise ValueError(f"baseline {ref!r} is not an audit_id of this server session (the "
                          f"server keeps the last {_RECENT_MAX}); pass the evidence JSON path")
-    with open(check_path(ref, "baseline"), encoding="utf-8") as fh:
-        try:
-            base = json.load(fh)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"baseline {ref}: not valid JSON ({e})") from None
+    base = _json_file(ref, "baseline")
     if not isinstance(base, dict) or not isinstance(base.get("findings"), list):
         raise TypeError(f"baseline {ref}: not vecscope evidence (no findings list)")
     return base
@@ -82,9 +87,65 @@ def _user_error(e: Exception) -> ToolError:
 
 
 def allowed_dirs() -> list[Path]:
-    """Directories the tools may read from, resolved; empty means no restriction."""
+    """Directories the tools may read from, resolved: --allow-dir / VECSCOPE_ALLOWED_DIRS when
+    set, otherwise the directory the server runs in. Empty (every readable file) only with
+    --allow-any / VECSCOPE_ALLOW_ANY=1 and no --allow-dir."""
     raw = os.environ.get(ALLOWED_DIRS_ENV, "")
-    return [Path(p).resolve() for p in raw.split(os.pathsep) if p.strip()]
+    dirs = [Path(p).resolve() for p in raw.split(os.pathsep) if p.strip()]
+    if dirs:
+        return dirs
+    if os.environ.get(ALLOW_ANY_ENV) == "1":
+        return []
+    return [Path.cwd().resolve()]
+
+
+def read_checked(path: str, what: str = "path") -> bytes:
+    """The content of ``path`` read through one handle that is verified to be a regular file
+    inside the allowed directories.
+
+    The path is checked, then opened, then the open handle is compared (device and inode)
+    with the file the path resolves to now. A symlink swapped between the check and the open
+    (time-of-check to time-of-use) makes the two differ and the read is refused, so the bytes
+    returned always come from a file inside the allowed directories."""
+    check_path(path, what)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)  # O_NONBLOCK: a FIFO cannot stall the server
+    except FileNotFoundError:
+        raise FileNotFoundError(f"{what} not found: {path}") from None
+    except (IsADirectoryError, PermissionError) as e:
+        raise ValueError(f"{what} {path!r} cannot be read as a file ({e.strerror})") from None
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError(f"{what} {path!r} is not a regular file")
+        if allowed_dirs():
+            check_path(path, what)
+            now = os.stat(Path(path).resolve(strict=True))
+            if (now.st_dev, now.st_ino) != (opened.st_dev, opened.st_ino):
+                raise PermissionError(f"{what} {path!r} changed while it was being opened; "
+                                      "refusing to read it")
+        with os.fdopen(fd, "rb") as fh:
+            fd = None
+            return fh.read()
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _json_file(path: str, what: str) -> dict:
+    try:
+        return json.loads(read_checked(path, what).decode("utf-8-sig"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise ValueError(f"{what} {path}: not valid JSON ({e})") from None
+
+
+def _vectors(path: str, what: str = "path"):
+    return load_vectors(path, read_checked(path, what))
+
+
+def _neighbors(path: str | None, what: str):
+    return load_neighbors(path, read_checked(path, what)) if path else None
 
 
 def _open_source(path: str):
@@ -93,8 +154,12 @@ def _open_source(path: str):
     from vecscope.adapters import load_source, local_path, scheme_of
 
     scheme = scheme_of(path)
-    if scheme.endswith("+local") or scheme in ("", "faiss"):
-        check_path(local_path(path) if scheme else path)
+    if scheme in ("", "faiss"):  # one index file: read through a verified handle
+        return load_source(path, read_checked(local_path(path) if scheme else path))
+    if scheme.endswith("+local"):
+        # a local database directory: its client opens the files itself, so only the
+        # directory is checked
+        check_path(local_path(path))
     elif os.environ.get(ALLOW_NETWORK_ENV) != "1":
         raise PermissionError(f"{scheme} sources reach the network; start the server with "
                               f"--allow-network (or {ALLOW_NETWORK_ENV}=1) to read them")
@@ -118,7 +183,8 @@ def check_path(path: str | None, what: str = "path") -> str | None:
             continue
     raise PermissionError(
         f"{what} {path!r} is outside the directories this server may read "
-        f"({', '.join(str(r) for r in roots)}); set {ALLOWED_DIRS_ENV} or --allow-dir"
+        f"({', '.join(str(r) for r in roots)}); start it with --allow-dir DIR (or "
+        f"{ALLOWED_DIRS_ENV}), or with --allow-any to read every file the process can"
     )
 
 INSTRUCTIONS = """vecscope gives deterministic evidence about an embedding matrix and a vector
@@ -284,25 +350,24 @@ def audit_embeddings(
         from vecscope.retrieval import load_qrels
 
         src = _open_source(path) if is_source(path) else None
-        x = src.vectors if src is not None else load_vectors(check_path(path))
+        x = src.vectors if src is not None else _vectors(path)
         if ann_from_source and src is None:
             raise ValueError("ann_from_source needs a faiss index or store as path")
-        ann = load_neighbors(check_path(ann_path, "ann_path")) if ann_path else None
+        ann = _neighbors(ann_path, "ann_path")
         if ann_from_source:
             ann = src.neighbors(k)
         if src is not None:
             src.close()
-        qrels = load_qrels(check_path(qrels_path, "qrels_path")) if qrels_path else None
-        ranked = load_neighbors(check_path(ranked_path, "ranked_path")) if ranked_path else None
-        q = load_vectors(check_path(queries_path, "queries_path")) if queries_path else None
+        qrels = (load_qrels(qrels_path, read_checked(qrels_path, "qrels_path"))
+                 if qrels_path else None)
+        ranked = _neighbors(ranked_path, "ranked_path")
+        q = _vectors(queries_path, "queries_path") if queries_path else None
         if tolerances is not None and baseline is None:
             raise ValueError("tolerances need baseline")
         base = _load_baseline(baseline) if baseline else None
         qbase, note = None, None
         if query_baseline_path:
-            with open(check_path(query_baseline_path, "query_baseline_path"),
-                      encoding="utf-8") as fh:
-                qbase = json.load(fh)
+            qbase = _json_file(query_baseline_path, "query_baseline_path")
         elif q is not None and base is not None and any(
                 f.get("name") == "query_gap" for f in base["findings"]):
             if same_corpus(base, x):
@@ -369,8 +434,8 @@ def sweep_index(
     from vecscope.sweep import sweep
 
     try:
-        x = load_vectors(check_path(path))
-        q = load_vectors(check_path(queries_path, "queries_path")) if queries_path else None
+        x = _vectors(path)
+        q = _vectors(queries_path, "queries_path") if queries_path else None
         res = sweep(x, k=k, queries=q, n_queries=n_queries, target_recall=target_recall,
                     device=device, margin=margin, timing_repeats=timing_repeats,
                     latency_queries=latency_queries).to_dict()
@@ -419,10 +484,10 @@ def compare_embeddings(
     try:
         if (neighbors_a_path is None) != (neighbors_b_path is None):
             raise ValueError("neighbors_a_path and neighbors_b_path go together")
-        na = load_neighbors(check_path(neighbors_a_path, "neighbors_a_path")) if neighbors_a_path else None
-        nb = load_neighbors(check_path(neighbors_b_path, "neighbors_b_path")) if neighbors_b_path else None
-        res = compare(load_vectors(check_path(path_a, "path_a")),
-                      load_vectors(check_path(path_b, "path_b")), k=k, near_dup_cos=near_dup_cos,
+        na = _neighbors(neighbors_a_path, "neighbors_a_path")
+        nb = _neighbors(neighbors_b_path, "neighbors_b_path")
+        res = compare(_vectors(path_a, "path_a"),
+                      _vectors(path_b, "path_b"), k=k, near_dup_cos=near_dup_cos,
                       sample=sample or None, neighbors_a=na, neighbors_b=nb).to_dict()
     except _USER_ERRORS as e:
         raise _user_error(e) from e
@@ -459,13 +524,18 @@ def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="vecscope-mcp", description="vecscope MCP server (stdio)")
     p.add_argument("--allow-dir", action="append", default=[], metavar="DIR",
                    help="only read files under this directory (repeatable); adds to "
-                        f"{ALLOWED_DIRS_ENV}. Without it every readable file is reachable")
+                        f"{ALLOWED_DIRS_ENV}. Without it only the current directory is readable")
+    p.add_argument("--allow-any", action="store_true",
+                   help="read any file the process can read (no directory restriction); "
+                        f"same as {ALLOW_ANY_ENV}=1. Ignored when --allow-dir is given")
     p.add_argument("--allow-network", action="store_true",
                    help="let the tools read network vector stores (qdrant://, chroma://, "
                         f"milvus://, weaviate://); same as {ALLOW_NETWORK_ENV}=1")
     args = p.parse_args(argv)
     if args.allow_network:
         os.environ[ALLOW_NETWORK_ENV] = "1"
+    if args.allow_any:
+        os.environ[ALLOW_ANY_ENV] = "1"
     if args.allow_dir:
         for d in args.allow_dir:
             if not Path(d).is_dir():
@@ -473,6 +543,9 @@ def main(argv: list[str] | None = None) -> None:
         current = os.environ.get(ALLOWED_DIRS_ENV, "")
         os.environ[ALLOWED_DIRS_ENV] = os.pathsep.join(
             [*([current] if current else []), *(str(Path(d).resolve()) for d in args.allow_dir)])
+    roots = allowed_dirs()
+    print("vecscope-mcp: reading files under " + ", ".join(map(str, roots)) if roots else
+          "vecscope-mcp: reading any file this process can read (--allow-any)", file=sys.stderr)
     mcp.run()
 
 

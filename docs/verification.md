@@ -20,8 +20,9 @@ The thresholds and the plan rules are set from these results.
   - six synthetic shapes (`examples/bench_common.py`: clustered, isotropic, anisotropic,
     duplicates, lowrank, zipf)
   - the eight public pre-computed embedding sets of the README table
-  - six labeled datasets encoded with 19 models: BEIR SciFact, NFCorpus, ArguAna, SCIDOCS
-    and FiQA-2018, and ko-strategyqa (Korean)
+  - nine labeled datasets encoded with 19 models: BEIR SciFact, NFCorpus, ArguAna, SCIDOCS
+    and FiQA-2018, and four Korean sets (ko-strategyqa, and from MTEB XPQA kor-kor, AutoRAG
+    and MultiLongDoc ko)
 - Vector stores: faiss 1.15.1, Qdrant client 1.20 (local mode), Chroma 1.5, Milvus Lite 3.2,
   Weaviate client 4.24
 
@@ -87,6 +88,43 @@ What this supports:
 - A pipeline that is wrong in an obvious way (GloVe on BEIR, a Korean-only model on English,
   an English-only model on Korean) raises several findings at once. The count of warnings
   separates such pipelines; a single `fail` does not.
+
+## Korean data and document length
+
+Three more Korean sets from MTEB, none used to set a threshold, differ mainly in document
+length. Documents were truncated to 512 tokens for every model.
+
+| dataset | documents | median length | good multilingual models (7): nDCG@10 | English-only models (9): nDCG@10 |
+|---|---|---|---|---|
+| XPQA kor-kor | 889 | 32 characters | 0.307 to 0.382 | 0.102 to 0.174 |
+| AutoRAG | 720 | 870 characters | 0.767 to 0.854 | 0.062 to 0.248 |
+| MultiLongDoc ko | 6,176 | 12,878 characters | 0.225 to 0.286 | 0.004 to 0.030 |
+
+The good models are KURE-v1, BGE-m3-ko, bge-m3, multilingual-e5-base and -large,
+gte-multilingual-base and Qwen3-Embedding-0.6B.
+
+- **Long documents (MultiLongDoc).** The findings behave as on BEIR.
+  - `hubness` or `query_hubness` flags all 9 English-only models.
+  - The good models are clean except one `hubness` and two `query_hubness` warnings (and the
+    deprecated `ood_queries`, which still flags the e5 models).
+  - Spearman with nDCG@10: `query_hubness` −0.86, `hubness` −0.76, `query_gap` −0.80.
+- **A narrow-domain corpus (AutoRAG, finance and commerce documents).** The ranking signal
+  holds, but one default does not fit.
+  - `query_hubness` correlates at −0.94 and, with `hubness`, flags 6 of the 9 English-only
+    models; no good model is flagged by either.
+  - `effective_rank` warns on all 7 good models (0.064 to 0.094 against a `warn` of 0.10): a
+    corpus about a few topics uses few directions. This is the domain effect `vecscope
+    calibrate` exists for, not a model fault.
+- **Very short documents (XPQA product answers).** The corpus findings describe the data,
+  not the pipeline.
+  - Every model, good or not, fails `collapse` (0.15 to 0.47) and `effective_rank`, and 15 of
+    16 flag `query_gap`. Only 4% of the answers have identical text, but answers such as
+    "네, 가능합니다" and "네, 가능해요" embed almost identically in every model.
+  - `hubness` warns on 6 of the 7 good models and on none of the English-only ones, so its
+    correlation with nDCG@10 turns positive (+0.43).
+  - Read this as "many documents are interchangeable for retrieval", which the low nDCG@10 of
+    every model confirms. The plan puts `query_gap` with the duplicates, so the queries are
+    not blamed for it.
 
 ## Query findings
 
@@ -200,9 +238,15 @@ What this supports:
 
 - The thresholds and the query findings were fitted on the data above; there is no held-out
   split. Production query logs and private corpora were not measured.
-- The real-model measurements cover six datasets in two languages. Exactness on corpora over
+- The real-model measurements cover nine datasets in two languages. On very short templated
+  documents and on narrow-domain corpora some defaults (`collapse`, `effective_rank`,
+  `query_gap`) flag good models; calibrate on such data before gating. Exactness on corpora over
   20,000 rows was checked on synthetic data; the real-data exactness check covers the 76
   smaller pairs.
+- Sampled audits use uniform random rows. Stratified (per-cluster) sampling was considered and
+  not adopted: an island must be smaller than max(k + 1, 0.5% of the rows) and isolated, so a
+  sample misses small islands whatever the strata, while stratifying would bias the
+  distribution findings. Exact copies are counted over every row instead.
 - The Weaviate adapter was tested only against an embedded server in opt-in tests
   (`VECSCOPE_TEST_WEAVIATE=1`); remote Qdrant, Milvus and Weaviate servers were not tested.
 - The agent run is one model on one task; it shows the tools and the plan are usable, not
@@ -218,7 +262,7 @@ What this supports:
   --json sweep.json` re-measure the tables and record the machine in the JSON.
 - `python examples/retrieval_quality.py` runs the labeled-data study for SciFact and
   NFCorpus.
-- The 19-model, six-dataset, query-finding and intervention runs use a harness that is not
+- The 19-model, nine-dataset, query-finding and intervention runs use a harness that is not
   shipped with the package. The behavior they set is pinned by tests instead:
   - `tests/test_query_findings.py` (query_gap and query_shift)
   - `tests/test_plan_incremental.py` (the plan rules, including the dominant-dimension and

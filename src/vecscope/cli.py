@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from vecscope import __version__
 from vecscope.adapters import annotate, is_source, load_source
@@ -159,6 +160,21 @@ def main(argv: list[str] | None = None) -> int:
                                          "neighbors")
     c.add_argument("--neighbors-b", help="same for space B; both or neither")
     c.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    b = sub.add_parser("calibrate", help="propose thresholds from audits of your own pipeline "
+                                         "states with labeled queries")
+    b.add_argument("states", nargs="+", help="--json audits of pipeline states, each run with the "
+                                             "same --queries and --qrels (3 or more)")
+    b.add_argument("--min-quality", type=float, required=True,
+                   help="a state is acceptable when its retrieval metric reaches this value")
+    b.add_argument("--metric", default="ndcg_at_k",
+                   help="retrieval metric (ndcg_at_k, recall_at_k, mrr_at_k, hit_rate_at_k)")
+    b.add_argument("--ranking", choices=["exact", "ranked"], default="exact",
+                   help="score exact search or the --ranked results (default exact)")
+    b.add_argument("--holdout", nargs="+", default=[],
+                   help="--json audits not used for fitting (other states, or the same states "
+                        "scored on held-out queries) to check the proposal on")
+    b.add_argument("--out", help="write the proposed thresholds here, for audit --thresholds")
+    b.add_argument("--json", action="store_true", help="emit JSON instead of text")
     args = p.parse_args(argv)
     try:
         return _run(args)
@@ -169,6 +185,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(args) -> int:
+    if args.cmd == "calibrate":
+        from vecscope.calibrate import calibrate, render_calibration
+
+        res = calibrate([_load_json(f, "states") for f in args.states], args.min_quality,
+                        metric=args.metric, ranking=args.ranking,
+                        holdout=[_load_json(f, "--holdout") for f in args.holdout] or None,
+                        names=[Path(f).name for f in args.states])
+        if args.out:
+            Path(args.out).write_text(json.dumps(res["thresholds"], indent=2) + "\n",
+                                      encoding="utf-8")
+        print(json.dumps(res, indent=2) if args.json else render_calibration(res))
+        return 0
     if args.cmd == "audit" and args.sample < 0:
         raise ValueError("--sample must be 0 (all rows) or a positive number")
     if args.cmd == "audit" and args.clusters < 0:

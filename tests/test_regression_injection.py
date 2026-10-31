@@ -174,7 +174,8 @@ def test_compare_sample_scope_differs_from_full_scope_and_says_so():
         compare(a, b, k=5, neighbors_a=ia[:-1], neighbors_b=ib)
 
 
-def test_compare_cli_and_mcp_take_neighbor_files(tmp_path, capsys):
+def test_compare_cli_and_mcp_take_neighbor_files(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("VECSCOPE_ALLOWED_DIRS", str(tmp_path))
     from vecscope.cli import main
 
     rng = np.random.default_rng(1)

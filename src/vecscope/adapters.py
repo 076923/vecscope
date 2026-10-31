@@ -133,15 +133,21 @@ def _redact(uri: str) -> str:
 
 # ----------------------------------------------------------------------------- backends
 
-def _faiss(path: str) -> Source:
+def _faiss(path: str, data: bytes | None = None) -> Source:
     try:
         import faiss
     except ImportError as e:
         raise ImportError("reading a faiss index needs faiss: pip install 'vecscope[index]'") from e
     p = Path(local_path(path) if path.startswith("faiss://") else path)
-    if not p.exists():
+    if data is not None:  # already read through a verified handle (MCP server)
+        try:
+            index = faiss.deserialize_index(np.frombuffer(data, dtype=np.uint8))
+        except RuntimeError as e:
+            raise ValueError(f"{p}: not a readable faiss index ({e})") from None
+    elif not p.exists():
         raise FileNotFoundError(f"faiss index not found: {p}")
-    index = faiss.read_index(str(p))
+    else:
+        index = faiss.read_index(str(p))
     inner, ids = index, None
     if isinstance(index, (faiss.IndexIDMap, faiss.IndexIDMap2)) or hasattr(index, "id_map"):
         inner = faiss.downcast_index(index.index)
@@ -340,13 +346,14 @@ def _weaviate(uri: str) -> Source:
                              "vector": name}, search, release=client.close)
 
 
-def load_source(uri: str) -> Source:
-    """Vectors (ascending id order), their ids, and a search function from a vector store."""
+def load_source(uri: str, data: bytes | None = None) -> Source:
+    """Vectors (ascending id order), their ids, and a search function from a vector store.
+    ``data`` is a faiss index file's content when the caller has already read it."""
     from vecscope.incremental import fingerprint
 
     scheme = scheme_of(uri)
     if scheme == "faiss" or Path(str(uri)).suffix.lower() in FAISS_SUFFIXES and not scheme:
-        src = _faiss(str(uri))
+        src = _faiss(str(uri), data)
     elif scheme.startswith("qdrant"):
         src = _qdrant(uri)
     elif scheme.startswith("chroma"):

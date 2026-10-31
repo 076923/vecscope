@@ -112,6 +112,33 @@ def test_query_gap_next_to_duplicates_is_read_again_after_deduplicating():
     assert groups["query_pipeline"] == ["query_gap"] and "collapse" in groups["shared_direction"]
 
 
+def test_islands_made_of_near_copies_go_with_the_duplicates():
+    dup = {"name": "collapse", "value": 0.03, "verdict": "warn",
+           "details": {"exact_duplicate_ratio": 0.0, "largest_near_duplicate_groups": [120, 40]}}
+    isl = {"name": "connectivity", "value": 0.02, "verdict": "warn",
+           "details": {"min_island_size": 500}}
+    plan = build_plan([dup, isl])
+    assert [s["group"] for s in plan] == ["input_integrity"]
+    placed = {f["name"]: f["placed_because"] for f in plan[0]["findings"]}
+    assert "island size" in placed["connectivity"]
+    # copies bigger than the island size are a component of their own, not an island
+    big = {**dup, "details": {**dup["details"], "largest_near_duplicate_groups": [900]}}
+    assert [s["group"] for s in build_plan([big, isl])] == ["input_integrity", "corpus_structure"]
+    # without a duplicate problem islands are corpus structure
+    assert [s["group"] for s in build_plan([isl])] == ["corpus_structure"]
+
+
+def test_every_planned_finding_says_why_it_is_there():
+    x = _unit(_clustered(1500))
+    x[:, 0] *= 30.0
+    for step in audit(x, k=10).plan:
+        for f in step["findings"]:
+            assert f["placed_because"], (step["group"], f["name"])
+    reasons = {f["name"]: f["placed_because"] for s in audit(x, k=10).plan for f in s["findings"]}
+    assert "rogue_dimensions is not ok" in reasons["norms"]
+    assert reasons["rogue_dimensions"] == "this group's cause covers it"
+
+
 def test_inconclusive_findings_are_marked_in_the_plan():
     findings = [{"name": "connectivity", "value": 0.02, "verdict": "warn", "details": {},
                  "inconclusive": True}]

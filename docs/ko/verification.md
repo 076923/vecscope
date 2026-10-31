@@ -21,8 +21,8 @@ vecscope의 주장을 어떻게 확인했고 측정 결과가 무엇을 보여 �
   - 합성 분포 6종(`examples/bench_common.py`의 clustered, isotropic, anisotropic, duplicates,
     lowrank, zipf)
   - README 표에 쓰인 공개 임베딩 8종
-  - 모델 19종으로 인코딩한 라벨 데이터세트 6개(BEIR SciFact·NFCorpus·ArguAna·SCIDOCS·FiQA-2018,
-    한국어 ko-strategyqa)
+  - 모델 19종으로 인코딩한 라벨 데이터세트 9개(BEIR SciFact·NFCorpus·ArguAna·SCIDOCS·FiQA-2018,
+    한국어 4개: ko-strategyqa, MTEB의 XPQA kor-kor·AutoRAG·MultiLongDoc ko)
 - 벡터 저장소: faiss 1.15.1, Qdrant client 1.20(로컬 모드), Chroma 1.5, Milvus Lite 3.2,
   Weaviate client 4.24
 
@@ -85,6 +85,41 @@ ArguAna의 nDCG@10은 BEIR과 같이 질의 자신의 문서(코퍼스에 들어
 - 명백히 잘못된 파이프라인(BEIR에 GloVe, 영어 데이터에 한국어 전용 모델, 한국어 데이터에 영어
   전용 모델)은 여러 항목을 동시에 올립니다. 이런 파이프라인을 가르는 것은 경고의 개수이지
   `fail` 하나가 아닙니다.
+
+## 한국어 데이터와 문서 길이
+
+MTEB의 한국어 데이터세트 3개를 더 측정했습니다. 어느 것도 임곗값을 정하는 데 쓰지 않았고, 주로
+문서 길이가 다릅니다. 모든 모델에서 문서를 512토큰으로 잘랐습니다.
+
+| 데이터세트 | 문서 | 길이 중앙값 | 좋은 다국어 모델(7개) nDCG@10 | 영어 전용 모델(9개) nDCG@10 |
+|---|---|---|---|---|
+| XPQA kor-kor | 889 | 32자 | 0.307\~0.382 | 0.102\~0.174 |
+| AutoRAG | 720 | 870자 | 0.767\~0.854 | 0.062\~0.248 |
+| MultiLongDoc ko | 6,176 | 12,878자 | 0.225\~0.286 | 0.004\~0.030 |
+
+좋은 모델은 KURE-v1, BGE-m3-ko, bge-m3, multilingual-e5-base와 -large, gte-multilingual-base,
+Qwen3-Embedding-0.6B입니다.
+
+- **긴 문서(MultiLongDoc).** BEIR에서와 같이 동작합니다.
+  - `hubness`나 `query_hubness`가 영어 전용 모델 9개를 모두 잡습니다.
+  - 좋은 모델은 `hubness` warn 1개, `query_hubness` warn 2개 말고는 깨끗합니다(지원 중단된
+    `ood_queries`는 여전히 e5 계열을 잡습니다).
+  - nDCG@10과의 Spearman: `query_hubness` −0.86, `hubness` −0.76, `query_gap` −0.80.
+- **좁은 도메인 코퍼스(AutoRAG, 금융·커머스 문서).** 모델을 가르는 신호는 유지되지만 기본값
+  하나가 맞지 않습니다.
+  - `query_hubness`의 상관은 −0.94이고, `hubness`와 함께 영어 전용 모델 9개 중 6개를 잡습니다.
+    좋은 모델은 둘 다 잡지 않습니다.
+  - `effective_rank`는 좋은 모델 7개 모두에 warn입니다(0.064\~0.094, `warn` 0.10). 몇 가지
+    주제만 다루는 코퍼스는 쓰는 방향이 적기 때문입니다. 모델 결함이 아니라 `vecscope calibrate`가
+    다루려는 도메인 효과입니다.
+- **아주 짧은 문서(XPQA 상품 답변).** 코퍼스 항목이 파이프라인이 아니라 데이터를 설명합니다.
+  - 좋은 모델이든 아니든 모두 `collapse`(0.15\~0.47)와 `effective_rank`가 fail이고, 16개 중
+    15개가 `query_gap`을 올립니다. 문장이 완전히 같은 답변은 4%뿐이지만 "네, 가능합니다"와
+    "네, 가능해요" 같은 답변은 어느 모델에서나 거의 같은 벡터가 됩니다.
+  - `hubness`는 좋은 모델 7개 중 6개에 warn이고 영어 전용 모델에는 하나도 없어서, nDCG@10과의
+    상관이 양수(+0.43)로 바뀝니다.
+  - "검색에서 서로 바꿔 써도 되는 문서가 많다"로 읽어야 하고, 모든 모델의 낮은 nDCG@10이 이를
+    뒷받침합니다. 계획은 `query_gap`을 중복과 같은 단계에 넣으므로 질의 탓으로 돌리지 않습니다.
 
 ## 질의 항목
 
@@ -192,8 +227,13 @@ q_nn은 질의에서 코퍼스로의 최근접 거리입니다. 임곗값은 재
 
 - 임곗값과 질의 항목은 위 데이터에 맞춰 정했고 홀드아웃 분할은 없습니다. 운영 질의 로그와
   비공개 코퍼스는 측정하지 않았습니다.
-- 실제 모델 측정은 두 언어의 데이터세트 6개입니다. 2만 행이 넘는 코퍼스의 정확성은 합성
+- 실제 모델 측정은 두 언어의 데이터세트 9개입니다. 아주 짧은 정형 문서나 좁은 도메인 코퍼스에서는
+  일부 기본값(`collapse`, `effective_rank`, `query_gap`)이 좋은 모델도 잡으므로, 그런 데이터에서는
+  게이트로 쓰기 전에 보정하십시오. 2만 행이 넘는 코퍼스의 정확성은 합성
   데이터로 확인했고, 실제 데이터 정확성 검사는 그보다 작은 76개 조합에서 했습니다.
+- 표본 감사는 균등 무작위 행을 씁니다. 군집별 층화 표본은 검토했지만 넣지 않았습니다. 섬은
+  max(k + 1, 행의 0.5%)보다 작고 떨어져 있어야 하므로 층을 어떻게 나눠도 표본은 작은 섬을 놓치고,
+  층화는 분포형 항목을 편향시킵니다. 대신 완전 복제는 전체 행에서 셉니다.
 - Weaviate 어댑터는 옵트인 테스트(`VECSCOPE_TEST_WEAVIATE=1`)에서 내장 서버로만 확인했습니다.
   원격 Qdrant·Milvus·Weaviate 서버는 테스트하지 않았습니다.
 - 에이전트 실행은 모델 하나, 과제 하나입니다. 도구와 계획을 쓸 수 있다는 것을 보여 줄 뿐,
@@ -208,7 +248,7 @@ q_nn은 질의에서 코퍼스로의 최근접 거리입니다. 임곗값은 재
   `python examples/benchmark_sweep.py --rows 100000 --dim 768 --corpus clustered zipf --json
   sweep.json`으로 표를 다시 잴 수 있습니다. 실행 환경 정보가 JSON에 함께 기록됩니다.
 - `python examples/retrieval_quality.py`는 SciFact와 NFCorpus로 라벨 데이터 연구를 실행합니다.
-- 모델 19종, 데이터셋 6개, 질의 항목, 개입 실험은 패키지에 포함하지 않은 하네스로
+- 모델 19종, 데이터세트 9개, 질의 항목, 개입 실험은 패키지에 포함하지 않은 하네스로
   실행했습니다. 그 결과로 정한 동작은 다음 테스트로 고정되어 있습니다.
   - `tests/test_query_findings.py`(query_gap, query_shift)
   - `tests/test_plan_incremental.py`(지배 좌표와 중복 사례를 포함한 계획 규칙)

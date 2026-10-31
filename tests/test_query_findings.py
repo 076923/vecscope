@@ -115,8 +115,9 @@ def test_cli_baseline_with_queries_adds_query_shift(tmp_path, capsys, space):
     assert "query_shift" not in {f["name"] for f in out["findings"]}
 
 
-def test_mcp_query_baseline_path(tmp_path, space):
+def test_mcp_query_baseline_path(tmp_path, space, monkeypatch):
     pytest.importorskip("mcp")
+    monkeypatch.setenv("VECSCOPE_ALLOWED_DIRS", str(tmp_path))
     from vecscope.mcp_server import audit_embeddings
 
     corpus, queries, other = space

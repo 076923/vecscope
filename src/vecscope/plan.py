@@ -16,7 +16,7 @@ from __future__ import annotations
 
 # (group, members, common cause, first change, re-measure, why at this position)
 GROUPS = [
-    ("input_integrity", ["norms", "collapse", "outliers", "query_gap"],
+    ("input_integrity", ["norms", "collapse", "outliers", "connectivity", "query_gap"],
      ("rows that are not real embeddings of distinct items: zero or constant vectors from "
      "failed embedding calls, duplicated documents or boilerplate chunks"),
      ("read norms.details.zero_norm_ratio, collapse.details.largest_near_duplicate_groups and "
@@ -93,6 +93,11 @@ _CONDITION = {
     # the gap is re-read after deduplicating before the queries are blamed
     ("input_integrity", "query_gap"): lambda f: (
         _bad(f, "collapse") and _CONDITION[("input_integrity", "collapse")](f)),
+    # a group of near-copies larger than k but below the island size is its own component
+    ("input_integrity", "connectivity"): lambda f: (
+        _bad(f, "collapse") and _CONDITION[("input_integrity", "collapse")](f)
+        and any(g < f["connectivity"]["details"].get("min_island_size", 0)
+                for g in f["collapse"]["details"].get("largest_near_duplicate_groups", []))),
     # a dominant coordinate makes far rows look like outliers
     ("input_integrity", "outliers"): lambda f: not _bad(f, "rogue_dimensions"),
     # everything a dominant coordinate moves belongs to it when it is measured
@@ -105,6 +110,29 @@ _CONDITION = {
     ("shared_direction", "effective_rank"): lambda f: _bad(f, "anisotropy"),
     # query hubness with a corpus hubness problem is the corpus's; alone it is the queries'
     ("query_pipeline", "query_hubness"): lambda f: not _bad(f, "hubness"),
+}
+
+
+# why a finding was placed in a group when a condition decided it; shown in the plan so a
+# grouping by co-occurrence reads as the hypothesis it is
+_REASON = {
+    ("input_integrity", "norms"): "zero vectors are present (norms.details.zero_norm_ratio > 0)",
+    ("input_integrity", "collapse"): ("exact copies are present, or no shared direction or "
+                                      "dominant coordinate is measured that would explain it"),
+    ("input_integrity", "query_gap"): ("near-copies shrink the corpus distance query_gap divides "
+                                       "by; read it again after deduplicating"),
+    ("input_integrity", "connectivity"): ("a near-duplicate group is smaller than the island "
+                                          "size, so the copies may be the islands"),
+    ("input_integrity", "outliers"): "no dominant coordinate is measured that would explain them",
+    **{("dominant_dimension", n): ("rogue_dimensions is not ok; one coordinate moves this "
+                                   "finding too")
+       for n in ("norms", "metric_mismatch", "outliers", "effective_rank", "hubness",
+                 "antihubs", "collapse")},
+    ("shared_direction", "hubness"): "anisotropy is not ok; a shared direction creates hubs",
+    ("shared_direction", "antihubs"): "anisotropy is not ok; a shared direction creates hubs",
+    ("shared_direction", "effective_rank"): ("anisotropy is not ok; a shared direction lowers "
+                                             "the rank"),
+    ("query_pipeline", "query_hubness"): "corpus hubness is ok, so the hubs come from the queries",
 }
 
 
@@ -133,7 +161,9 @@ def build_plan(findings: list[dict], retrieval: dict | None = None) -> list[dict
             continue
         taken.update(names)
         evidence = [{"name": n, "value": by[n]["value"], "verdict": by[n]["verdict"],
-                     "inconclusive": bool(by[n].get("inconclusive"))} for n in names]
+                     "inconclusive": bool(by[n].get("inconclusive")),
+                     "placed_because": _REASON.get((group, n), "this group's cause covers it")}
+                    for n in names]
         conclusive = [e for e in evidence if not e["inconclusive"]]
         steps.append({
             "order": len(steps) + 1,
@@ -153,7 +183,9 @@ def build_plan(findings: list[dict], retrieval: dict | None = None) -> list[dict
                 f = by["query_hubness"]
                 s["findings"].append({"name": "query_hubness", "value": f["value"],
                                       "verdict": f["verdict"],
-                                      "inconclusive": bool(f.get("inconclusive"))})
+                                      "inconclusive": bool(f.get("inconclusive")),
+                                      "placed_because": ("corpus hubness is not ok; the same "
+                                                         "hubs answer the queries")})
                 s["only_inconclusive"] = all(e["inconclusive"] for e in s["findings"])
                 taken.add("query_hubness")
                 break
@@ -163,7 +195,8 @@ def build_plan(findings: list[dict], retrieval: dict | None = None) -> list[dict
         steps.append({
             "order": len(steps) + 1, "group": n,
             "findings": [{"name": n, "value": by[n]["value"], "verdict": by[n]["verdict"],
-                          "inconclusive": bool(by[n].get("inconclusive"))}],
+                          "inconclusive": bool(by[n].get("inconclusive")),
+                          "placed_because": "no rule links it to the findings above"}],
             "common_cause": "; ".join(by[n].get("likely_causes", [])),
             "first_change": by[n].get("suggested_action", ""),
             "re_measure": by[n].get("verify_by", ""),

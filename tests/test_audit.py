@@ -876,7 +876,8 @@ def test_mcp_server_exposes_tools():
         assert getattr(ann, "readOnlyHint", None) or getattr(ann, "read_only_hint", None)
 
 
-def test_mcp_audit_summary_and_verbose(tmp_path):
+def test_mcp_audit_summary_and_verbose(tmp_path, monkeypatch):
+    monkeypatch.setenv("VECSCOPE_ALLOWED_DIRS", str(tmp_path))
     import json
 
     pytest = __import__("pytest")
@@ -899,7 +900,8 @@ def test_mcp_audit_summary_and_verbose(tmp_path):
         "ann_recall", "ood_queries", "query_gap", "query_shift", "query_hubness"}
 
 
-def test_mcp_baseline_by_audit_id_and_summary(tmp_path):
+def test_mcp_baseline_by_audit_id_and_summary(tmp_path, monkeypatch):
+    monkeypatch.setenv("VECSCOPE_ALLOWED_DIRS", str(tmp_path))
     import json
 
     pytest = __import__("pytest")
@@ -1174,6 +1176,14 @@ def test_mcp_tools_refuse_paths_outside_allowed_dirs(tmp_path, monkeypatch):
     np.save(inside / "v.npy", x)
     np.save(outside / "v.npy", x)
     monkeypatch.delenv(mcp_server.ALLOWED_DIRS_ENV, raising=False)
+    monkeypatch.delenv(mcp_server.ALLOW_ANY_ENV, raising=False)
+    # by default only the directory the server runs in is readable
+    monkeypatch.chdir(inside)
+    assert mcp_server.allowed_dirs() == [inside.resolve()]
+    assert mcp_server.audit_embeddings("v.npy", k=5)["n"] == 100
+    with pytest.raises(Exception, match="--allow-any"):
+        mcp_server.audit_embeddings(str(outside / "v.npy"), k=5)
+    monkeypatch.setenv(mcp_server.ALLOW_ANY_ENV, "1")
     assert mcp_server.allowed_dirs() == []
     assert mcp_server.audit_embeddings(str(outside / "v.npy"), k=5)["n"] == 100  # unrestricted
     monkeypatch.setenv(mcp_server.ALLOWED_DIRS_ENV, os.pathsep.join([str(inside), ""]))
@@ -1190,6 +1200,65 @@ def test_mcp_tools_refuse_paths_outside_allowed_dirs(tmp_path, monkeypatch):
         mcp_server.audit_embeddings(str(inside / ".." / "secret" / "v.npy"), k=5)
     with pytest.raises(SystemExit):
         mcp_server.main(["--allow-dir", str(tmp_path / "missing")])
+
+
+def test_sampled_audit_counts_exact_copies_over_every_row():
+    # 2.5% of rows are copied pairs; a 2% sample sees almost none of the pairs, so the
+    # estimate from the sample alone reads ok while the full corpus is a warn
+    rng = np.random.default_rng(3)
+    x = rng.standard_normal((50_000, 16)).astype(np.float32)
+    pick = rng.choice(50_000, 1250, replace=False)
+    x[pick[:625]] = x[pick[625:]]
+    ev = audit(x, k=5, sample=1000)
+    f = next(f for f in ev.findings if f.name == "collapse")
+    assert f.value < 0.01  # what the sample itself sees
+    assert f.details["full_corpus_exact_copy_share"] == pytest.approx(0.025)
+    assert f.details["estimated_full_share"] == pytest.approx(0.025)
+    assert f.verdict == "warn" and "counted over every row" in f.explanation
+    assert f.details["full_corpus_largest_exact_groups"] == [2, 2, 2, 2, 2]
+
+
+def test_mcp_read_refuses_a_path_swapped_while_it_is_opened(tmp_path, monkeypatch):
+    pytest.importorskip("mcp")
+    import os
+    import sys
+
+    from vecscope import mcp_server
+
+    if sys.platform == "win32":
+        pytest.skip("creating symlinks needs extra rights on Windows")
+    inside, outside = tmp_path / "data", tmp_path / "secret"
+    inside.mkdir()
+    outside.mkdir()
+    x = np.random.default_rng(0).standard_normal((50, 4)).astype(np.float32)
+    np.save(inside / "real.npy", x)
+    np.save(outside / "secret.npy", x * 2)
+    link = inside / "v.npy"
+    link.symlink_to(inside / "real.npy")
+    monkeypatch.setenv(mcp_server.ALLOWED_DIRS_ENV, str(inside))
+    real_open = os.open
+
+    def swapping_open(path, flags, *a):
+        # point the link outside for the open itself, then back before the re-check
+        link.unlink()
+        link.symlink_to(outside / "secret.npy")
+        try:
+            return real_open(path, flags, *a)
+        finally:
+            link.unlink()
+            link.symlink_to(inside / "real.npy")
+
+    monkeypatch.setattr(mcp_server.os, "open", swapping_open)
+    with pytest.raises(Exception, match="changed while it was being opened"):
+        mcp_server.audit_embeddings(str(link), k=5)
+    monkeypatch.setattr(mcp_server.os, "open", real_open)
+    assert mcp_server.audit_embeddings(str(link), k=5)["n"] == 50  # an honest symlink is fine
+    # special files are refused without blocking the server
+    os.mkfifo(inside / "pipe.npy")
+    with pytest.raises(Exception, match="not a regular file"):
+        mcp_server.audit_embeddings(str(inside / "pipe.npy"), k=5)
+    with pytest.raises(Exception, match="cannot be read as a file|not a regular file"):
+        mcp_server.audit_embeddings(str(inside), k=5)
 
 
 def test_mcp_server_round_trip_over_stdio(tmp_path):

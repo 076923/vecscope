@@ -160,7 +160,7 @@ The [agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/ve
 that loop.
 
 Thresholds are defaults calibrated on [seven public models](#real-embeddings) and re-checked
-against 19 models on six labeled datasets in two languages ([verification](https://github.com/076923/vecscope/blob/main/docs/verification.md)).
+against 19 models on nine labeled datasets in two languages ([verification](https://github.com/076923/vecscope/blob/main/docs/verification.md)).
 They are a starting point for diagnosis, not a universal quality bar.
 
 Embedding spaces differ by model, language, domain and dimensionality, so a `warn` on a good
@@ -414,10 +414,15 @@ The order follows dependencies between fixes:
 A near-duplicate share caused by a shared direction (every cosine above the cutoff, no exact
 copies) is grouped with the direction, not with deduplication. A `query_gap` next to
 duplicates is listed with them: near-copies shrink the corpus distance the gap divides by, so
-it is read again after deduplicating before the queries are blamed.
+it is read again after deduplicating before the queries are blamed. Islands next to a
+near-duplicate group smaller than the island size go with the duplicates too, since the
+copies may be the islands.
 
 The rules are fixed and listed in `src/vecscope/plan.py`; a step is a hypothesis to test with
-its re-measure line, not a diagnosis.
+its re-measure line, not a diagnosis. Each finding in a step carries `placed_because`: either
+"this group's cause covers it", or the other finding whose verdict put it there (for example
+"rogue_dimensions is not ok; one coordinate moves this finding too"). The second kind is a
+grouping by co-occurrence, so check it with the step's re-measure numbers.
 
 What the fixes did to retrieval on real embeddings is in the
 [verification](https://github.com/076923/vecscope/blob/main/docs/verification.md#interventions).
@@ -533,9 +538,22 @@ path outside them (after resolving `..` and symlinks) is refused before it is op
 { "mcpServers": { "vecscope": { "command": "vecscope-mcp", "args": ["--allow-dir", "/data/embeddings"] } } }
 ```
 
-`--allow-dir` can be repeated; the environment variable `VECSCOPE_ALLOWED_DIRS` (paths
-separated by `:` on Unix, `;` on Windows) does the same. Without either, every file the
-server process can read is reachable.
+What the server may read:
+
+- By default, only the directory it was started in and below.
+- `--allow-dir DIR` names the directories instead. It can be repeated; the environment
+  variable `VECSCOPE_ALLOWED_DIRS` (paths separated by `:` on Unix, `;` on Windows) does the
+  same.
+- `--allow-any` (or `VECSCOPE_ALLOW_ANY=1`) lifts the restriction, so every file the server
+  process can read is reachable. Use it only on your own machine.
+- Network vector stores need `--allow-network` on top; read-only does not make reaching
+  them harmless, so grant it only where the server's network access is what you intend.
+
+Each file is read through one handle that is checked after opening: it must be a regular
+file, and the same file the path resolves to inside the allowed directories. A symlink
+swapped between the check and the read, a FIFO or a directory is refused. Local database
+directories (`qdrant+local://` and the like) are checked by path only, because their client
+opens the files itself.
 
 The agent skill in [`.agents/skills/vecscope/SKILL.md`](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) tells
 the agent when to run the audit and what to do about each verdict: center or swap the model,
@@ -798,7 +816,7 @@ for the findings that need every row. Which findings those are:
 |---|---|---|
 | anisotropy, effective_rank, rogue_dimensions, norms, metric_mismatch, distance_concentration | a distribution estimate: within 2.3% of the full value on 200k x 384 with 100k, 50k and 20k samples, and the verdict holds | no |
 | hubness, antihubs | a *lower bound*: k-occurrence concentrates with density, so the same corpus scores less hubness on a smaller sample (skewness 2.6 `warn` on all 200k rows, 1.15 on a quarter, 0.16 on a tenth). Verdicts other than `fail` are marked inconclusive | to measure the corpus's own hubness |
-| collapse | the duplicate *share* seen inside the sample: a pair counts only when both rows were drawn, so the sampled share is 0.96 to 1.03 x (sample fraction x full share); the verdict uses the estimated full share | to count or list every duplicate |
+| collapse | the duplicate *share* seen inside the sample: a pair counts only when both rows were drawn, so the sampled share is 0.96 to 1.03 x (sample fraction x full share); the verdict uses the estimated full share, at least the exact copies counted over every row | to count or list every near-duplicate |
 | outliers | an estimate that over-counts on small samples (3.9x at a tenth); verdicts other than `ok` are marked inconclusive | to find every outlier |
 | connectivity | the islands of the sample's own k-NN graph, which miss most islands of the corpus (37% of rows in islands scored 0.08% on a quarter sample); verdicts other than `fail` are marked inconclusive | yes, to judge connectivity at all |
 | ann_recall | not available on a sample: ids must line up with the ANN file | yes (`--sample 0`) |
@@ -808,8 +826,11 @@ A sampled audit therefore:
 
 - lists `inconclusive_findings` (the verdicts the table marks inconclusive)
 - flags them `INCONCLUSIVE (sampled)` in the text output and names them in the gate line
-- takes the collapse verdict from `details.estimated_full_share` (the sampled share divided
-  by the sample fraction)
+- takes the collapse verdict from `details.estimated_full_share`: the sampled share divided
+  by the sample fraction, or the share of rows with an exact copy counted over every row
+  (`details.full_corpus_exact_copy_share`) when that is larger. Counting exact copies over
+  the whole corpus is cheap (one digest per row), so rare copies the sample missed still
+  count; near-duplicates that are not exact copies are only seen in the sample
 - repeats each caveat in the finding's explanation next to the number
 
 The 200k-row figures come from the
@@ -938,6 +959,30 @@ own data:
 5. Confirm on the held-out split that the thresholds separate the acceptable states from the
    rest. A threshold tuned and checked on the same queries will look better than it is.
 
+`vecscope calibrate` does steps 3 to 5 from the audits of step 2. Audit each state with the
+fitting queries, and each again with the held-out queries:
+
+```bash
+vecscope audit state_a.npy --queries q_fit.npy --qrels qrels_fit.tsv --json > fit_a.json
+vecscope audit state_a.npy --queries q_hold.npy --qrels qrels_hold.tsv --json > hold_a.json
+# ... the same for every state, then:
+vecscope calibrate fit_*.json --min-quality 0.45 --holdout hold_*.json --out th.json
+vecscope audit vectors.npy --thresholds th.json
+```
+
+For each finding it reports:
+
+- the Spearman correlation with the retrieval metric across the states (`--metric`, nDCG@k by
+  default), and whether the sign is the one the finding implies;
+- the worst value among acceptable states and the best among the others;
+- a (warn, fail) pair only when the finding tracks quality and separates the two groups,
+  placed a third and two thirds of the way across the gap.
+
+A finding that does not move with quality on your data, or moves the other way, gets no
+pair: keep its default as a reason to look. The holdout line counts the unacceptable states
+the proposal catches and the false alarms on acceptable ones. It needs at least three states
+on both sides of `--min-quality` together; five or more make the correlations worth reading.
+
 The same procedure applies to a `suggested_action`: it is a hypothesis about the cause, and
 centering, standardizing or truncating vectors changes rankings.
 
@@ -1012,7 +1057,7 @@ JSON. The skill file describes both paths.
 
 - [Agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md): when to run the audit and what to do with each verdict
 - [Retrieval-quality study](https://github.com/076923/vecscope/blob/main/docs/retrieval_quality.md): every finding against nDCG@10 on labeled data
-- [Verification](https://github.com/076923/vecscope/blob/main/docs/verification.md): exactness, recall scoring, the sampling claims, the query findings, interventions, agent integration, and 19 models on 6 labeled datasets
+- [Verification](https://github.com/076923/vecscope/blob/main/docs/verification.md): exactness, recall scoring, the sampling claims, the query findings, interventions, agent integration, and 19 models on 9 labeled datasets
 - [Examples](https://github.com/076923/vecscope/tree/main/examples/): synthetic matrices, the calibration script and the retrieval-quality study
 - [Changelog](https://github.com/076923/vecscope/blob/main/CHANGELOG.md)
 

@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
-from vecscope._knn import check_magnitude, exact_knn, resolve_sample
+from vecscope._knn import check_magnitude, exact_copy_counts, exact_knn, resolve_sample
 from vecscope.diagnostics import (
     anisotropy,
     ann_recall,
@@ -246,7 +246,8 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
     }
 
 
-def _apply_sampling(findings: list[Finding], fraction: float, th: dict) -> list[str]:
+def _apply_sampling(findings: list[Finding], fraction: float, th: dict,
+                    full_counts: np.ndarray | None = None) -> list[str]:
     """Make a sampled audit say what each value can stand for, and keep a verdict that the
     sample cannot support from reading as a clean bill. Measured on synthetic corpora at
     200k x 384 with 100k/50k/20k samples (docs/verification.md) and in
@@ -258,7 +259,9 @@ def _apply_sampling(findings: list[Finding], fraction: float, th: dict) -> list[
     - a duplicate pair is seen only when both rows were drawn, so the sampled collapse share
       is about ``fraction`` times the full one (0.96 to 1.03 of it in the measurements). The
       verdict is taken from the estimated full share ``value / fraction`` (in details), so a
-      full-corpus ``fail`` does not read ``warn``.
+      full-corpus ``fail`` does not read ``warn``. Exact copies are counted over every row
+      (``full_counts``, cheap: one digest per row); their share is a lower bound for the full
+      near-duplicate share, so rare copies the sample missed still raise the estimate.
     - islands are those of the sample's k-NN graph: a corpus with 37% of its rows in islands
       scored 0.08% on a 25% sample. connectivity is ``inconclusive`` unless it is ``fail``.
     - outliers are over-counted on small samples (3.9x at 10%), so a sampled ``warn``/``fail``
@@ -278,13 +281,25 @@ def _apply_sampling(findings: list[Finding], fraction: float, th: dict) -> list[
                 f.inconclusive = True
         elif f.name == "collapse":
             est = min(1.0, f.value / fraction)
+            note = ""
+            if full_counts is not None:
+                copied = float(full_counts[full_counts > 1].sum() / full_counts.sum())
+                f.details["full_corpus_exact_copy_share"] = copied
+                f.details["full_corpus_largest_exact_groups"] = [
+                    int(c) for c in np.sort(full_counts[full_counts > 1])[::-1][:5]]
+                if copied > est:
+                    est = copied
+                    note = (f" Exact copies counted over every row cover {copied:.1%} of the "
+                            "corpus, more than the sample shows, so that share is the estimate.")
             f.details["estimated_full_share"] = est
             f.details["sample_fraction"] = fraction
             f.verdict = _verdict("collapse.near_duplicate_ratio", est, th)
             f.explanation += (f" Measured on a {pct} sample: a duplicate pair is seen only when "
                               f"both rows were sampled, so the full-corpus share is estimated at "
-                              f"{est:.1%} (this value divided by {fraction:.2f}) and the verdict "
-                              "uses that estimate; audit every row (sample=0) to count duplicates.")
+                              f"{est:.1%} (this value divided by {fraction:.2f}, or the exact "
+                              "copies counted over every row when more) and the verdict uses "
+                              "that estimate; audit every row (sample=0) to count near-duplicates."
+                              + note)
         elif f.name == "outliers":
             f.explanation += (f" Measured on a {pct} sample: small samples over-count outliers, "
                               "and details.sample_ids lists only those inside the sample.")
@@ -986,7 +1001,8 @@ def audit(
     inconclusive: list[str] = []
     if sampled:
         _to_original_rows(findings, report, rows)
-        inconclusive = _apply_sampling(findings, sample / n_total, th)
+        inconclusive = _apply_sampling(findings, sample / n_total, th,
+                                       full_counts=exact_copy_counts(x_full))
     from vecscope.plan import build_plan
 
     findings = _attach_thresholds(findings, th)

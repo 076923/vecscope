@@ -157,7 +157,7 @@ JSON의 각 항목에는 `healthy_range`, `warn_at`, `fail_at`과 세부 수치�
 
 [에이전트 스킬](../../.agents/skills/vecscope/SKILL.md)에 이 절차가 정리되어 있습니다.
 
-임곗값은 [공개 모델 7개](#실제-임베딩-검증)로 보정한 뒤 두 언어의 라벨 데이터세트 6개에서 모델 19종으로
+임곗값은 [공개 모델 7개](#실제-임베딩-검증)로 보정한 뒤 두 언어의 라벨 데이터세트 9개에서 모델 19종으로
 다시 확인한 기본값입니다([검증 결과](verification.md)). 진단의 출발점이지 보편적인
 품질 기준은 아닙니다.
 
@@ -410,10 +410,14 @@ BEIR의 `query-id`/`corpus-id`/`score` 이름도 읽습니다. 행 번호는 질
 공통 방향 때문에 생긴 근접 중복(모든 코사인이 기준을 넘지만 정확한 복사본은 없음)은 중복
 제거가 아니라 공통 방향 단계로 묶습니다. 중복과 함께 나온 `query_gap`은 중복 단계에 넣습니다.
 근접 복제가 `query_gap`이 나누는 코퍼스 거리를 줄이므로, 질의를 의심하기 전에 중복을 제거하고
-다시 읽어야 하기 때문입니다.
+다시 읽어야 하기 때문입니다. 섬 기준보다 작은 근접 중복 묶음과 함께 나온 섬(connectivity)도
+중복 단계에 넣습니다. 그 복제 묶음이 섬일 수 있기 때문입니다.
 
 규칙은 고정되어 있고 `src/vecscope/plan.py`에 있습니다. 각 단계는 다시 잴 숫자로 시험할
-가설이지 진단이 아닙니다.
+가설이지 진단이 아닙니다. 단계 안의 항목마다 `placed_because`가 붙습니다. "this group's cause
+covers it"이거나, 그 항목을 그 단계에 넣게 한 다른 항목의 판정입니다(예: "rogue_dimensions is not
+ok; one coordinate moves this finding too"). 뒤의 경우는 함께 나타났다는 이유로 묶은 것이므로
+단계의 재측정 숫자로 확인하십시오.
 
 실제 임베딩에서 이 조치들이 검색 품질을 어떻게 바꿨는지는 [검증 결과](verification.md#개입-실험)에
 있습니다.
@@ -526,9 +530,20 @@ Claude Code는 공통 오프셋이 있는 코퍼스를 감사한 뒤 계획대�
 { "mcpServers": { "vecscope": { "command": "vecscope-mcp", "args": ["--allow-dir", "/data/embeddings"] } } }
 ```
 
-`--allow-dir`는 여러 번 줄 수 있고, 환경 변수 `VECSCOPE_ALLOWED_DIRS`(Unix는 `:`, Windows는
-`;`로 구분)도 같은 역할을 합니다. 둘 다 없으면 서버 프로세스가 읽을 수 있는 모든 파일에 접근할
-수 있습니다.
+서버가 읽을 수 있는 범위는 다음과 같습니다.
+
+- 기본값은 서버를 시작한 디렉터리와 그 아래뿐입니다.
+- `--allow-dir DIR`을 주면 그 디렉터리를 대신 씁니다. 여러 번 줄 수 있고, 환경 변수
+  `VECSCOPE_ALLOWED_DIRS`(Unix는 `:`, Windows는 `;`로 구분)도 같은 역할을 합니다.
+- `--allow-any`(또는 `VECSCOPE_ALLOW_ANY=1`)는 제한을 풀어 서버 프로세스가 읽을 수 있는 모든
+  파일에 접근하게 합니다. 자신의 컴퓨터에서만 쓰십시오.
+- 네트워크 벡터 저장소는 여기에 더해 `--allow-network`가 있어야 합니다. 읽기 전용이라고 해서
+  접속이 무해한 것은 아니므로, 서버의 네트워크 접근이 의도한 범위일 때만 켜십시오.
+
+파일은 연 뒤에 확인한 핸들 하나로 읽습니다. 일반 파일이어야 하고, 경로가 가리키는 허용 디렉터리
+안의 파일과 같은 파일이어야 합니다. 확인과 읽기 사이에 바꿔치기한 심볼릭 링크, FIFO, 디렉터리는
+거부합니다. 로컬 데이터베이스 디렉터리(`qdrant+local://` 등)는 클라이언트가 파일을 직접 열기
+때문에 경로만 확인합니다.
 
 [`.agents/skills/vecscope/SKILL.md`](../../.agents/skills/vecscope/SKILL.md)의 에이전트
 스킬에는 감사를 실행할 시점과 판정별 조치(벡터 중심화(centering) 또는 모델 교체, 중복 제거,
@@ -789,7 +804,7 @@ k-NN을 한 번 더 계산합니다. 표본 감사는 표본에 대한 설명이
 |---|---|---|
 | anisotropy, effective_rank, rogue_dimensions, norms, metric_mismatch, distance_concentration | 분포 추정치. 20만 × 384 코퍼스에서 표본 10만·5만·2만 모두 전체 값과 2.3% 이내로 같았고 판정도 같았음 | 없음 |
 | hubness, antihubs | *하한값*. k-출현 빈도는 밀도가 높을수록 쏠리므로 같은 코퍼스라도 표본이 작으면 hubness가 낮게 나옴(20만 행 전체 2.6 `warn`, 4분의 1 표본 1.15, 10분의 1 표본 0.16). `fail`이 아닌 판정은 inconclusive로 표시 | 코퍼스 자체의 hubness를 잴 때 |
-| collapse | 표본 안에서 확인된 중복 *비율*. 중복 쌍의 두 행이 모두 뽑혀야 세므로 표본 비율 × 전체 비율의 0.96\~1.03배가 나옴. 판정은 이를 되돌려 추정한 전체 비율로 내림 | 모든 중복을 세거나 나열할 때 |
+| collapse | 표본 안에서 확인된 중복 *비율*. 중복 쌍의 두 행이 모두 뽑혀야 세므로 표본 비율 × 전체 비율의 0.96\~1.03배가 나옴. 판정은 이를 되돌려 추정한 전체 비율로 내리되, 전체 행에서 센 완전 복제 비율보다 작게 잡지 않음 | 모든 근접 중복을 세거나 나열할 때 |
 | outliers | 작은 표본에서 실제보다 많이 잡힘(10분의 1 표본에서 3.9배). `ok`가 아닌 판정은 inconclusive로 표시 | 모든 이상치를 찾을 때 |
 | connectivity | 표본으로 만든 k-NN 그래프의 섬. 코퍼스의 섬은 대부분 보이지 않음(전체 행의 37%가 섬인 코퍼스가 4분의 1 표본에서는 0.08%). `fail`이 아닌 판정은 inconclusive로 표시 | 항상. 표본으로는 판단할 수 없음 |
 | ann_recall | 표본에서는 불가. 행 번호가 ANN 파일과 맞아야 함 | 항상 (`--sample 0`) |
@@ -800,8 +815,10 @@ k-NN을 한 번 더 계산합니다. 표본 감사는 표본에 대한 설명이
 - 표에서 inconclusive로 표시한 판정들이 `inconclusive_findings` 목록으로 들어갑니다.
 - 그 판정들은 텍스트 출력에서는 `INCONCLUSIVE (sampled)`로, gate 줄에서는 이름으로
   표시됩니다.
-- collapse 판정은 표본 비율로 되돌려 추정한 전체 비율(`details.estimated_full_share`)로
-  내립니다.
+- collapse 판정은 `details.estimated_full_share`로 내립니다. 표본 비율로 되돌려 추정한 전체
+  비율이고, 전체 행에서 센 완전 복제 행의 비율(`details.full_corpus_exact_copy_share`)이 더 크면
+  그 값을 씁니다. 완전 복제는 행마다 해시 하나로 전체 코퍼스에서 싸게 셀 수 있어서, 표본이 놓친
+  드문 복제도 셉니다. 완전 복제가 아닌 근접 중복은 표본 안에서만 보입니다.
 - 각 항목의 설명문에도 이 주의 사항이 숫자 바로 옆에 붙습니다.
 
 20만 행 수치는
@@ -924,6 +941,30 @@ NFCorpus)에서 정확한 코사인 검색으로 nDCG@10을 구하고, 공개 �
 5. 따로 둔 검증용 질의로 그 임곗값이 허용 상태와 나머지를 구분하는지 확인합니다. 같은 질의로
    맞추고 검증한 임곗값은 실제보다 좋아 보입니다.
 
+`vecscope calibrate`는 2단계의 감사 결과로 3\~5단계를 실행합니다. 상태마다 맞추기용 질의로 한
+번, 검증용 질의로 한 번 감사합니다.
+
+```bash
+vecscope audit state_a.npy --queries q_fit.npy --qrels qrels_fit.tsv --json > fit_a.json
+vecscope audit state_a.npy --queries q_hold.npy --qrels qrels_hold.tsv --json > hold_a.json
+# ... 모든 상태에 대해 같은 방식으로 실행한 뒤:
+vecscope calibrate fit_*.json --min-quality 0.45 --holdout hold_*.json --out th.json
+vecscope audit vectors.npy --thresholds th.json
+```
+
+항목마다 다음을 보여 줍니다.
+
+- 상태들에 걸친 검색 지표(`--metric`, 기본값 nDCG@k)와의 Spearman 상관, 그리고 부호가 그
+  항목이 뜻하는 방향과 맞는지
+- 허용 상태 중 가장 나쁜 값과 나머지 상태 중 가장 좋은 값
+- 항목이 품질을 따라가고 두 묶음을 가를 때만 제안하는 (warn, fail) 쌍. 두 값 사이 간격의 3분의
+  1과 3분의 2 지점에 둡니다.
+
+자신의 데이터에서 품질과 함께 움직이지 않거나 반대로 움직이는 항목에는 쌍을 제안하지 않습니다.
+기본값은 들여다볼 계기로만 쓰십시오. 홀드아웃 줄은 제안한 임곗값이 잡은 불합격 상태와 합격
+상태에 낸 오경보 수를 셉니다. 상태는 `--min-quality` 양쪽을 합쳐 3개 이상이어야 하고, 상관을
+읽을 만하려면 5개 이상이 좋습니다.
+
 `suggested_action`에도 같은 절차가 적용됩니다. 권장 조치는 원인에 대한 가설이고, 중심화,
 표준화, 차원 절단은 검색 순위를 바꿉니다.
 
@@ -998,7 +1039,7 @@ NFCorpus)에서 정확한 코사인 검색으로 nDCG@10을 구하고, 공개 �
 
 - [에이전트 스킬](../../.agents/skills/vecscope/SKILL.md): 감사를 실행할 시점과 판정별 조치
 - [검색 품질 연구](retrieval_quality.md): 라벨 데이터의 nDCG@10과 모든 진단 항목을 대조한 결과
-- [검증 결과](verification.md): 정확성, recall 채점, 표본 감사, 질의 항목, 개입 실험, 에이전트 연동, 라벨 데이터세트 6개에서 모델 19종을 측정한 결과
+- [검증 결과](verification.md): 정확성, recall 채점, 표본 감사, 질의 항목, 개입 실험, 에이전트 연동, 라벨 데이터세트 9개에서 모델 19종을 측정한 결과
 - [예제](../../examples/): 합성 행렬 생성 스크립트, 보정 스크립트, 검색 품질 연구 스크립트
 - [변경 이력](../../CHANGELOG.md)
 

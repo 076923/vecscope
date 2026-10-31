@@ -88,17 +88,18 @@ def parse_qrels(obj) -> dict[int, dict[int, float]]:
     return out
 
 
-def load_qrels(path: str | Path) -> dict[int, dict[int, float]]:
+def load_qrels(path: str | Path, data: bytes | None = None) -> dict[int, dict[int, float]]:
     """Read qrels from .json (mapping or list), .jsonl (one row per line) or .tsv/.csv/.txt
-    (``query doc [grade]`` per line; a non-numeric first line is a header)."""
+    (``query doc [grade]`` per line; a non-numeric first line is a header). ``data`` is the
+    file's content when the caller has already read it."""
     p = Path(path)
-    if not p.exists():
+    if data is None and not p.exists():
         raise FileNotFoundError(f"qrels file not found: {p}")
     suf = p.suffix.lower()
     if suf not in {".json", ".jsonl", ".tsv", ".csv", ".txt"}:
         raise ValueError(f"unsupported qrels file: {p} (use .json/.jsonl/.tsv/.csv)")
     try:
-        text = p.read_text(encoding="utf-8-sig")
+        text = p.read_text(encoding="utf-8-sig") if data is None else data.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise ValueError(f"{p}: not a text qrels file (binary or not UTF-8)") from None
     if suf == ".json":

@@ -26,6 +26,7 @@ vecscope audit <embeddings> --sample 0 --knn-cache knn.npz --json   # appended r
 vecscope audit <embeddings> --clusters 10 --json                  # adds a per-cluster map
 vecscope sweep <embeddings>                # MCP: sweep_index; picks HNSW/IVF parameters
 vecscope compare <embeddings A> <embeddings B>   # MCP: compare_embeddings; same rows, two spaces
+vecscope calibrate fit_*.json --min-quality 0.45 --holdout hold_*.json --out th.json  # own thresholds
 ```
 
 In CI:
@@ -51,9 +52,12 @@ In CI:
   gate with `--fail-on none --baseline` so only the change is judged, and say that is the
   policy.
 
-MCP server on a shared machine: start it with `--allow-dir DIR` (or `VECSCOPE_ALLOWED_DIRS`)
-so the tools can only read embeddings under those directories; a refused path says so.
-Network vector stores are refused unless the server runs with `--allow-network`.
+MCP server file access:
+
+- By default it reads only under the directory it was started in; `--allow-dir DIR` (or
+  `VECSCOPE_ALLOWED_DIRS`) names the directories, and a refused path says so.
+- `--allow-any` lifts the restriction; do not suggest it on a shared machine.
+- Network vector stores are refused unless the server runs with `--allow-network`.
 
 Vector stores:
 
@@ -94,6 +98,9 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
   - The `collapse` share is about sample fraction times the full share (a pair counts only
     when both rows were drawn; the verdict uses the estimated full share in
     `details.estimated_full_share`).
+  - Exact copies are counted over every row even when sampling
+    (`details.full_corpus_exact_copy_share`); near-duplicates that are not exact copies are
+    only seen in the sample.
   - `outliers` are over-counted on small samples.
   - `connectivity` sees only the sample's own islands.
 - The response lists `inconclusive_findings` (hubness, antihubs and connectivity verdicts
@@ -118,6 +125,9 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
   - Override with `--thresholds file.json` (MCP: `thresholds`) when the user's domain has its
     own baseline, and derive that baseline from labeled queries split into a tuning and a
     held-out part; a threshold chosen to make the current corpus pass predicts nothing.
+  - `vecscope calibrate` proposes that file from audits of several pipeline states run with
+    `--qrels`. Use only the pairs it proposes; a finding it marks as not tracking quality (or
+    tracking it the other way) should not gate on that data. Quote its holdout line.
 - A `fail` does not prove retrieval is bad and all-`ok` does not prove it is good: the audit
   measures the vector space and the index, not relevance. Say so when reporting.
 
@@ -127,6 +137,10 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
    - Start from `plan`: the non-ok findings grouped by shared cause, in fix order, each with
      `first_change` and `re_measure`.
    - Work through it one step at a time and re-audit after each.
+   - Each finding in a step has `placed_because`. "this group's cause covers it" is the
+     group's own finding; a reason naming another finding ("anisotropy is not ok; ...") is a
+     grouping by co-occurrence. Say so when you report it, and let the re-measure numbers
+     confirm the shared cause before you call it one.
    - A step whose findings are all `inconclusive` (`only_inconclusive`) needs `--sample 0`
      before anything is changed.
 2. **Separate the causes**: use `likely_causes` and the other findings to decide whether the
