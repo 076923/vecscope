@@ -273,13 +273,17 @@ vecscope sweep embeddings.npy -k 10 --target-recall 0.95
 `nlist`)을 매개변수로 받습니다.
 
 스윕이 답하는 질문은 하나입니다. 이 코퍼스와 이 질의에서 어떤 파라미터가 목표 재현율을
-만족하고, 그 비용이 얼마인가입니다. 수치는 측정한 장비와 프로세스 안에서의 상대값이므로,
+만족하고, 그 비용이 얼마인가입니다. 수치는 측정한 장비와 프로세스 안에서의 상댓값이므로,
 고른 조합은 운영 환경에서 지연 시간·처리량·메모리를 따로 재어 확정하십시오.
 
-GPU용 faiss(Linux에서는 `pip install faiss-gpu-cu12`)가 설치되어 있으면 IVF 인덱스와 정답
+GPU용 faiss(`pip install "vecscope[index-gpu]"`, CUDA 12.6 이상인 Linux x86_64용 Meta 공식 `faiss-gpu`)가
+설치되어 있으면 IVF 인덱스와 정답
 기준이 되는 정확 검색을 자동으로 GPU에서 실행하고, 출력 첫 줄에 사용한 장치를 표시합니다.
 HNSW는 faiss에 GPU 구현이 없어 항상 CPU에서 실행됩니다. `--device cpu|gpu`로 장치를 직접
 지정할 수도 있습니다.
+`index`와 `index-gpu`는 둘 다 `faiss` 모듈을 설치하므로 하나만 설치합니다. `stores`에는 `index`가
+포함되어 있으므로 GPU 장비에서는 저장소(store) extra를 하나씩 지정합니다(`"vecscope[index-gpu,qdrant]"`). 드라이버가 오래된 환경에서는 `index-gpu` 대신 커뮤니티 빌드인
+`faiss-gpu-cu12`(CUDA 12.1)나 `faiss-gpu-cu11`을 직접 설치합니다.
 
 ## 두 임베딩 비교
 
@@ -545,9 +549,14 @@ vecscope audit day3.npy --sample 0 --knn-cache knn.npz    # updated: 바뀐 행�
 어디에든 등록할 수 있습니다.
 
 ```bash
-pip install "vecscope[mcp]"
+pip install vecscope
 claude mcp add vecscope -- vecscope-mcp --allow-dir /data/embeddings     # Claude Code
+claude mcp add vecscope -- uvx vecscope mcp --allow-dir /data/embeddings # 설치하지 않고 실행
 ```
+
+`vecscope mcp`와 `vecscope-mcp`는 옵션까지 같은 서버입니다.
+[MCP 레지스트리(MCP Registry)](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.076923/vecscope)에
+`io.github.076923/vecscope`로 등록되어 있습니다.
 
 ```json
 { "mcpServers": { "vecscope": { "command": "vecscope-mcp", "args": ["--allow-dir", "/data/embeddings"] } } }
@@ -1123,7 +1132,7 @@ vecscope audit vectors.npy --thresholds th.json
 <details>
 <summary><strong>벡터가 외부로 전송됩니까?</strong></summary>
 
-아니요. NumPy만 사용하고 모든 계산이 로컬에서 이루어집니다. 모델을 내려받거나 네트워크
+아니요. 모든 계산은 NumPy로 로컬에서 이루어집니다. 모델을 내려받거나 네트워크
 연결을 하지 않습니다.
 
 </details>

@@ -43,7 +43,8 @@ audit time, or when it makes two runs on the same input produce different output
 ## Pull requests
 
 Keep PRs focused on one change. Fill in the template, especially the evidence section.
-Dependencies stay at NumPy for the core; optional extras are fine for loaders and the MCP server.
+The diagnostics compute with NumPy only; `mcp` is a dependency for the server alone, and
+optional extras are fine for loaders.
 
 ## Releasing
 
@@ -51,7 +52,8 @@ Releases are published to PyPI by `.github/workflows/release.yml` through PyPI t
 publishing; no token is stored anywhere. PyPI never lets a version number be reused, so bump
 the version before tagging.
 
-1. Bump `__version__` in `src/vecscope/__init__.py` (the only place the version lives).
+1. Bump `__version__` in `src/vecscope/__init__.py` and both `version` fields in `server.json`
+   (a test checks that they match).
 2. Move the entries under `Unreleased` in `CHANGELOG.md` into a new `## [x.y.z] - YYYY-MM-DD`
    section.
 3. Commit and push to `main`, and wait for CI to pass.
@@ -70,3 +72,5 @@ the version before tagging.
    ```
 
 6. Check `pip install vecscope==x.y.z` in a clean environment.
+7. Publish the new version to the MCP Registry once PyPI has it: `mcp-publisher login github`,
+   then `mcp-publisher publish` from the repository root.

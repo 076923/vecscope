@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] - 2026-11-01
+
+### Changed
+
+- `mcp` is now a dependency, so `pip install vecscope` installs the MCP server. The `mcp`
+  extra is gone; install `vecscope` without it.
+
+### Added
+
+- `vecscope mcp` runs the MCP server, with the same options as `vecscope-mcp`, so
+  `uvx vecscope mcp --allow-dir DIR` starts it without installing anything first.
+- `server.json` and the `mcp-name` marker in the README, for the
+  [MCP Registry](https://registry.modelcontextprotocol.io) entry `io.github.076923/vecscope`.
+- The `index-gpu` extra installs Meta's `faiss-gpu` (CUDA 12.6 or later) on Linux x86_64, for
+  sweeps on the GPU. Install it instead of `index`, not next to it: both ship the `faiss` module.
+
 ## [0.10.1] - 2026-11-01
 
 ### Fixed

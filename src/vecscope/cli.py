@@ -81,9 +81,17 @@ def _render_text(ev) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["mcp"]:  # its options are the server's own, so it parses them itself
+        from vecscope.mcp_server import main as serve
+
+        serve(argv[1:])
+        return 0
     p = argparse.ArgumentParser(prog="vecscope", description="Embedding space evidence for agents.")
     p.add_argument("--version", action="version", version=f"vecscope {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("mcp", add_help=False,
+                   help="run the MCP server over stdio (vecscope mcp --help lists its options)")
     a = sub.add_parser("audit", help="audit an embedding matrix")
     a.add_argument("path", help=".npy/.npz/.parquet/.jsonl/.csv with one vector per row, a faiss "
                                 "index file, or a vector store URI (qdrant://, chroma://, "

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.076923/vecscope",
+  "title": "vecscope",
+  "description": "Deterministic evidence about embedding spaces and vector indexes: hubness, collapse, ANN recall",
+  "repository": {
+    "url": "https://github.com/076923/vecscope",
+    "source": "github"
+  },
+  "version": "0.11.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "vecscope",
+      "version": "0.11.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "named",
+          "name": "--allow-dir",
+          "description": "Directory the server may read embeddings, indexes and qrels from (repeatable). Without it only the working directory is readable",
+          "format": "filepath",
+          "isRepeated": true
+        }
+      ]
+    }
+  ]
+}

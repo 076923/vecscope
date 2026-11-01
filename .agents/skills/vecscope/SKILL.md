@@ -16,7 +16,7 @@ labeled queries.
 ## Run it
 
 ```bash
-pip install vecscope                       # or "vecscope[mcp]" / "vecscope[index]"
+pip install vecscope                       # or "vecscope[index]" for sweeps
 vecscope audit <embeddings> --json         # MCP: audit_embeddings
 vecscope audit <embeddings> --queries <query embeddings> --json   # adds query-side findings
 vecscope audit <embeddings> --queries <today's queries> --baseline good.json --json   # + query_shift

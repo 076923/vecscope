@@ -9,7 +9,8 @@ These rules apply to any agent or person changing this repository.
   explanation that states what the number means and what healthy looks like.
 - Output is deterministic: fixed seeds, exact neighbors, no learned components, no network.
   Two runs on the same input must produce identical JSON.
-- The core depends on NumPy only. Loaders and the MCP server may use optional extras.
+- The diagnostics compute with NumPy only. The `mcp` package is a dependency for the server and
+  is imported only by `mcp_server.py`; loaders may use optional extras.
 - Never guess at embedding quality in docs or messages. Point at the finding.
 
 ## Layout

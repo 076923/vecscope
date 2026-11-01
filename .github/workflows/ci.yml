@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -e ".[dev,mcp,index]"
+      - run: python -m pip install -e ".[dev,index]"
       - run: ruff check src tests examples
       - run: pytest -q
       - name: CLI smoke test
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install -e ".[dev,mcp,stores]"
+      - run: python -m pip install -e ".[dev,stores]"
       - run: pytest -q tests/test_adapters.py tests/test_agent_workflow.py -rs
 
   build:

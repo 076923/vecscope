@@ -1552,3 +1552,19 @@ def test_auto_block_keeps_the_memory_budget_on_large_corpora():
     for n in (900_000, 1_000_000, 10_000_000, 80_000_000):
         assert 12 * n * auto_block(n) <= 1_000_000_000
     assert auto_block(1_000_000) == 83 and auto_block(10**9) == 1
+
+
+def test_server_json_matches_the_release_and_the_mcp_subcommand_starts_the_server(monkeypatch):
+    import json
+    from pathlib import Path
+
+    import vecscope
+    from vecscope import cli, mcp_server
+
+    root = Path(__file__).resolve().parents[1]
+    server = json.loads((root / "server.json").read_text(encoding="utf-8"))
+    assert server["version"] == server["packages"][0]["version"] == vecscope.__version__
+    assert f"mcp-name: {server['name']}" in (root / "README.md").read_text(encoding="utf-8")
+    seen = []
+    monkeypatch.setattr(mcp_server, "main", seen.append)
+    assert cli.main(["mcp", "--allow-dir", "."]) == 0 and seen == [["--allow-dir", "."]]

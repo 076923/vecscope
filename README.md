@@ -1,3 +1,5 @@
+<!-- mcp-name: io.github.076923/vecscope -->
+
 <div align="center">
 
 **English** · [한국어](https://github.com/076923/vecscope/blob/main/docs/ko/README.md)
@@ -282,9 +284,14 @@ and these queries, and what they cost. The numbers are relative to this machine 
 process; confirm the chosen setting in the serving environment with its own latency,
 throughput and memory measurements before fixing it.
 
-With a GPU build of faiss (`pip install faiss-gpu-cu12` on Linux) the IVF index and the exact
+With a GPU build of faiss (`pip install "vecscope[index-gpu]"`, Meta's `faiss-gpu` for Linux x86_64
+with CUDA 12.6 or later) the IVF index and the exact
 baseline run on the GPU automatically; the output header names the device. HNSW has no GPU
 implementation in faiss and stays on the CPU. Force a device with `--device cpu|gpu`.
+`index` and `index-gpu` both install the `faiss` module, so install only one of them; `stores`
+includes `index`, so on a GPU machine pick the store extras one by one
+(`"vecscope[index-gpu,qdrant]"`). On an older driver, install the community builds
+`faiss-gpu-cu12` (CUDA 12.1) or `faiss-gpu-cu11` yourself instead of `index-gpu`.
 
 ## Compare two embeddings
 
@@ -556,9 +563,14 @@ rows rebuilt the cache in 87 s against a full audit's 87 s.
 `compare_embeddings` and `describe_findings`. Register it with any MCP client:
 
 ```bash
-pip install "vecscope[mcp]"
+pip install vecscope
 claude mcp add vecscope -- vecscope-mcp --allow-dir /data/embeddings     # Claude Code
+claude mcp add vecscope -- uvx vecscope mcp --allow-dir /data/embeddings # or without installing
 ```
+
+`vecscope mcp` and `vecscope-mcp` are the same server with the same options. It is listed in
+the [MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.076923/vecscope)
+as `io.github.076923/vecscope`.
 
 ```json
 { "mcpServers": { "vecscope": { "command": "vecscope-mcp", "args": ["--allow-dir", "/data/embeddings"] } } }
@@ -1148,7 +1160,7 @@ centering, standardizing or truncating vectors changes rankings.
 <details>
 <summary><strong>Does it send my vectors anywhere?</strong></summary>
 
-No. `vecscope` is NumPy only and runs entirely on your machine. It never loads a model or opens
+No. `vecscope` computes everything with NumPy on your machine. It never loads a model or opens
 a network connection.
 
 </details>
