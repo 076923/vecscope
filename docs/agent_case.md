@@ -1,18 +1,28 @@
-# Agent case: two ingestion faults found and fixed over MCP
+# Agent cases over MCP
 
 **English** · [한국어](ko/agent_case.md)
 
-This is a recorded run of Claude Code in headless mode using the vecscope MCP server: it
-diagnosed a corpus, changed it, and re-verified the change with a re-audit. The numbers
-below come from the tool responses of the run, not from the agent's summary.
+These are recorded runs of Claude Code in headless mode using the vecscope MCP server. In
+each case it diagnosed a problem, changed something, and re-verified the change with a
+re-audit. The numbers below come from the tool responses of the runs, not from the agent's
+summary.
 
-## The data
+- [Case 1](#case-1-two-ingestion-faults): two ingestion faults in the corpus
+- [Case 2](#case-2-an-ivf-index-searched-with-too-few-probes): an IVF index searched with
+  too few probes
 
-Real embeddings with two injected faults, built by
-[`examples/agent_case.py`](../examples/agent_case.py):
+Both cases are built by [`examples/agent_case.py`](../examples/agent_case.py) from SciFact
+(BEIR): 5,183 abstracts and 300 test queries with 339 relevance judgments, embedded with
+bge-small-en-v1.5 (384 dims, unit length, the query instruction on queries). Each run used
+Claude Code 2.1 with the model claude-opus-5-5, and could call the vecscope tools and run
+Python, and nothing else.
 
-- SciFact (BEIR): 5,183 abstracts and 300 test queries with 339 relevance judgments,
-  embedded with bge-small-en-v1.5 (384 dims, unit length, the query instruction on queries).
+## Case 1: two ingestion faults
+
+### The data
+
+Real embeddings with two injected faults (`--case ingestion`):
+
 - Fault 1, a batch ingested twice: documents 1000 to 1599 appended again at the end, so the
   corpus has 5,783 rows.
 - Fault 2, a worker that skipped normalization: documents 2600 onward stored with a per-row
@@ -32,10 +42,10 @@ into corpus_fixed.npy (and recompute the production top-10 into prod_topk_fixed.
 same way), and show with a re-audit that the fix worked. Do not change the queries.
 ```
 
-## How it was run
+### How it was run
 
 ```bash
-python examples/agent_case.py --out run
+python examples/agent_case.py --case ingestion --out run
 cd run
 claude -p "$(cat PROMPT.txt)" \
   --mcp-config mcp.json --strict-mcp-config --setting-sources project \
@@ -43,11 +53,9 @@ claude -p "$(cat PROMPT.txt)" \
   --allowedTools "mcp__vecscope__audit_embeddings mcp__vecscope__describe_findings mcp__vecscope__compare_embeddings Bash(python:*) Bash(python3:*) Read Write"
 ```
 
-- `mcp.json` is written by hand and registers `vecscope-mcp --allow-dir <run directory>`.
-- The agent could call the vecscope tools and run Python, and nothing else.
-- Claude Code 2.1, model claude-opus-5-5.
+`mcp.json` is written by hand and registers `vecscope-mcp --allow-dir <run directory>`.
 
-## What the agent did (first run, 8 turns, 58 s)
+### What the agent did (first run, 8 turns, 58 s)
 
 1. **Looked at the files**: shapes and dtypes of the arrays, the head of `qrels.tsv`.
 2. **Audited** with `audit_embeddings(corpus.npy, queries_path, qrels_path, ranked_path,
@@ -85,7 +93,7 @@ The plan put deduplication first (`input_integrity`) and the metric second. The 
 applied both in one change, because its checks showed two independent faults, and the
 re-audit judged both.
 
-## Before and after
+### Before and after
 
 | | before | after |
 |---|---|---|
@@ -98,21 +106,90 @@ re-audit judged both.
 | production nDCG@10 / recall@10 / MRR@10 | 0.100 / 0.127 / 0.101 | 0.713 / 0.836 / 0.682 |
 | production `overlap_with_exact` | 0.093 | 1.0 |
 
-## Second run (11 turns, 75 s)
+### Second run (11 turns, 75 s)
 
 The same prompt on a fresh copy of the data found the same two faults and made the same
 change, with the same re-audit numbers. It took more turns because it wrote its checks to a
 script first. It also confirmed with faiss `IndexFlatIP` that it could reproduce
 `prod_topk.npy` before recomputing it.
 
-## What this shows and what it does not
+## Case 2: an IVF index searched with too few probes
+
+### The data
+
+The embeddings are clean this time (`--case index`). `prod_topk.npy` is the top-10 of a faiss
+`IndexIVFFlat` (inner product, nlist=128) searched with nprobe=1, so each query looks in one
+of 128 lists. The agent got the same four files and this prompt:
+
+```text
+Since we moved our SciFact search to a faiss IVF index (IndexIVFFlat, inner
+product, nlist=128, nprobe=1), answers got worse. The corpus embeddings are corpus.npy, query
+embeddings queries.npy, relevance labels qrels.tsv (query row, corpus row, grade; rows are
+positions in those files) and the production index's top-10 per query prod_topk.npy. Use the
+vecscope MCP tools to find whether the embeddings or the index are at fault, choose index
+settings (we would like to keep an IVF index, latency matters), recompute the production
+top-10 with them into prod_topk_fixed.npy, and show with a re-audit that the fix worked. Do
+not change corpus.npy or queries.npy.
+```
+
+It was run like case 1, with `sweep_index` added to `--allowedTools` and a faiss GPU build
+on an NVIDIA L4 available to the server.
+
+### What the agents did (two runs, 7 turns each, 37 s and 41 s)
+
+1. **Audited** with the queries, qrels and production top-10:
+
+   ```text
+   verdict=ok n=5183 dim=384 k=10; all findings ok; retrieval nDCG@10=0.713 exact, 0.422 ranked
+   ```
+
+   Every embedding finding was `ok` while the production ranking lost 0.29 nDCG and shared
+   41.6% of its top-10 with exact search. Both agents concluded the index was at fault.
+2. **Swept** the index with `sweep_index` on the real queries. Run 1 forced the CPU and got
+   HNSW as the fastest setting at the target. Run 2 left the device on `auto`, so IVF ran on
+   the GPU, and got:
+
+   ```text
+   recommend ivf (nlist=132, nprobe=32): recall@10=0.969 (margin +0.019, tight), ... The
+   fastest setting with margin >= 0.02 is ivf (nlist=132, nprobe=64) at recall 0.992
+   ```
+
+3. **Re-measured at nlist=128.** The sweep chose nlist from the row count (132), not the
+   production 128. Both agents rebuilt the production index, confirmed it reproduced
+   `prod_topk.npy` (overlap 0.416), and measured nprobe on it in Python.
+4. **Chose nprobe and recomputed the top-10.** Run 1 took nprobe=32, the cheapest setting
+   with room over 0.95 recall. Run 2 took nprobe=64, the sweep's `safer_alternative`, because
+   the recommendation was marked tight.
+5. **Re-audited** with `baseline` set to the first `audit_id`.
+
+### Before and after
+
+| production top-10 | before | run 1 (nprobe=32) | run 2 (nprobe=64) | exact search |
+|---|---|---|---|---|
+| nDCG@10 | 0.422 | 0.700 | 0.711 | 0.713 |
+| recall@10 | 0.470 | 0.820 | 0.833 | 0.836 |
+| MRR@10 | 0.417 | 0.671 | 0.681 | 0.682 |
+| `overlap_with_exact` | 0.416 | 0.969 | 0.992 | |
+
+Every embedding finding stayed `ok` and the baseline diff listed no regressions.
+
+### What it changed in vecscope
+
+Both runs spent a step re-measuring by hand because the sweep could not be told the
+production nlist. `vecscope sweep --nlist` and `sweep_index(nlist=...)` now sweep nprobe on
+the lists the production index has.
+
+## What these show and what they do not
 
 - The tools, the plan and the `baseline` re-audit were enough for an agent to go from a
-  symptom ("same paper twice, worse queries") to a verified fix without being told the
+  symptom ("same paper twice", "answers got worse") to a verified fix without being told the
   cause.
-- The agent verified each finding in the data before changing anything, and kept the qrels
-  valid without being asked.
-- This is one model on one task with two runs, on faults that vecscope's findings are
+- In both cases the agent checked the findings in the data or against the index before
+  changing anything. In case 1 it kept the qrels valid without being asked; in case 2 it
+  confirmed its rebuilt index reproduced production before tuning it.
+- In case 2 the clean audit and the retrieval block together placed the loss in the index:
+  exact search on the same embeddings already scored 0.713.
+- This is one model on two tasks with two runs each, on problems vecscope's findings are
   designed to catch. It does not show that every agent follows the plan, or how the
   findings do on faults they do not measure (a missing query prefix, for example; see
   [verification](verification.md)).

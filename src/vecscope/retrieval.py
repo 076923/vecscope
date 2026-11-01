@@ -5,7 +5,9 @@ With relevance judgments (qrels) this module scores exact cosine search, and opt
 ranking a production index returned, so a change to the vectors or the index can be judged
 by the finding it was meant to fix *and* by retrieval quality:
 
-- ndcg_at_k, recall_at_k, mrr_at_k, hit_rate_at_k over the judged queries
+- ndcg_at_k, recall_at_k, mrr_at_k, hit_rate_at_k over the judged queries, those with at
+  least one relevant (grade > 0) judgment; the others are counted in unscored_queries, since
+  nDCG and recall are undefined without a relevant document
 - duplicate_result_share: share of top-k slots taken by a near-duplicate of a higher-ranked
   result, over every query (what deduplication should lower)
 - for a supplied ranking, overlap_with_exact: share of its top-k that exact search also
@@ -194,12 +196,15 @@ def evaluate_retrieval(
             if d >= n:
                 raise ValueError(f"qrels names corpus row {d} but the corpus has {n} rows")
     judged = sorted(q for q, docs in qrels.items() if any(g > 0 for g in docs.values()))
+    if not judged:
+        raise ValueError("qrels has no relevant (grade > 0) judgment")
     c = normalize(corpus)
     exact, _ = query_knn(c, queries, k)
     out = {
         "k": k,
         "n_queries": int(m),
         "judged_queries": len(judged),
+        "unscored_queries": int(m) - len(judged),
         "qrels_fingerprint": qrels_fingerprint(qrels),
         "near_dup_cos": float(near_dup_cos),
         "exact": {**_scores(exact, qrels, k, judged),
@@ -229,6 +234,8 @@ def evaluate_retrieval(
         + ("" if out["ranked"] is None else
            f" The supplied ranking scores nDCG@{k} {out['ranked']['ndcg_at_k']:.4f} and shares "
            f"{out['ranked']['overlap_with_exact']:.1%} of its top-{k} with exact search.")
+        + ("" if m == len(judged) else
+           f" {m - len(judged)} of {m} queries have no relevant judgment and are not scored.")
         + " These are the numbers a change should move; compare them against a baseline "
           "with the same qrels_fingerprint.")
     return out

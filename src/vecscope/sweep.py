@@ -129,6 +129,7 @@ def sweep(
     timing_repeats: int = 3,
     margin: float = RECALL_MARGIN,
     latency_queries: int = LATENCY_QUERIES,
+    nlist: int | None = None,
 ) -> SweepResult:
     """Sweep HNSW and IVF settings. ``device`` is 'auto' (GPU when available), 'cpu' or 'gpu'.
 
@@ -136,7 +137,9 @@ def sweep(
     ``margin`` is the recall headroom over ``target_recall`` below which the recommendation
     is marked tight and a safer alternative is named. ``latency_queries`` queries are also
     searched one at a time per setting for ``latency_ms_p50/p95/p99`` (0 = skip), and every
-    point carries ``index_bytes``, the serialized size of its index.
+    point carries ``index_bytes``, the serialized size of its index. ``nlist`` fixes the IVF
+    list count, e.g. to the production index's, so nprobe is swept on the same lists; by
+    default it follows the row count (4*sqrt(n), at least 39 rows per list).
     """
     try:
         import faiss
@@ -157,6 +160,9 @@ def sweep(
     if isinstance(latency_queries, bool) or not isinstance(latency_queries, (int, np.integer)) \
             or latency_queries < 0:
         raise ValueError("latency_queries must be a non-negative integer (0 = skip)")
+    if nlist is not None and (isinstance(nlist, bool) or not isinstance(nlist, (int, np.integer))
+                              or nlist < 1):
+        raise ValueError(f"nlist must be a positive integer, got {nlist!r}")
     x = np.asarray(x)
     if x.dtype.kind not in "iufb":
         raise ValueError(f"embeddings must be real numbers, got dtype {x.dtype}")
@@ -253,7 +259,10 @@ def sweep(
                                       {"M": m, "ef_construction": efc, "ef_search": efs},
                                       build, nbytes, "cpu"))  # HNSW: CPU only
 
-    nlist = int(max(1, min(4 * np.sqrt(n), n // 39 or 1)))
+    fixed_nlist = nlist is not None
+    if fixed_nlist and nlist > n:
+        raise ValueError(f"nlist={nlist} is more lists than the {n} rows")
+    nlist = int(nlist) if fixed_nlist else int(max(1, min(4 * np.sqrt(n), n // 39 or 1)))
     quantizer = faiss.IndexFlatIP(d)
     index = to_device(faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT))
     t = time.perf_counter()
@@ -277,9 +286,10 @@ def sweep(
          f"recall is measured on {q.shape[0]} supplied queries") + "; real query traffic "
         "can differ, pass it as queries when available",
         ("HNSW recall at fixed parameters falls as the corpus grows, so a sweep on a sample is "
-         "optimistic for HNSW; IVF nlist is set from the row count (4*sqrt(n)), so its recall "
-         "at a given nprobe can move either way with size. Re-run at production size before "
-         "fixing parameters"),
+         "optimistic for HNSW; " + (f"IVF uses the supplied nlist={nlist}, and its recall at a "
+         "given nprobe falls as each list grows" if fixed_nlist else "IVF nlist is set from "
+         "the row count (4*sqrt(n)), so its recall at a given nprobe can move either way with "
+         "size") + ". Re-run at production size before fixing parameters"),
         (f"queries_per_second is the median of {timing_repeats} runs on this machine with one "
          "query batch; it ranks settings against each other and is not a serving throughput"),
         (f"latency_ms_p50/p95/p99 time {n_lat} queries one at a time in this process, with no "

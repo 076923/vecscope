@@ -4,6 +4,43 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-11-01
+
+### Changed
+
+- `.jsonl` embeddings are read line by line and converted in blocks of rows, and `.parquet`
+  reads only the vector column, in batches, straight from Arrow's buffers into one array.
+  On 50,000 x 384 vectors the peak memory falls from 1.52 to 0.34 GiB for `.jsonl` and from
+  1.42 to 0.39 GiB for `.parquet` (3.9 to 0.4 s). Parquet vectors keep their column's dtype.
+- `.csv`, `.tsv` and `.txt` files are parsed in chunks of lines instead of as one string
+  (1.18 to 0.18 GiB on 50,000 x 384).
+- JSON and Parquet errors name the offending line or row.
+- The MCP server parses files straight from the verified handle instead of reading them into
+  memory first: on a 500,000 x 384 `.npy` file the peak falls from 1.51 to 0.79 GiB (the
+  CLI's) and the read from 3.3 to 0.3 s; `.parquet` from 2.42 to 1.71 GiB, `.jsonl` from
+  0.75 to 0.38 GiB on 50,000 x 384.
+
+### Added
+
+- MCP `--max-concurrent` (default 1, `VECSCOPE_MAX_CONCURRENT`): the SDK runs tool calls in
+  threads, so audits, sweeps and compares now wait for a slot instead of holding several
+  corpora in memory at once.
+- MCP caps on settings that multiply a call's cost (`k`, `clusters`, `sample_repeats`,
+  `timing_repeats`, `n_queries`, `latency_queries`); the CLI has none.
+- MCP call log: one stderr line per audit, sweep and compare with the files or stores read
+  (credentials redacted), the verdict or error, and the time taken.
+- `vecscope sweep --nlist` / MCP `sweep_index(nlist=)`: sweep nprobe on the production
+  index's list count instead of the row-count default. Both agents in the index case had to
+  re-measure by hand because the sweep used nlist=132 where production had 128.
+- `examples/agent_case.py --case index`: the data of a second agent case, an IVF index
+  searched with too few probes.
+- `retrieval.unscored_queries`: queries with no relevant judgment, which the scores already
+  left out, are now counted and named in the explanation and the CLI line.
+- `evaluate_retrieval` called directly with qrels holding no relevant judgment raises instead
+  of averaging nothing.
+- The README says what `--ranked` measures when filters, hybrid search or a reranker sit in
+  the pipeline, and how much memory each file format takes to load.
+
 ## [0.9.0] - 2026-10-31
 
 ### Changed

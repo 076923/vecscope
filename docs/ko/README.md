@@ -265,10 +265,12 @@ vecscope sweep embeddings.npy -k 10 --target-recall 0.95
   백분위수를 구합니다.
 - `index_bytes`는 직렬화한 인덱스 크기라서 속도뿐 아니라 메모리 기준으로도 조합을 고를 수
   있습니다.
+- IVF의 nlist는 `--nlist`로 정하지 않으면 행 수를 따릅니다(4*sqrt(n)). 기존 인덱스의 nprobe를
+  조정하려면 그 인덱스의 nlist를 넘기십시오.
 
 끝의 note 줄은 JSON에 `caveats`로 들어갑니다. MCP 도구 이름은 `sweep_index`이며 같은
-옵션(`n_queries`, `target_recall`, `device`, `margin`, `timing_repeats`, `latency_queries`)을
-매개변수로 받습니다.
+옵션(`n_queries`, `target_recall`, `device`, `margin`, `timing_repeats`, `latency_queries`,
+`nlist`)을 매개변수로 받습니다.
 
 스윕이 답하는 질문은 하나입니다. 이 코퍼스와 이 질의에서 어떤 파라미터가 목표 재현율을
 만족하고, 그 비용이 얼마인가입니다. 수치는 측정한 장비와 프로세스 안에서의 상대값이므로,
@@ -348,6 +350,15 @@ vecscope compare clip.npy lens.npy -k 10 --neighbors-a clip_knn.npy --neighbors-
 `--ranked`를 주면 운영 인덱스가 돌려준 top-k도 정확한 검색 옆에서 함께 채점하고
 `overlap_with_exact`를 붙입니다.
 
+`--ranked`에는 질의를 처리하는 단계가 무엇이든 그 최종 top-k를 넣으면 됩니다. ANN 인덱스,
+필터를 건 저장소 질의, 하이브리드 검색, 재정렬기 모두 됩니다. 정확한 검색 기준선은 필터,
+키워드 점수, 재정렬 없이 모든 행에 대한 코사인입니다.
+
+- 파이프라인에 이런 단계가 있으면 `overlap_with_exact`는 ANN 재현율만이 아니라 파이프라인이
+  벡터 검색에서 얼마나 벗어났는지를 잽니다.
+- vecscope는 단계별로 따로 채점하지 않습니다. 품질을 잃는 단계를 찾으려면 각 단계의 출력을
+  차례로 `--ranked`에 넣으세요.
+
 ```bash
 vecscope audit corpus.npy --queries queries.npy --qrels qrels.tsv
 vecscope audit corpus.npy --queries queries.npy --qrels qrels.tsv --ranked prod_topk.npy
@@ -361,6 +372,10 @@ vecscope audit corpus.npy --queries queries.npy --qrels qrels.tsv --ranked prod_
 
 BEIR의 `query-id`/`corpus-id`/`score` 이름도 읽습니다. 행 번호는 질의 파일과 코퍼스
 파일에서의 위치입니다.
+
+관련 문서가 없으면 nDCG와 recall이 정의되지 않으므로, 점수는 관련(등급 > 0) 판정이 하나
+이상 있는 질의만으로 평균합니다. 관련 판정이 없거나 판정 자체가 없는 질의는
+`unscored_queries`로 세고 설명에 적습니다.
 
 `--baseline`과 함께 쓰면 비교 결과에 진단 항목 변화와 나란히 `retrieval_changes`가
 붙습니다. 그래서 어떤 변경을, 고치려던 진단 항목과 검색 품질 양쪽으로 판단할 수 있습니다.
@@ -520,7 +535,8 @@ vecscope audit day3.npy --sample 0 --knn-cache knn.npz    # updated: 바뀐 행�
 10만 행 중 1,000행을 제자리에서 다시 임베딩하면 10,625행을 다시 계산했습니다. 캐시 갱신에
 15초, 캐시로 감사하는 데 5초가 걸려 전체 감사(95초)보다 빨랐고 판정도 같았습니다. 1만 행을
 바꾸면 갱신이 68,933행을 다시 계산해 83초가 걸려 전체 감사(89초)와 비슷하므로, 이때는 캐시를
-새로 만듭니다.
+새로 만듭니다. 이 기준으로 다시 돌리자 1만 행 변경에서 캐시를 새로 만들었고, 87초로 전체 감사(87초)와
+같았습니다.
 
 ## 에이전트와 함께 사용
 
@@ -601,6 +617,25 @@ args = ["--allow-dir", "/data/embeddings"]
 - `--max-read-mb`(기본값 4096, `VECSCOPE_MAX_READ_MB`, 0이면 제한 없음)보다 큰 파일은 읽기 전에
   거부합니다.
 - 저장소도 벡터가 같은 크기를 넘으면 읽기를 멈춥니다.
+- 파일은 확인한 핸들에서 바로 파싱하고, 먼저 메모리에 통째로 복사하지 않습니다. 500,000 x 384
+  `.npy` 파일(0.72 GiB)을 MCP로 읽을 때 최대 메모리는 CLI와 같은 0.79 GiB입니다.
+
+병렬 호출과 비용이 큰 설정에도 한도가 있습니다.
+
+- 서버는 도구 호출마다 스레드를 따로 씁니다. 감사, 스윕, 비교는 `--max-concurrent` 슬롯(기본값 1,
+  `VECSCOPE_MAX_CONCURRENT`) 하나를 차지하고, 나머지 호출은 기다립니다. 에이전트가 감사를 세 번
+  동시에 호출해도 메모리에는 코퍼스 하나만 올라갑니다.
+- 호출의 비용을 몇 배로 키우는 설정은 호출마다 상한이 있습니다. `k`와 `clusters`는 1,000,
+  `sample_repeats`와 `timing_repeats`는 10, `n_queries`는 100,000, `latency_queries`는 10,000입니다.
+  CLI에는 상한이 없습니다.
+
+감사, 스윕, 비교는 호출마다 서버의 stderr에 한 줄을 남기고, MCP 클라이언트는 이를 로그에
+보관합니다. 도구 이름, 읽은 파일이나 저장소(인증정보는 가림), 판정이나 오류, 슬롯 대기를 포함한
+걸린 시간이 들어갑니다.
+
+```text
+vecscope-mcp: audit_embeddings path=/data/run/corpus.npy qrels_path=/data/run/qrels.tsv: fail in 2.1 s
+```
 
 `baseline`이 가리키는 최근 감사 기록은 락으로 보호합니다. stdio 서버는 자신을 시작한 클라이언트
 하나만 상대하므로, 에이전트를 여럿 병렬로 돌리면 각자 서버를 띄웁니다.
@@ -615,10 +650,15 @@ Claude Code는 공통 오프셋이 있는 코퍼스를 감사한 뒤 계획대�
 감사했으며, 요청받지 않은 나머지 단계는 건드리지 않고 멈췄습니다. Cursor와 Codex는 같은
 프로토콜을 쓰지만 직접 돌려 보지는 않았습니다.
 
-[docs/ko/agent_case.md](agent_case.md)에는 실제 SciFact 임베딩에 적재 결함 두 가지(한 배치를 두
-번 적재, 정규화를 빠뜨린 작업자)를 넣은 실행 기록이 있습니다. 에이전트는 증상만 듣고 두 결함을
-찾아 코퍼스를 고쳤고, 첫 `audit_id`를 기준으로 다시 감사했습니다. 운영 nDCG@10은 0.100에서
-0.713이 됐습니다.
+[docs/ko/agent_case.md](agent_case.md)에는 실제 SciFact 임베딩으로 만든 사례 두 개를 각각 두 번
+실행한 기록이 있습니다.
+
+- **적재 결함 두 가지**: 한 배치를 두 번 적재했고, 정규화를 빠뜨린 작업자가 있었습니다.
+  에이전트는 증상만 듣고 두 결함을 찾아 코퍼스를 고쳤고, 첫 `audit_id`를 기준으로 다시
+  감사했습니다. 운영 nDCG@10은 0.100에서 0.713이 됐습니다.
+- **nprobe=1로 검색하는 IVF 인덱스**: 감사 결과 임베딩은 건강했고, 운영 랭킹은 정확한 검색보다
+  nDCG가 0.29 낮았습니다. 에이전트는 인덱스를 스윕해 nprobe를 골랐고, 운영 nDCG@10은 0.422에서
+  0.700과 0.711이 됐습니다.
 
 ### 서버가 연결되지 않을 때
 
@@ -766,6 +806,7 @@ vecscope sweep vectors.npy --device gpu                # IVF를 GPU에서 실행
 vecscope sweep vectors.npy --margin 0.05               # 이 여유 미만이면 추천을 tight로 표시 (기본값 0.02)
 vecscope sweep vectors.npy --n-queries 2000 --timing-repeats 5   # 시간을 잴 질의 수(기본값 1000), 설정별 측정 횟수(기본값 3)
 vecscope sweep vectors.npy --latency-queries 0         # 단일 질의 지연 백분위수 생략 (기본값 200개 질의)
+vecscope sweep vectors.npy --nlist 128                 # 운영 인덱스의 목록 수에서 nprobe 스윕
 vecscope compare a.npy b.npy -k 10                     # 같은 행을 가진 두 임베딩의 이웃 일치도
 vecscope compare a.npy b.npy --neighbors-a a_knn.npy --neighbors-b b_knn.npy   # 행은 표본, 이웃은 전체 코퍼스
 vecscope calibrate fit_*.json --min-quality 0.45 --out th.json   # 자신의 파이프라인 상태들로 게이트 임곗값 산출
@@ -796,6 +837,19 @@ embeddings[0]                           # 첫 번째 항목의 벡터
 | `.jsonl` | 한 줄에 JSON 객체 하나. 첫 번째 리스트 필드를 벡터로 사용 | `{"id": 7, "text": "...", "embedding": [0.1, -0.3, ...]}` |
 | `.json` | 위와 같은 객체의 배열, 또는 리스트의 배열 | `[[0.1, -0.3, ...], [0.2, 0.5, ...]]` |
 | `.csv`, `.tsv`, `.txt` | 한 줄에 벡터 하나, 숫자만 포함. 헤더나 id 컬럼 없음 | `0.1,-0.3,0.8,...` |
+
+형식별로 읽을 때 드는 메모리입니다. float32 벡터 50,000개 x 384차원(행렬 73 MiB)에서 쟀습니다.
+
+| 형식 | 읽는 방식 | 최대 메모리 |
+| --- | --- | --- |
+| `.npy` | 저장된 그대로 | 0.10 GiB |
+| `.csv` | 여러 줄씩 끊어서 | 0.18 GiB |
+| `.jsonl` | 한 줄씩 읽어 행 블록 단위로 변환 | 0.34 GiB |
+| `.parquet` | 벡터 열만 배치 단위로 읽어 배열 하나에 채움 | 0.39 GiB |
+| `.json` | 파일 전체를 한 번에 파싱 | 1.13 GiB |
+
+큰 코퍼스에는 `.npy`, `.csv`, `.parquet`를 쓰세요. `.json`은 전체를 한 번에 파싱하므로 행렬
+크기의 몇 배가 듭니다.
 
 선택 입력은 다음과 같습니다.
 
@@ -1131,7 +1185,7 @@ vecscope audit vectors.npy --thresholds th.json
 - [에이전트 스킬](../../.agents/skills/vecscope/SKILL.md): 감사를 실행할 시점과 판정별 조치
 - [검색 품질 연구](retrieval_quality.md): 라벨 데이터의 nDCG@10과 모든 진단 항목을 대조한 결과
 - [검증 결과](verification.md): 정확성, recall 채점, 표본 감사, 질의 항목, 개입 실험, 에이전트 연동, 라벨 데이터세트 9개에서 모델 19종을 측정한 결과
-- [에이전트 사례](agent_case.md): 에이전트가 MCP로 적재 결함 두 가지를 찾고 고친 과정, 도구 호출과 숫자
+- [에이전트 사례](agent_case.md): 에이전트가 MCP로 적재 결함 두 가지와 잘못 조정된 IVF 인덱스를 찾고 고친 과정, 도구 호출과 숫자
 - [예제](../../examples/): 합성 행렬 생성 스크립트, 보정 스크립트, 검색 품질 연구 스크립트
 - [변경 이력](../../CHANGELOG.md)
 

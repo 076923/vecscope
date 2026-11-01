@@ -20,12 +20,20 @@ with a per-request timeout (``timeout=`` in the URI, default 60 s).
 
 A file larger than ``--max-read-mb`` (default 4096, ``VECSCOPE_MAX_READ_MB``, 0 = no limit)
 is refused before it is read, and a store stops being read once its vectors pass that size,
-so one request cannot exhaust the server's memory. The recent-audit memory that ``baseline``
-refers to is guarded by a lock.
+so one request cannot exhaust the server's memory. Files are parsed straight from the
+verified handle, never copied into memory first.
+
+The SDK runs every tool call in its own thread. Audits, sweeps and compares take one of
+``--max-concurrent`` slots (default 1, ``VECSCOPE_MAX_CONCURRENT``) and further calls wait,
+so parallel calls on large files do not multiply the memory. Settings that multiply a call's
+cost are capped (``LIMITS``), and each heavy call logs one line to stderr: the tool, what it
+read (credentials redacted), how long it took and how it ended. The recent-audit memory that
+``baseline`` refers to is guarded by a lock.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import inspect
 import json
@@ -33,6 +41,7 @@ import os
 import stat
 import sys
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 
@@ -58,6 +67,12 @@ ALLOW_NETWORK_ENV = "VECSCOPE_ALLOW_NETWORK"
 ALLOW_ANY_ENV = "VECSCOPE_ALLOW_ANY"
 MAX_READ_ENV = "VECSCOPE_MAX_READ_MB"
 DEFAULT_MAX_READ_MB = 4096
+MAX_CONCURRENT_ENV = "VECSCOPE_MAX_CONCURRENT"
+# the most a call may ask for of a setting that multiplies its cost; the CLI has no caps
+LIMITS = {"k": 1000, "clusters": 1000, "sample_repeats": 10, "timing_repeats": 10,
+          "n_queries": 100_000, "latency_queries": 10_000}
+_SLOTS: threading.BoundedSemaphore | None = None
+_SLOTS_LOCK = threading.Lock()
 # recent audits of this server process by audit_id, so a re-audit can name its baseline
 # without the agent writing the earlier response to a file; held in memory only
 _RECENT: OrderedDict[str, dict] = OrderedDict()
@@ -93,6 +108,59 @@ def _load_baseline(ref: str) -> dict:
     return base
 
 
+def max_concurrent() -> int:
+    """How many audits, sweeps and compares run at once (VECSCOPE_MAX_CONCURRENT, default 1)."""
+    raw = os.environ.get(MAX_CONCURRENT_ENV, "").strip() or "1"
+    if not raw.isdigit() or int(raw) < 1:
+        raise ValueError(f"{MAX_CONCURRENT_ENV}={raw!r} is not a positive integer")
+    return int(raw)
+
+
+def _slots() -> threading.BoundedSemaphore:
+    """The SDK runs each tool call in its own thread, so without this two calls on large
+    files would hold both in memory; a call beyond the limit waits for a free slot."""
+    global _SLOTS
+    with _SLOTS_LOCK:
+        if _SLOTS is None:
+            _SLOTS = threading.BoundedSemaphore(max_concurrent())
+        return _SLOTS
+
+
+def _check_limits(**values) -> None:
+    for name, value in values.items():
+        if value is not None and value > LIMITS[name]:
+            raise ValueError(f"{name}={value} is above the {LIMITS[name]} this server allows "
+                             "per call; run the vecscope CLI for larger settings")
+
+
+def _shown(value: str) -> str:
+    from vecscope.adapters import _redact
+
+    return _redact(value) if "://" in value else value
+
+
+@contextlib.contextmanager
+def _call(tool: str, **paths):
+    """Run one heavy tool call in a concurrency slot and log it to stderr: the tool, the
+    files or stores it read (credentials redacted), how long it took and how it ended."""
+    t = time.perf_counter()
+    named = " ".join(f"{k}={_shown(v)}" for k, v in paths.items() if v)
+    result = {"outcome": "ok"}
+    waited = 0.0
+    try:
+        with _slots():
+            waited = time.perf_counter() - t
+            yield result
+    except Exception as e:
+        kind = str(e).split(":", 1)[0] if isinstance(e, ToolError) else type(e).__name__
+        result["outcome"] = f"error {kind}"
+        raise
+    finally:
+        wait = f", waited {waited:.1f} s for a slot" if waited >= 0.1 else ""
+        print(f"vecscope-mcp: {tool} {named}: {result['outcome']} in "
+              f"{time.perf_counter() - t:.1f} s{wait}", file=sys.stderr, flush=True)
+
+
 def _user_error(e: Exception) -> ToolError:
     """Return a ToolError whose message reaches the agent (plain exceptions are masked)."""
     return ToolError(f"{type(e).__name__}: {e}")
@@ -121,14 +189,16 @@ def max_read_bytes() -> int | None:
     return None if mb <= 0 else int(mb * 2**20)
 
 
-def read_checked(path: str, what: str = "path") -> bytes:
-    """The content of ``path`` read through one handle that is verified to be a regular file
-    inside the allowed directories.
+@contextlib.contextmanager
+def open_checked(path: str, what: str = "path"):
+    """A binary handle on ``path`` that is verified to be a regular file inside the allowed
+    directories; the caller parses straight from it, so the file is never held twice.
 
     The path is checked, then opened, then the open handle is compared (device and inode)
     with the file the path resolves to now. A symlink swapped between the check and the open
-    (time-of-check to time-of-use) makes the two differ and the read is refused, so the bytes
-    returned always come from a file inside the allowed directories."""
+    (time-of-check to time-of-use) makes the two differ and the read is refused, so what is
+    parsed always comes from a file inside the allowed directories. A file that grows past
+    the read limit while it is parsed is refused afterwards."""
     check_path(path, what)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
@@ -154,13 +224,24 @@ def read_checked(path: str, what: str = "path") -> bytes:
                                       "refusing to read it")
         with os.fdopen(fd, "rb") as fh:
             fd = None
-            data = fh.read() if limit is None else fh.read(limit + 1)
-        if limit is not None and len(data) > limit:  # grew after the size check
-            raise ValueError(f"{what} {path!r} grew past {limit / 2**20:.0f} MiB while being read")
-        return data
+            yield fh
+            if limit is not None and os.fstat(fh.fileno()).st_size > limit:
+                raise ValueError(f"{what} {path!r} grew past {limit / 2**20:.0f} MiB while "
+                                 "being read")
     finally:
         if fd is not None:
             os.close(fd)
+
+
+def read_checked(path: str, what: str = "path") -> bytes:
+    """The content of ``path``, read through ``open_checked`` (for the small files: JSON,
+    qrels, and faiss indexes, which faiss deserializes from memory)."""
+    limit = max_read_bytes()
+    with open_checked(path, what) as fh:
+        data = fh.read() if limit is None else fh.read(limit + 1)
+    if limit is not None and len(data) > limit:  # grew after the size check
+        raise ValueError(f"{what} {path!r} grew past {limit / 2**20:.0f} MiB while being read")
+    return data
 
 
 def _json_file(path: str, what: str) -> dict:
@@ -171,11 +252,15 @@ def _json_file(path: str, what: str) -> dict:
 
 
 def _vectors(path: str, what: str = "path"):
-    return load_vectors(path, read_checked(path, what))
+    with open_checked(path, what) as fh:
+        return load_vectors(path, fh)
 
 
 def _neighbors(path: str | None, what: str):
-    return load_neighbors(path, read_checked(path, what)) if path else None
+    if not path:
+        return None
+    with open_checked(path, what) as fh:
+        return load_neighbors(path, fh)
 
 
 def _open_source(path: str):
@@ -376,63 +461,68 @@ def audit_embeddings(
     verify_by. Treat actions as hypotheses: apply the smallest change, re-audit, and compare
     retrieval on real queries before adopting.
     """
-    try:
-        from vecscope.adapters import annotate, is_source
-        from vecscope.retrieval import load_qrels
+    with _call("audit_embeddings", path=path, ann_path=ann_path, queries_path=queries_path,
+               qrels_path=qrels_path, ranked_path=ranked_path, baseline=baseline,
+               query_baseline_path=query_baseline_path) as call:
+        try:
+            _check_limits(k=k, clusters=clusters, sample_repeats=sample_repeats)
+            from vecscope.adapters import annotate, is_source
+            from vecscope.retrieval import load_qrels
 
-        src = _open_source(path) if is_source(path) else None
-        x = src.vectors if src is not None else _vectors(path)
-        if ann_from_source and src is None:
-            raise ValueError("ann_from_source needs a faiss index or store as path")
-        ann = _neighbors(ann_path, "ann_path")
-        if ann_from_source:
-            ann = src.neighbors(k)
-        if src is not None:
-            src.close()
-        qrels = (load_qrels(qrels_path, read_checked(qrels_path, "qrels_path"))
-                 if qrels_path else None)
-        ranked = _neighbors(ranked_path, "ranked_path")
-        q = _vectors(queries_path, "queries_path") if queries_path else None
-        if tolerances is not None and baseline is None:
-            raise ValueError("tolerances need baseline")
-        base = _load_baseline(baseline) if baseline else None
-        qbase, note = None, None
-        if query_baseline_path:
-            qbase = _json_file(query_baseline_path, "query_baseline_path")
-        elif q is not None and base is not None and any(
-                f.get("name") == "query_gap" for f in base["findings"]):
-            if same_corpus(base, x):
-                qbase = base
-            else:
-                note = ("query_shift skipped: the baseline was audited on a different corpus "
-                        "(rows changed or transformed), so its query distances are not a "
-                        "reference here")
-        ev = audit(
-            x, k=k, ann_neighbors=ann, near_dup_cos=near_dup_cos, sample=sample or None,
-            queries=q, clusters=clusters, thresholds=thresholds, sample_repeats=sample_repeats,
-            query_baseline=qbase, qrels=qrels, ranked=ranked,
-        )
-        if src is not None:
-            annotate(ev, src)
-        ev = ev.to_dict()
-        audit_id = _audit_id(ev)
-        _remember(audit_id, ev)
-        if base is not None:
-            ev["baseline_diff"] = diff_evidence(ev, base, tolerances=tolerances)
-        if note:
-            ev["query_reference_note"] = note
-    except _USER_ERRORS as e:
-        raise _user_error(e) from e
-    summary = _summary(ev)
-    if not verbose:
-        ev = {**ev, "findings": [dict(f) for f in ev["findings"]]}
-        ev.pop("thresholds", None)
-        for f in ev["findings"]:
-            if f["verdict"] == "ok":
-                f["details"] = {}
-                f["likely_causes"], f["suggested_action"], f["verify_by"] = [], "", ""
-                f["explanation"] = ""
-    return {"summary": summary, "verdict": ev["verdict"], "audit_id": audit_id, **ev}
+            src = _open_source(path) if is_source(path) else None
+            x = src.vectors if src is not None else _vectors(path)
+            if ann_from_source and src is None:
+                raise ValueError("ann_from_source needs a faiss index or store as path")
+            ann = _neighbors(ann_path, "ann_path")
+            if ann_from_source:
+                ann = src.neighbors(k)
+            if src is not None:
+                src.close()
+            qrels = (load_qrels(qrels_path, read_checked(qrels_path, "qrels_path"))
+                     if qrels_path else None)
+            ranked = _neighbors(ranked_path, "ranked_path")
+            q = _vectors(queries_path, "queries_path") if queries_path else None
+            if tolerances is not None and baseline is None:
+                raise ValueError("tolerances need baseline")
+            base = _load_baseline(baseline) if baseline else None
+            qbase, note = None, None
+            if query_baseline_path:
+                qbase = _json_file(query_baseline_path, "query_baseline_path")
+            elif q is not None and base is not None and any(
+                    f.get("name") == "query_gap" for f in base["findings"]):
+                if same_corpus(base, x):
+                    qbase = base
+                else:
+                    note = ("query_shift skipped: the baseline was audited on a different corpus "
+                            "(rows changed or transformed), so its query distances are not a "
+                            "reference here")
+            ev = audit(
+                x, k=k, ann_neighbors=ann, near_dup_cos=near_dup_cos, sample=sample or None,
+                queries=q, clusters=clusters, thresholds=thresholds, sample_repeats=sample_repeats,
+                query_baseline=qbase, qrels=qrels, ranked=ranked,
+            )
+            if src is not None:
+                annotate(ev, src)
+            ev = ev.to_dict()
+            audit_id = _audit_id(ev)
+            _remember(audit_id, ev)
+            if base is not None:
+                ev["baseline_diff"] = diff_evidence(ev, base, tolerances=tolerances)
+            if note:
+                ev["query_reference_note"] = note
+        except _USER_ERRORS as e:
+            raise _user_error(e) from e
+        summary = _summary(ev)
+        call["outcome"] = ev["verdict"]
+        if not verbose:
+            ev = {**ev, "findings": [dict(f) for f in ev["findings"]]}
+            ev.pop("thresholds", None)
+            for f in ev["findings"]:
+                if f["verdict"] == "ok":
+                    f["details"] = {}
+                    f["likely_causes"], f["suggested_action"], f["verify_by"] = [], "", ""
+                    f["explanation"] = ""
+        return {"summary": summary, "verdict": ev["verdict"], "audit_id": audit_id, **ev}
 
 
 @mcp.tool(**_TOOL_KW)
@@ -446,6 +536,7 @@ def sweep_index(
     timing_repeats: int = 3,
     n_queries: int = 1000,
     latency_queries: int = 200,
+    nlist: int | None = None,
 ) -> dict:
     """Sweep HNSW (M, ef_search) and IVF (nprobe) parameters on an embedding file and report
     recall@k against exact k-NN, build time, queries per second, single-query latency
@@ -460,18 +551,23 @@ def sweep_index(
     `n_queries` caps the queries timed (sampled from the corpus, or from `queries_path`);
     pass real query traffic as `queries_path` whenever it exists, because the best setting
     on corpus-drawn queries can differ. `latency_queries` are searched one at a time per
-    setting for the percentiles (0 = skip).
+    setting for the percentiles (0 = skip). `nlist` fixes the IVF list count; pass the
+    production index's nlist when tuning its nprobe, since the default follows the row count
+    (4*sqrt(n)) and gives other lists.
     """
     from vecscope.sweep import sweep
 
-    try:
-        x = _vectors(path)
-        q = _vectors(queries_path, "queries_path") if queries_path else None
-        res = sweep(x, k=k, queries=q, n_queries=n_queries, target_recall=target_recall,
-                    device=device, margin=margin, timing_repeats=timing_repeats,
-                    latency_queries=latency_queries).to_dict()
-    except (*_USER_ERRORS, RuntimeError) as e:
-        raise _user_error(e) from e
+    with _call("sweep_index", path=path, queries_path=queries_path):
+        try:
+            _check_limits(k=k, timing_repeats=timing_repeats, n_queries=n_queries,
+                          latency_queries=latency_queries)
+            x = _vectors(path)
+            q = _vectors(queries_path, "queries_path") if queries_path else None
+            res = sweep(x, k=k, queries=q, n_queries=n_queries, target_recall=target_recall,
+                        device=device, margin=margin, timing_repeats=timing_repeats,
+                        latency_queries=latency_queries, nlist=nlist).to_dict()
+        except (*_USER_ERRORS, RuntimeError) as e:
+            raise _user_error(e) from e
     r = res["recommendation"]
     params = ", ".join(f"{a}={b}" for a, b in r["params"].items())
     lat = (f", p95 {r['latency_ms_p95']:.3f} ms single-query"
@@ -512,17 +608,20 @@ def compare_embeddings(
     """
     from vecscope.compare import compare
 
-    try:
-        if (neighbors_a_path is None) != (neighbors_b_path is None):
-            raise ValueError("neighbors_a_path and neighbors_b_path go together")
-        na = _neighbors(neighbors_a_path, "neighbors_a_path")
-        nb = _neighbors(neighbors_b_path, "neighbors_b_path")
-        res = compare(_vectors(path_a, "path_a"),
-                      _vectors(path_b, "path_b"), k=k, near_dup_cos=near_dup_cos,
-                      sample=sample or None, neighbors_a=na, neighbors_b=nb).to_dict()
-    except _USER_ERRORS as e:
-        raise _user_error(e) from e
-    return {"summary": res["explanation"], **res}
+    with _call("compare_embeddings", path_a=path_a, path_b=path_b,
+               neighbors_a_path=neighbors_a_path, neighbors_b_path=neighbors_b_path):
+        try:
+            _check_limits(k=k)
+            if (neighbors_a_path is None) != (neighbors_b_path is None):
+                raise ValueError("neighbors_a_path and neighbors_b_path go together")
+            na = _neighbors(neighbors_a_path, "neighbors_a_path")
+            nb = _neighbors(neighbors_b_path, "neighbors_b_path")
+            res = compare(_vectors(path_a, "path_a"),
+                          _vectors(path_b, "path_b"), k=k, near_dup_cos=near_dup_cos,
+                          sample=sample or None, neighbors_a=na, neighbors_b=nb).to_dict()
+        except _USER_ERRORS as e:
+            raise _user_error(e) from e
+        return {"summary": res["explanation"], **res}
 
 
 @mcp.tool(**_TOOL_KW)
@@ -565,7 +664,18 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--max-read-mb", type=float, default=None, metavar="MB",
                    help="refuse files larger than this and stop reading a store past it "
                         f"(default {DEFAULT_MAX_READ_MB}; 0 = no limit); same as {MAX_READ_ENV}")
+    p.add_argument("--max-concurrent", type=int, default=None, metavar="N",
+                   help="audits, sweeps and compares that run at once; further calls wait "
+                        f"(default 1); same as {MAX_CONCURRENT_ENV}")
     args = p.parse_args(argv)
+    if args.max_concurrent is not None:
+        if args.max_concurrent < 1:
+            p.error("--max-concurrent must be 1 or more")
+        os.environ[MAX_CONCURRENT_ENV] = str(args.max_concurrent)
+    try:
+        slots = max_concurrent()
+    except ValueError as e:
+        p.error(str(e))
     if args.max_read_mb is not None:
         if args.max_read_mb < 0:
             p.error("--max-read-mb must be 0 (no limit) or positive")
@@ -585,7 +695,8 @@ def main(argv: list[str] | None = None) -> None:
     limit = max_read_bytes()
     print(("vecscope-mcp: reading files under " + ", ".join(map(str, roots)) if roots else
            "vecscope-mcp: reading any file this process can read (--allow-any)")
-          + (f"; at most {limit / 2**20:.0f} MiB per file or store" if limit else "; no size limit"),
+          + (f"; at most {limit / 2**20:.0f} MiB per file or store" if limit else "; no size limit")
+          + f"; {slots} heavy call{'s' if slots > 1 else ''} at a time",
           file=sys.stderr)
     mcp.run()
 

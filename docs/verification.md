@@ -38,7 +38,7 @@ The thresholds and the plan rules are set from these results.
 | `sample_repeats` | `value_range` is the spread between samples; it often does not contain the full-corpus value, so it is not an interval estimate |
 | thresholds | on the 18 pipelines that reproduce published nDCG@10 within 0.007, no `anisotropy`, `query_gap` or `query_hubness` verdict is worse than `ok`; all 11 English-only models on Korean data raise `hubness` or `query_hubness` |
 | README "Real embeddings" table | all 88 values and verdicts reproduced on the first 40k rows of each set |
-| incremental audit (`--knn-cache`) | on 100k x 768 with 5k or 20k appended rows, verdicts identical to a full audit and values within 7e-5 relative; 15 s and 47 s against 94 s and 123 s for the full audit. With 1,000 rows re-embedded in place, 10,625 rows recomputed, same verdicts, values within 4e-5, 19 s against 95 s; with 10,000 the update took 83 s against 89 s, which is why the cache rebuilds once more than half the rows would be recomputed |
+| incremental audit (`--knn-cache`) | on 100k x 768 with 5k or 20k appended rows, verdicts identical to a full audit and values within 7e-5 relative; 15 s and 47 s against 94 s and 123 s for the full audit. With 1,000 rows re-embedded in place, 10,625 rows recomputed, same verdicts, values within 4e-5, 19 s against 95 s; with 10,000 the update took 83 s against 89 s, which is why the cache rebuilds once more than half the rows would be recomputed; re-run with that rule, 10,000 changed rows rebuilt it in 87 s against 87 s |
 | sweep | recommendations identical across three seeds; IVF recall at a fixed nprobe can rise or fall with corpus size depending on how the data's clusters line up with nlist |
 
 ## Finding values against nDCG@10
@@ -242,6 +242,14 @@ What this supports:
     normalized.
   - Both re-audited with `baseline` and got `ok` on every finding. Production nDCG@10 went
     from 0.100 to 0.713, and exact search from 0.689 to 0.713.
+- A second case on the same data with clean embeddings and an IVF index (nlist=128) searched
+  with nprobe=1. Two runs, 7 turns each, 37 and 41 seconds.
+  - Both audited, found every finding `ok` and production nDCG@10 at 0.422 against 0.713 for
+    exact search, and put the fault on the index.
+  - Both swept the index, re-measured nprobe at the production nlist, and chose nprobe=32
+    and 64. Production nDCG@10 went to 0.700 and 0.711, with no finding regressed.
+  - Both had to re-measure by hand because the sweep chose its own nlist (132), which led to
+    `sweep --nlist`.
 
 ## Limitations
 
@@ -260,8 +268,8 @@ What this supports:
   (`VECSCOPE_TEST_WEAVIATE=1`); remote Qdrant, Milvus and Weaviate servers were not tested.
   The `timeout=` option and the scrubbing of client errors were tested against an unreachable
   Qdrant port and a stubbed client, not against a slow server.
-- The agent runs are one model on two tasks; they shows the tools and the plan are usable, not
-  that every agent follows them.
+- The agent runs are one model on three tasks; they show the tools and the plan are usable,
+  not that every agent follows them.
 
 ## Reproducing
 

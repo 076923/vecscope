@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+import warnings
 
 import numpy as np
 import pytest
@@ -114,6 +115,21 @@ def test_load_qrels_formats(tmp_path):
         assert load_qrels(tmp_path / name) == want, name
     with pytest.raises(FileNotFoundError):
         load_qrels(tmp_path / "missing.tsv")
+
+
+def test_queries_without_a_relevant_judgment_are_counted_not_scored():
+    corpus = _unit(np.eye(4, dtype=np.float32) + 0.01)
+    queries = corpus[[0, 1, 2]].copy()
+    # query 0 has a relevant doc, query 1 only a grade-0 judgment, query 2 none at all
+    qrels = parse_qrels({0: {0: 1}, 1: {1: 0}})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # no division by zero, no mean of an empty list
+        r = evaluate_retrieval(corpus, queries, qrels, k=2)
+    assert r["judged_queries"] == 1 and r["unscored_queries"] == 2
+    assert r["exact"]["ndcg_at_k"] == pytest.approx(1.0)
+    assert "2 of 3 queries have no relevant judgment and are not scored" in r["explanation"]
+    with pytest.raises(ValueError, match="no relevant"):
+        evaluate_retrieval(corpus, queries, {1: {1: 0}}, k=2)  # unparsed, nothing relevant
 
 
 def test_qrels_must_index_existing_rows(labeled):

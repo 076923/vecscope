@@ -58,6 +58,9 @@ MCP server file access:
   `VECSCOPE_ALLOWED_DIRS`) names the directories, and a refused path says so.
 - `--allow-any` lifts the restriction; do not suggest it on a shared machine.
 - Network vector stores are refused unless the server runs with `--allow-network`.
+- Audits, sweeps and compares run one at a time by default (`--max-concurrent`), so calling
+  several in parallel saves no time; a call that says a setting "is above" a cap should be
+  retried with a smaller value or run through the CLI.
 
 Vector stores:
 
@@ -165,6 +168,10 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
    - Quote `retrieval_changes` next to the finding changes, and only when
      `retrieval_comparable` is true.
    - Pass the production top-k as `--ranked` to see the index's effect (`overlap_with_exact`).
+     With filters, hybrid search or a reranker in the pipeline, overlap measures the whole
+     pipeline's departure from vector search; pass each stage's output to locate a loss.
+   - Report `unscored_queries` when it is not 0: those queries have no relevant judgment and
+     are not in the averages.
    - A finding turning `ok` is not proof that search got better, and a change that fixes a
      finding but lowers `ndcg_at_k` is not an improvement.
 5. **Adopt only confirmed improvements**; otherwise revert and try the next cause. Measure
@@ -212,6 +219,8 @@ Finding-specific notes:
     CPU-only).
   - Report the recommendation's `margin`; when it is `tight`, propose the `safer_alternative`
     instead.
+  - Tuning an existing IVF index: pass its nlist (`--nlist`, MCP `nlist`), or the sweep
+    measures nprobe on other lists.
   - Relay `caveats`: HNSW recall falls as the corpus grows, so a sweep on a sample is
     optimistic for HNSW (IVF can move either way because nlist follows the row count), and
     qps only ranks settings on this machine.

@@ -671,6 +671,65 @@ def test_load_json_and_jsonl(tmp_path):
     assert load_vectors(tmp_path / "b.json").shape == (2, 2)
 
 
+def test_jsonl_streams_in_blocks_with_the_same_values_and_messages(tmp_path, monkeypatch):
+    import json
+
+    from vecscope import io as vio
+
+    monkeypatch.setattr(vio, "_BLOCK_ROWS", 4)  # several blocks and a partial last one
+    x = np.random.default_rng(0).standard_normal((11, 3))
+    lines = [json.dumps({"id": i, "embedding": r}) for i, r in enumerate(x.tolist())]
+    path = tmp_path / "a.jsonl"
+    path.write_text("\ufeff" + "\n".join(lines[:5]) + "\n\n" + "\r\n".join(lines[5:]) + "\n",
+                    encoding="utf-8")
+    assert np.array_equal(vio.load_vectors(path), x)
+    assert np.array_equal(vio.load_vectors("b.jsonl", path.read_bytes()), x)
+    bad = lines[:6] + [json.dumps({"id": 6, "embedding": [1.0, 2.0]})]
+    path.write_text("\n".join(bad), encoding="utf-8")
+    with pytest.raises(ValueError, match="row 0 has 3, row 6 has 2"):
+        vio.load_vectors(path)
+    path.write_text("\n".join(lines[:2] + ["{oops"]), encoding="utf-8")
+    with pytest.raises(ValueError, match="line 3 is not valid JSON"):
+        vio.load_vectors(path)
+    path.write_bytes(b'{"embedding": [1.0, 2.0]}\n\xff\xfe\n')
+    with pytest.raises(ValueError, match="UTF-8"):
+        vio.load_vectors(path)
+    path.write_text("\n\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="empty"):
+        vio.load_vectors(path)
+
+
+def test_parquet_reads_the_vector_column_in_batches(tmp_path, monkeypatch):
+    pa = pytest.importorskip("pyarrow")
+    import pyarrow.parquet as pq
+
+    from vecscope import io as vio
+
+    monkeypatch.setattr(vio, "_BLOCK_ROWS", 1)  # batches of 4 rows over 3 row groups
+    x = np.random.default_rng(0).standard_normal((10, 3)).astype(np.float32)
+    for typ in (pa.list_(pa.float32()), pa.large_list(pa.float32()), pa.list_(pa.float32(), 3)):
+        t = pa.table({"text": [str(i) for i in range(10)], "embedding": pa.array(list(x), typ)})
+        pq.write_table(t, tmp_path / "v.parquet", row_group_size=4)
+        got = vio.load_vectors(tmp_path / "v.parquet")
+        assert got.dtype == np.float32 and np.array_equal(got, x), typ
+    data = (tmp_path / "v.parquet").read_bytes()
+    assert np.array_equal(vio.load_vectors("w.parquet", data), x)
+    ragged = [[1.0, 2.0]] * 5 + [[1.0]] + [[1.0, 2.0]] * 2
+    for rows, err in ((ragged, "different lengths"), ([[1.0, 2.0]] * 6 + [None], "row 6 is null"),
+                      ([[1.0, None]], "holds a null"), ([[]], "empty lists")):
+        pq.write_table(pa.table({"embedding": pa.array(rows, pa.list_(pa.float64()))}),
+                       tmp_path / "bad.parquet", row_group_size=4)
+        with pytest.raises(ValueError, match=err):
+            vio.load_vectors(tmp_path / "bad.parquet")
+    pq.write_table(pa.table({"embedding": pa.array([], pa.list_(pa.float64()))}),
+                   tmp_path / "none.parquet")
+    with pytest.raises(ValueError, match="empty"):
+        vio.load_vectors(tmp_path / "none.parquet")
+    (tmp_path / "junk.parquet").write_bytes(b"not parquet")
+    with pytest.raises(ValueError, match="not a readable parquet"):
+        vio.load_vectors(tmp_path / "junk.parquet")
+
+
 def test_findings_carry_thresholds():
     rng = np.random.default_rng(0)
     ev = audit(rng.standard_normal((300, 16)).astype(np.float32), k=5)
@@ -842,6 +901,29 @@ def test_sweep_rejects_bad_repeats_and_margin():
         sweep(x, k=5, timing_repeats=0)
     with pytest.raises(ValueError):
         sweep(x, k=5, margin=1.0)
+
+
+def test_sweep_takes_the_production_nlist(tmp_path, capsys):
+    pytest.importorskip("faiss")
+    from vecscope.cli import main
+    from vecscope.sweep import sweep
+
+    x = np.random.default_rng(0).standard_normal((800, 16)).astype(np.float32)
+    res = sweep(x, k=5, n_queries=50, nlist=16, device="cpu", latency_queries=0,
+                timing_repeats=1)
+    ivf = [p for p in res.points if p.index == "ivf"]
+    assert {p.params["nlist"] for p in ivf} == {16} and ivf[-1].params["nprobe"] == 16
+    assert any("supplied nlist=16" in c for c in res.caveats)
+    default = sweep(x, k=5, n_queries=50, device="cpu", latency_queries=0, timing_repeats=1)
+    assert next(p for p in default.points if p.index == "ivf").params["nlist"] == 20
+    for bad in (0, True, 801):
+        with pytest.raises(ValueError, match="nlist"):
+            sweep(x, k=5, nlist=bad, device="cpu")
+    path = tmp_path / "x.npy"
+    np.save(path, x)
+    assert main(["sweep", str(path), "-k", "5", "--nlist", "8", "--n-queries", "20",
+                 "--latency-queries", "0", "--timing-repeats", "1", "--device", "cpu"]) == 0
+    assert "nlist=8, nprobe=8" in capsys.readouterr().out
 
 
 def test_sweep_device_selection():
@@ -1297,6 +1379,88 @@ def test_mcp_recent_audits_survive_concurrent_calls():
         got = list(pool.map(work, range(400)))
     assert all(g in (i, None) for i, g in enumerate(got))
     assert len(mcp_server._RECENT) == mcp_server._RECENT_MAX
+
+
+def test_mcp_heavy_calls_take_turns_and_are_logged(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("mcp")
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from vecscope import mcp_server
+
+    x = np.random.default_rng(0).standard_normal((300, 8)).astype(np.float32)
+    np.save(tmp_path / "x.npy", x)
+    monkeypatch.setenv(mcp_server.ALLOWED_DIRS_ENV, str(tmp_path))
+    monkeypatch.setattr(mcp_server, "_SLOTS", None)
+    active, peak, lock = [0], [0], threading.Lock()
+    real = mcp_server.audit
+
+    def slow_audit(*a, **kw):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.2)
+        with lock:
+            active[0] -= 1
+        return real(*a, **kw)
+
+    monkeypatch.setattr(mcp_server, "audit", slow_audit)
+    with ThreadPoolExecutor(3) as pool:
+        verdicts = list(pool.map(lambda _: mcp_server.audit_embeddings(
+            str(tmp_path / "x.npy"), k=5)["verdict"], range(3)))
+    assert peak[0] == 1 and len(verdicts) == 3  # one at a time by default
+    err = capsys.readouterr().err
+    assert err.count("vecscope-mcp: audit_embeddings path=") == 3
+    assert f"x.npy: {verdicts[0]} in" in err and "waited" in err
+    monkeypatch.setattr(mcp_server, "_SLOTS", None)
+    monkeypatch.setenv(mcp_server.MAX_CONCURRENT_ENV, "3")
+    peak[0] = 0
+    with ThreadPoolExecutor(3) as pool:
+        list(pool.map(lambda _: mcp_server.audit_embeddings(str(tmp_path / "x.npy"), k=5),
+                      range(3)))
+    assert peak[0] > 1
+    monkeypatch.setattr(mcp_server, "_SLOTS", None)
+    monkeypatch.setenv(mcp_server.MAX_CONCURRENT_ENV, "0")
+    with pytest.raises(ValueError, match="positive integer"):
+        mcp_server.max_concurrent()
+
+
+def test_mcp_caps_settings_that_multiply_the_cost(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("mcp")
+    from vecscope import mcp_server
+
+    np.save(tmp_path / "x.npy", np.random.default_rng(0).standard_normal((50, 4)))
+    monkeypatch.setenv(mcp_server.ALLOWED_DIRS_ENV, str(tmp_path))
+    with pytest.raises(Exception, match="sample_repeats=11 is above the 10"):
+        mcp_server.audit_embeddings(str(tmp_path / "x.npy"), k=5, sample_repeats=11)
+    with pytest.raises(Exception, match="k=5000 is above"):
+        mcp_server.compare_embeddings(str(tmp_path / "x.npy"), str(tmp_path / "x.npy"), k=5000)
+    with pytest.raises(Exception, match="timing_repeats=50"):
+        mcp_server.sweep_index(str(tmp_path / "x.npy"), timing_repeats=50)
+    err = capsys.readouterr().err
+    assert "audit_embeddings path=" in err and ": error ValueError in" in err
+
+
+def test_mcp_parses_from_the_verified_handle(tmp_path, monkeypatch):
+    pytest.importorskip("mcp")
+    import json
+
+    from vecscope import mcp_server
+
+    x = np.random.default_rng(0).standard_normal((40, 3))
+    np.save(tmp_path / "x.npy", x)
+    (tmp_path / "x.jsonl").write_text("\n".join(json.dumps({"v": r}) for r in x.tolist()),
+                                      encoding="utf-8")
+    np.savetxt(tmp_path / "x.csv", x, delimiter=",")
+    np.savetxt(tmp_path / "ids.tsv", np.arange(80).reshape(40, 2), fmt="%d")
+    monkeypatch.setenv(mcp_server.ALLOWED_DIRS_ENV, str(tmp_path))
+    for name in ("x.npy", "x.jsonl", "x.csv"):
+        assert np.allclose(mcp_server._vectors(str(tmp_path / name)), x), name
+    assert mcp_server._neighbors(str(tmp_path / "ids.tsv"), "ann").tolist()[1] == [2, 3]
+    monkeypatch.setenv(mcp_server.MAX_READ_ENV, str(500 / 2**20))
+    with pytest.raises(ValueError, match="over the"):
+        mcp_server._vectors(str(tmp_path / "x.npy"))
 
 
 def test_mcp_server_round_trip_over_stdio(tmp_path):

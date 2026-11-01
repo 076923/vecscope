@@ -40,7 +40,8 @@ def _render_text(ev) -> str:
             lines.append(f"{'':31}try: {f.suggested_action}")
     if ev.retrieval:
         r = ev.retrieval
-        lines.append(f"  retrieval ({r['judged_queries']} judged queries, k={r['k']}):")
+        unscored = f", {r['unscored_queries']} unscored" if r.get("unscored_queries") else ""
+        lines.append(f"  retrieval ({r['judged_queries']} judged queries{unscored}, k={r['k']}):")
         for part in ("exact", "ranked"):
             if r.get(part):
                 m = r[part]
@@ -147,6 +148,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--latency-queries", type=int, default=200,
                    help="queries searched one at a time per setting for the latency "
                         "percentiles p50/p95/p99 (default 200, 0 = skip)")
+    s.add_argument("--nlist", type=int, default=None,
+                   help="IVF list count, e.g. your production index's, so nprobe is swept on "
+                        "the same lists (default 4*sqrt(rows))")
     s.add_argument("--json", action="store_true", help="emit JSON instead of text")
     c = sub.add_parser("compare", help="compare two embeddings of the same rows (no verdicts)")
     c.add_argument("path_a", help="embedding file A, one vector per row")
@@ -238,7 +242,7 @@ def _run(args) -> int:
         res = sweep(x, k=args.k, queries=q, n_queries=args.n_queries,
                     target_recall=args.target_recall, device=args.device,
                     timing_repeats=args.timing_repeats, margin=args.margin,
-                    latency_queries=args.latency_queries)
+                    latency_queries=args.latency_queries, nlist=args.nlist)
         print(json.dumps(res.to_dict(), indent=2) if args.json else render_sweep(res))
         return 0
 

@@ -270,10 +270,12 @@ corpus-drawn queries can differ from the one real traffic needs.
   percentiles.
 - `index_bytes` is the size of the serialized index, so a setting can be judged on memory as
   well as speed.
+- IVF's nlist follows the row count (4*sqrt(n)) unless `--nlist` fixes it. To tune nprobe for
+  an existing index, pass that index's nlist.
 
 The notes at the end are part of the JSON as `caveats`. The MCP tool is `sweep_index`, with
 the same options as parameters (`n_queries`, `target_recall`, `device`, `margin`,
-`timing_repeats`, `latency_queries`).
+`timing_repeats`, `latency_queries`, `nlist`).
 
 The sweep answers one question: which parameters reach the target recall on this corpus
 and these queries, and what they cost. The numbers are relative to this machine and this
@@ -353,6 +355,15 @@ Pass relevance judgments for the queries and the audit adds a `retrieval` block:
 `--ranked` scores the top-k your production index returned next to exact search, with
 `overlap_with_exact`.
 
+`--ranked` takes the final top-k of whatever serves the queries: an ANN index, a store query
+with filters, hybrid search or a reranker. The exact baseline is plain cosine over every row,
+with no filter, keyword score or reranking.
+
+- With those stages in the pipeline, `overlap_with_exact` measures how far the pipeline
+  departs from vector search, not ANN recall alone.
+- vecscope does not score the stages separately. To find the stage that loses quality, pass
+  each stage's output as `--ranked` in turn.
+
 ```bash
 vecscope audit corpus.npy --queries queries.npy --qrels qrels.tsv
 vecscope audit corpus.npy --queries queries.npy --qrels qrels.tsv --ranked prod_topk.npy
@@ -366,6 +377,10 @@ vecscope audit corpus.npy --queries queries.npy --qrels qrels.tsv --ranked prod_
 
 BEIR's `query-id`/`corpus-id`/`score` names work. Rows are positions in the query and corpus
 files.
+
+The scores average over the queries with at least one relevant (grade > 0) judgment, since
+nDCG and recall are undefined without one. Queries with none, or with no judgment at all, are
+counted in `unscored_queries` and named in the explanation.
 
 With `--baseline`, the diff lists `retrieval_changes` next to the finding changes, so a
 change is judged by the finding it was meant to fix *and* by retrieval:
@@ -532,7 +547,8 @@ Creating the cache costs about what a full audit does (83 s here).
 Re-embedding 1,000 of the 100,000 rows in place recomputed 10,625 rows: 15 s to update the
 cache and 5 s to audit from it, against 95 s for a full audit, with the same verdicts. With
 10,000 rows changed an update would recompute 68,933 rows in 83 s, about as long as the full
-audit's 89 s, so the cache is rebuilt there instead.
+audit's 89 s, so the cache is rebuilt there instead. Re-run with that rule, 10,000 changed
+rows rebuilt the cache in 87 s against a full audit's 87 s.
 
 ## Use with an agent
 
@@ -615,6 +631,25 @@ One request cannot exhaust the server's memory:
 - A file larger than `--max-read-mb` (default 4096; `VECSCOPE_MAX_READ_MB`; 0 for no limit)
   is refused before it is read.
 - A store stops being read once its vectors pass the same size.
+- Files are parsed straight from the checked handle, never copied into memory first. On a
+  500,000 x 384 `.npy` file (0.72 GiB) an MCP read peaks at 0.79 GiB, as the CLI does.
+
+Calls in parallel, or with expensive settings, are bounded too:
+
+- The server runs each tool call in its own thread. Audits, sweeps and compares take one of
+  `--max-concurrent` slots (default 1; `VECSCOPE_MAX_CONCURRENT`), and further calls wait.
+  An agent that fires three audits at once therefore holds one corpus in memory, not three.
+- Settings that multiply a call's cost are capped per call: `k` and `clusters` at 1,000,
+  `sample_repeats` and `timing_repeats` at 10, `n_queries` at 100,000 and `latency_queries`
+  at 10,000. The CLI has no caps.
+
+Each audit, sweep and compare writes one line to the server's stderr, which MCP clients keep
+in their logs. It names the tool and every file or store it read (credentials redacted), the
+verdict or error, and the time taken, including any wait for a slot:
+
+```text
+vecscope-mcp: audit_embeddings path=/data/run/corpus.npy qrels_path=/data/run/qrels.tsv: fail in 2.1 s
+```
 
 The recent audits that `baseline` refers to are kept behind a lock. A stdio server serves the
 one client that started it; agents that run in parallel each start their own server.
@@ -630,10 +665,14 @@ said, and stopped at the remaining step it was not asked to fix. Cursor and Code
 same protocol and were not run.
 
 [docs/agent_case.md](https://github.com/076923/vecscope/blob/main/docs/agent_case.md) records
-a run on real SciFact embeddings with two ingestion faults: a batch ingested twice and a
-worker that skipped normalization. From the symptom alone, the agent found both, fixed the
-corpus and re-audited against its first `audit_id`. Production nDCG@10 went from 0.100 to
-0.713.
+two cases on real SciFact embeddings, each run twice:
+
+- **Two ingestion faults**: a batch ingested twice and a worker that skipped normalization.
+  From the symptom alone, the agent found both, fixed the corpus and re-audited against its
+  first `audit_id`. Production nDCG@10 went from 0.100 to 0.713.
+- **An IVF index searched with nprobe=1**: the audit found the embeddings healthy and the
+  production ranking 0.29 nDCG below exact search. The agent swept the index, chose nprobe,
+  and production nDCG@10 went from 0.422 to 0.700 and 0.711.
 
 ### If the server stops connecting
 
@@ -784,6 +823,7 @@ vecscope sweep vectors.npy --device gpu                # IVF on the GPU (faiss G
 vecscope sweep vectors.npy --margin 0.05               # headroom under which the pick is marked tight (default 0.02)
 vecscope sweep vectors.npy --n-queries 2000 --timing-repeats 5   # queries to time (default 1000), timing runs per setting (default 3)
 vecscope sweep vectors.npy --latency-queries 0         # skip the single-query latency percentiles (default 200 queries)
+vecscope sweep vectors.npy --nlist 128                 # sweep nprobe on the production index's list count
 vecscope compare a.npy b.npy -k 10                     # agreement between two embeddings of the same rows
 vecscope compare a.npy b.npy --neighbors-a a_knn.npy --neighbors-b b_knn.npy   # full-corpus neighbors on a sample of rows
 vecscope calibrate fit_*.json --min-quality 0.45 --out th.json   # gate thresholds from your own pipeline states
@@ -814,6 +854,20 @@ embeddings[0]                           # the vector of the first item
 | `.jsonl` | one JSON object per line; the first list-valued field is the vector | `{"id": 7, "text": "...", "embedding": [0.1, -0.3, ...]}` |
 | `.json` | a JSON array of objects (as above) or an array of lists | `[[0.1, -0.3, ...], [0.2, 0.5, ...]]` |
 | `.csv`, `.tsv`, `.txt` | one vector per line, numbers only, no header or id column | `0.1,-0.3,0.8,...` |
+
+How much memory a format takes to load, measured on 50,000 x 384 float32 vectors (a 73 MiB
+matrix):
+
+| Format | How it is read | Peak memory |
+| --- | --- | --- |
+| `.npy` | as stored | 0.10 GiB |
+| `.csv` | in chunks of lines | 0.18 GiB |
+| `.jsonl` | line by line, converted in blocks of rows | 0.34 GiB |
+| `.parquet` | only the vector column, in batches, into one array | 0.39 GiB |
+| `.json` | the whole file parsed at once | 1.13 GiB |
+
+For large corpora use `.npy`, `.csv` or `.parquet`. `.json` is parsed whole and needs several
+times the matrix size.
 
 The optional inputs:
 
@@ -1156,7 +1210,7 @@ JSON. The skill file describes both paths.
 - [Agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md): when to run the audit and what to do with each verdict
 - [Retrieval-quality study](https://github.com/076923/vecscope/blob/main/docs/retrieval_quality.md): every finding against nDCG@10 on labeled data
 - [Verification](https://github.com/076923/vecscope/blob/main/docs/verification.md): exactness, recall scoring, the sampling claims, the query findings, interventions, agent integration, and 19 models on 9 labeled datasets
-- [Agent case](https://github.com/076923/vecscope/blob/main/docs/agent_case.md): an agent finding and fixing two ingestion faults over MCP, with the tool calls and numbers
+- [Agent cases](https://github.com/076923/vecscope/blob/main/docs/agent_case.md): an agent finding and fixing two ingestion faults, and a mis-tuned IVF index, over MCP, with the tool calls and numbers
 - [Examples](https://github.com/076923/vecscope/tree/main/examples/): synthetic matrices, the calibration script and the retrieval-quality study
 - [Changelog](https://github.com/076923/vecscope/blob/main/CHANGELOG.md)
 
