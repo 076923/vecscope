@@ -1542,3 +1542,13 @@ def test_public_entry_points_validate_input_alike():
         for call in entry_points:
             with pytest.raises(ValueError, match=message):
                 call(x)
+
+
+def test_auto_block_keeps_the_memory_budget_on_large_corpora():
+    from vecscope._knn import auto_block
+
+    assert auto_block(10_000) == 2048 and auto_block(100_000) == 833
+    # the old floor of 128 rows broke the 1 GB budget above ~830k rows
+    for n in (900_000, 1_000_000, 10_000_000, 80_000_000):
+        assert 12 * n * auto_block(n) <= 1_000_000_000
+    assert auto_block(1_000_000) == 83 and auto_block(10**9) == 1

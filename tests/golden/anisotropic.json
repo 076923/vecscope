@@ -415,18 +415,20 @@
      "name": "anisotropy",
      "value": 0.8731670910623341,
      "verdict": "warn",
-     "inconclusive": false
+     "inconclusive": false,
+     "placed_because": "this group's cause covers it"
     },
     {
      "name": "antihubs",
      "value": 0.05228793340357085,
      "verdict": "warn",
-     "inconclusive": false
+     "inconclusive": false,
+     "placed_because": "anisotropy is not ok; a shared direction creates hubs"
     }
    ],
-   "common_cause": "a large component shared by all vectors (a mean offset or a few high-variance coordinates) that compresses scores and creates hubs",
-   "first_change": "subtract the corpus mean and re-normalize (anisotropy.details shows the expected cosine after centering); if rogue_dimensions fails, z-score dimensions instead. Apply the same transform to queries and rebuild the index",
-   "re_measure": "anisotropy and rogue_dimensions below warn_at, hubness.skewness down; retrieval ndcg_at_k not lower than before; pass --qrels to measure retrieval quality as well",
+   "common_cause": "a large component shared by all vectors (a mean offset) that compresses scores and creates hubs",
+   "first_change": "subtract the corpus mean and re-normalize (anisotropy.details shows the expected cosine after centering); apply the same transform to queries and rebuild the index",
+   "re_measure": "anisotropy below warn_at, hubness.skewness down; retrieval ndcg_at_k not lower than before (centering healthy models cost up to 0.034 nDCG@10 in the verification); pass --qrels to measure retrieval quality as well",
    "why_this_order": "a transform rebuilds the neighbor graph that hubness, connectivity and ann_recall are computed on",
    "only_inconclusive": false
   }

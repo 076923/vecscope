@@ -470,12 +470,13 @@
      "name": "collapse",
      "value": 0.8,
      "verdict": "fail",
-     "inconclusive": false
+     "inconclusive": false,
+     "placed_because": "exact copies are present, or no shared direction or dominant coordinate is measured that would explain it"
     }
    ],
    "common_cause": "rows that are not real embeddings of distinct items: zero or constant vectors from failed embedding calls, duplicated documents or boilerplate chunks",
    "first_change": "read norms.details.zero_norm_ratio, collapse.details.largest_near_duplicate_groups and outliers.details.sample_ids; drop zero and constant rows and deduplicate before changing anything else",
-   "re_measure": "zero_norm_ratio 0, near_duplicate_ratio and outlier_ratio below warn_at; retrieval duplicate_result_share falls; pass --qrels to measure retrieval quality as well",
+   "re_measure": "zero_norm_ratio 0, near_duplicate_ratio and outlier_ratio below warn_at; retrieval duplicate_result_share falls; query_gap, if listed here, read again; pass --qrels to measure retrieval quality as well",
    "why_this_order": "broken rows distort every other statistic, so later steps would be measured on noise",
    "only_inconclusive": false
   }

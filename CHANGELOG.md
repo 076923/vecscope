@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.10.1] - 2026-11-01
+
+### Fixed
+
+- The exact k-NN block size no longer stops at 128 rows, which let the block's distances
+  and argpartition index pass the 1 GB budget above ~830k rows (1.5 GB at 1M rows with
+  `--sample 0`, a large incremental cache or a large query corpus). It now shrinks to 83
+  rows at 1M and stays within budget up to ~83M rows. The default 100k sample was not
+  affected.
+
 ## [0.10.0] - 2026-11-01
 
 ### Changed

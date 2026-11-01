@@ -108,8 +108,9 @@ def row_overlap(a: np.ndarray, b: np.ndarray, block: int = 4096) -> np.ndarray:
 def auto_block(n: int, budget_bytes: int = 1_000_000_000) -> int:
     """Rows per block so that the block's distance matrix and its argpartition index
     (4 + 8 bytes per entry) stay within ``budget_bytes``: 2048 rows up to ~40k rows,
-    about 800 at 100k rows, never below 128."""
-    return int(max(128, min(2048, budget_bytes // (12 * max(n, 1)))))
+    about 800 at 100k rows, 83 at 1M. Only above ~83M rows, where one row alone exceeds
+    the budget, does the block stay at 1 row and the budget give way."""
+    return int(max(1, min(2048, budget_bytes // (12 * max(n, 1)))))
 
 
 def exact_knn(
@@ -118,7 +119,8 @@ def exact_knn(
     """Return (indices, distances) of the k nearest neighbors, excluding self.
 
     distances are cosine distance (1 - cos) or squared euclidean. ``block`` rows are
-    processed at a time; the default keeps peak memory near 1 GB whatever ``n`` is. The
+    processed at a time; the default keeps the block's distances and argpartition index
+    within 1 GB (``auto_block``), on top of the n x d input and the n x k outputs. The
     neighbor set does not depend on it except among exactly tied distances, where the
     selection is NumPy's and may differ between NumPy builds (not between runs on one build).
     """
