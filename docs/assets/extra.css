@@ -1,0 +1,5 @@
+/* Use wide screens: the default content column is 61rem, which leaves the README tables and
+   the recorded agent commands scrolling sideways on a desktop display. */
+.md-grid {
+  max-width: 100rem;
+}
