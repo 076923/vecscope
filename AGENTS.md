@@ -26,6 +26,7 @@ These rules apply to any agent or person changing this repository.
 ```bash
 pytest -q
 ruff check src tests examples
+zensical build --strict   # when a document changed; pip install --group docs
 ```
 
 Update `README.md`, `docs/ko/README.md`, the skill file and `CHANGELOG.md` when the

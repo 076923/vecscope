@@ -1,6 +1,8 @@
-<div align="center">
+<div align="center" markdown="1">
 
-[English](../../README.md) · **한국어**
+<img src="https://raw.githubusercontent.com/076923/vecscope/main/images/brand/logo-mark.png" alt="vecscope logo" width="128">
+
+[English](https://github.com/076923/vecscope/blob/main/README.md) · **한국어**
 
 # vecscope
 
@@ -11,7 +13,8 @@
 [![PyPI version](https://img.shields.io/pypi/v/vecscope?style=flat-square&color=3775a9)](https://pypi.org/project/vecscope/)
 [![Python](https://img.shields.io/pypi/pyversions/vecscope?style=flat-square)](https://pypi.org/project/vecscope/)
 [![CI](https://img.shields.io/github/actions/workflow/status/076923/vecscope/ci.yml?style=flat-square&label=CI)](https://github.com/076923/vecscope/actions/workflows/ci.yml)
-[![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](../../LICENSE)
+[![Docs](https://img.shields.io/badge/docs-076923.github.io-2563eb?style=flat-square)](https://076923.github.io/vecscope/)
+[![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](https://github.com/076923/vecscope/blob/main/LICENSE)
 
 [빠른 시작](#빠른-시작) · [진단 항목](#진단-항목) · [질의와 군집](#질의와-군집) · [인덱스 스윕](#인덱스-스윕) · [두 임베딩 비교](#두-임베딩-비교) · [검색 품질과 수정 순서](#검색-품질과-수정-순서) · [벡터 저장소](#벡터-저장소에서-읽기) · [에이전트와 함께 사용](#에이전트와-함께-사용) · [CI에서 사용](#ci에서-사용) · [입력 형식](#입력-형식) · [실제 임베딩 검증](#실제-임베딩-검증) · [FAQ](#faq)
 
@@ -155,7 +158,7 @@ JSON의 각 항목에는 `healthy_range`, `warn_at`, `fail_at`과 세부 수치�
 - 다시 감사합니다.
 - 실제 질의로 검색 결과를 전후 비교하고 나서 채택합니다.
 
-[에이전트 스킬](../../.agents/skills/vecscope/SKILL.md)에 이 절차가 정리되어 있습니다.
+[에이전트 스킬](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md)에 이 절차가 정리되어 있습니다.
 
 ### 임곗값
 
@@ -595,7 +598,7 @@ args = ["--allow-dir", "/data/embeddings"]
 `verbose=false`를 주면 `ok` 항목의 세부 내용, 설명, 조치를 생략합니다. MCP를 지원하지 않는
 에이전트라면 CLI를 `--json`으로 실행해 같은 결과를 읽으면 됩니다.
 
-[`.agents/skills/vecscope/SKILL.md`](../../.agents/skills/vecscope/SKILL.md)의 에이전트
+[`.agents/skills/vecscope/SKILL.md`](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md)의 에이전트
 스킬에는 감사를 실행할 시점과 판정별 조치(벡터 중심화(centering) 또는 모델 교체, 중복 제거,
 재순위화(re-ranking), 인덱스 재구축)가 정리되어 있습니다. 같은 절차가 서버 instructions에도
 들어 있어 MCP 연결만 있는 에이전트도 동일하게 동작합니다.
@@ -1191,18 +1194,19 @@ vecscope audit vectors.npy --thresholds th.json
 
 ## 문서
 
-- [에이전트 스킬](../../.agents/skills/vecscope/SKILL.md): 감사를 실행할 시점과 판정별 조치
+- [문서 사이트](https://076923.github.io/vecscope/): 이 README와 아래 문서를 검색할 수 있는 사이트
+- [에이전트 스킬](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md): 감사를 실행할 시점과 판정별 조치
 - [검색 품질 연구](retrieval_quality.md): 라벨 데이터의 nDCG@10과 모든 진단 항목을 대조한 결과
 - [검증 결과](verification.md): 정확성, recall 채점, 표본 감사, 질의 항목, 개입 실험, 에이전트 연동, 라벨 데이터세트 9개에서 모델 19종을 측정한 결과
 - [에이전트 사례](agent_case.md): 에이전트가 MCP로 적재 결함 두 가지와 잘못 조정된 IVF 인덱스를 찾고 고친 과정, 도구 호출과 숫자
-- [예제](../../examples/): 합성 행렬 생성 스크립트, 보정 스크립트, 검색 품질 연구 스크립트
-- [변경 이력](../../CHANGELOG.md)
+- [예제](https://github.com/076923/vecscope/tree/main/examples/): 합성 행렬 생성 스크립트, 보정 스크립트, 검색 품질 연구 스크립트
+- [변경 이력](https://github.com/076923/vecscope/blob/main/CHANGELOG.md)
 
 ## 기여
 
-이슈와 PR을 환영합니다. 테스트 방법과 기여 기준은 [CONTRIBUTING.md](../../CONTRIBUTING.md)에,
-보안 취약점 제보 방법은 [SECURITY.md](../../SECURITY.md)에 있습니다.
+이슈와 PR을 환영합니다. 테스트 방법과 기여 기준은 [CONTRIBUTING.md](https://github.com/076923/vecscope/blob/main/CONTRIBUTING.md)에,
+보안 취약점 제보 방법은 [SECURITY.md](https://github.com/076923/vecscope/blob/main/SECURITY.md)에 있습니다.
 
 ## 라이선스
 
-[MIT](../../LICENSE)
+[MIT](https://github.com/076923/vecscope/blob/main/LICENSE)

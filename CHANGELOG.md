@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Documentation site at <https://076923.github.io/vecscope/>, built with Zensical from the README,
+  `docs/` and the Korean translations, and deployed by `.github/workflows/docs.yml`.
+- `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `CITATION.cff`, a logo and social preview
+  under `images/brand/`, `.editorconfig`, `.pre-commit-config.yaml` and Dependabot for actions
+  and pip.
+
+### Changed
+
+- Workflows run with no default token permissions, pin actions to commit SHAs, and do not keep
+  the checkout credentials. CI also builds the package, checks it with `twine`, and lints the
+  workflows with zizmor. The release workflow checks that the built version matches the tag.
+- The Korean README and the agent cases page link to repository files by URL, so the links work
+  on the documentation site as well as on GitHub.
+
 ## [0.11.0] - 2026-11-01
 
 ### Changed

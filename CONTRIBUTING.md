@@ -1,20 +1,41 @@
 # Contributing to vecscope
 
 Thanks for helping agents see embedding spaces. This file explains how to work on the code
-and what a good change looks like.
+and what a good change looks like. Everyone taking part follows the
+[code of conduct](CODE_OF_CONDUCT.md).
 
 ## Setup
 
 ```bash
 git clone https://github.com/076923/vecscope
 cd vecscope
-python -m pip install -e ".[dev,mcp,index]"
+python -m pip install -e ".[dev,index]"
 pytest -q
 ruff check src tests examples
 ```
 
 `python examples/make_examples.py` writes three small matrices into `examples/` so you can try
 `vecscope audit examples/anisotropic.npy` right away.
+
+`pre-commit install` runs `ruff --fix` and the whitespace, YAML and TOML checks from
+`.pre-commit-config.yaml` on every commit (`pip install pre-commit` first). `.editorconfig`
+sets the indentation and line endings for editors that read it.
+
+## Documentation site
+
+<https://076923.github.io/vecscope/> is built by [Zensical](https://zensical.org) from
+`README.md`, `CHANGELOG.md`, `docs/` and `docs/ko/`, using the navigation in `zensical.toml`.
+`.github/workflows/docs.yml` deploys it on every push to `main`. Build it locally before
+changing a document:
+
+```bash
+python -m pip install --group docs
+zensical build --strict    # fails on a broken link or anchor
+zensical serve             # preview at http://127.0.0.1:8000
+```
+
+Link to repository files that are not in `docs/` (the skill, examples, `LICENSE`) by their
+GitHub URL, as the READMEs do, so the link works both on GitHub and on the site.
 
 ## Scope
 

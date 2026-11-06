@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-label="vecscope">
+  <title>vecscope</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#111C33"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <!-- faint embedding points across the card -->
+  <g fill="#fff" opacity="0.08">
+    <circle cx="90" cy="80" r="6"/><circle cx="1180" cy="120" r="8"/><circle cx="1220" cy="560" r="5"/>
+    <circle cx="140" cy="580" r="7"/><circle cx="700" cy="60" r="4"/><circle cx="980" cy="600" r="6"/>
+    <circle cx="1100" cy="330" r="5"/><circle cx="60" cy="330" r="4"/><circle cx="820" cy="540" r="5"/>
+  </g>
+  <g transform="translate(120 176) scale(0.5625)">
+    <rect width="512" height="512" rx="116" fill="url(#mark)"/>
+    <g fill="#fff" opacity="0.5">
+      <circle cx="112" cy="128" r="13"/><circle cx="164" cy="90" r="9"/><circle cx="396" cy="110" r="11"/>
+      <circle cx="424" cy="172" r="8"/><circle cx="92" cy="300" r="10"/><circle cx="126" cy="404" r="14"/>
+      <circle cx="204" cy="434" r="9"/><circle cx="402" cy="402" r="12"/><circle cx="358" cy="442" r="8"/>
+      <circle cx="432" cy="300" r="9"/>
+    </g>
+    <g fill="none" stroke="#fff" stroke-linecap="round">
+      <circle cx="256" cy="256" r="118" stroke-width="26"/>
+      <path d="M256 82V114 M256 398V430 M82 256H114 M398 256H430" stroke-width="26"/>
+    </g>
+    <g fill="#fff">
+      <circle cx="236" cy="238" r="22"/><circle cx="288" cy="262" r="17"/><circle cx="246" cy="292" r="13"/>
+    </g>
+  </g>
+  <g font-family="Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif">
+    <text x="460" y="318" font-size="124" font-weight="600" fill="#F8FAFC" letter-spacing="-3">vecscope</text>
+    <text x="464" y="384" font-size="40" fill="#CBD5E1">Embedding space evidence for agents</text>
+    <text x="464" y="446" font-size="28" fill="#94A3B8">hubness · anisotropy · collapse · ANN recall · HNSW/IVF sweeps</text>
+    <text x="464" y="492" font-size="28" fill="#94A3B8">pip install vecscope · CLI and MCP server</text>
+  </g>
+</svg>

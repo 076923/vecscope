@@ -9,7 +9,7 @@ Claude Code headless 모드가 vecscope MCP 서버를 써서 문제를 진단하
 - [사례 1](#사례-1-적재-결함-두-가지): 코퍼스의 적재 결함 두 가지
 - [사례 2](#사례-2-탐색-목록이-너무-적은-ivf-인덱스): 탐색 목록이 너무 적은 IVF 인덱스
 
-두 사례 모두 [`examples/agent_case.py`](../../examples/agent_case.py)가 SciFact(BEIR)로 만듭니다.
+두 사례 모두 [`examples/agent_case.py`](https://github.com/076923/vecscope/blob/main/examples/agent_case.py)가 SciFact(BEIR)로 만듭니다.
 초록 5,183개와 테스트 질의 300개, 관련성 판정 339개이고, bge-small-en-v1.5로 임베딩했습니다
 (384차원, 단위 길이, 질의에는 질의용 지시문 사용). 실행마다 Claude Code 2.1과 모델
 claude-opus-5-5를 썼고, 에이전트는 vecscope 도구 호출과 Python 실행만 할 수 있었습니다.

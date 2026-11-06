@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "vecscope"
+abstract: >-
+  vecscope gives agents deterministic evidence about embedding spaces and
+  vector indexes: hubness, anisotropy, collapse, distance concentration,
+  duplicate neighbors, ANN recall against exact search, and HNSW/IVF
+  parameter sweeps. Every finding reports the measured value, an
+  ok/warn/fail verdict, the threshold that produced it and what healthy
+  looks like. It runs as a CLI and as an MCP server, computes with NumPy
+  only, and produces identical JSON for identical input.
+authors:
+  - family-names: Yun
+    given-names: Daehee
+    email: s076923@gmail.com
+contact:
+  - family-names: Yun
+    given-names: Daehee
+    email: s076923@gmail.com
+repository-code: "https://github.com/076923/vecscope"
+repository-artifact: "https://pypi.org/project/vecscope/"
+url: "https://076923.github.io/vecscope/"
+license: MIT
+keywords:
+  - embeddings
+  - vector search
+  - approximate nearest neighbor
+  - retrieval-augmented generation
+  - semantic search
+  - embedding quality
+  - hubness
+  - anisotropy
+  - FAISS
+  - HNSW
+  - IVF
+  - MCP server
+  - agents
+  - Python

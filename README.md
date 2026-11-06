@@ -1,6 +1,8 @@
 <!-- mcp-name: io.github.076923/vecscope -->
 
-<div align="center">
+<div align="center" markdown="1">
+
+<img src="https://raw.githubusercontent.com/076923/vecscope/main/images/brand/logo-mark.png" alt="vecscope logo" width="128">
 
 **English** · [한국어](https://github.com/076923/vecscope/blob/main/docs/ko/README.md)
 
@@ -13,6 +15,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/vecscope?style=flat-square&color=3775a9)](https://pypi.org/project/vecscope/)
 [![Python](https://img.shields.io/pypi/pyversions/vecscope?style=flat-square)](https://pypi.org/project/vecscope/)
 [![CI](https://img.shields.io/github/actions/workflow/status/076923/vecscope/ci.yml?style=flat-square&label=CI)](https://github.com/076923/vecscope/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-076923.github.io-2563eb?style=flat-square)](https://076923.github.io/vecscope/)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](https://github.com/076923/vecscope/blob/main/LICENSE)
 
 [Quick start](#quick-start) · [What it measures](#what-vecscope-measures) · [Queries and clusters](#queries-and-clusters) · [Index sweep](#index-sweep) · [Compare two embeddings](#compare-two-embeddings) · [Retrieval quality and the fix order](#retrieval-quality-and-the-fix-order) · [Vector stores](#read-from-a-vector-store) · [Use with an agent](#use-with-an-agent) · [Use in CI](#use-in-ci) · [Input formats](#input-formats) · [Real embeddings](#real-embeddings) · [FAQ](#faq)
@@ -1219,6 +1222,7 @@ JSON. The skill file describes both paths.
 
 ## Documentation
 
+- [Documentation site](https://076923.github.io/vecscope/): this README and the pages below, searchable
 - [Agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md): when to run the audit and what to do with each verdict
 - [Retrieval-quality study](https://github.com/076923/vecscope/blob/main/docs/retrieval_quality.md): every finding against nDCG@10 on labeled data
 - [Verification](https://github.com/076923/vecscope/blob/main/docs/verification.md): exactness, recall scoring, the sampling claims, the query findings, interventions, agent integration, and 19 models on 9 labeled datasets

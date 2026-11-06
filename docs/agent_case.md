@@ -11,7 +11,7 @@ summary.
 - [Case 2](#case-2-an-ivf-index-searched-with-too-few-probes): an IVF index searched with
   too few probes
 
-Both cases are built by [`examples/agent_case.py`](../examples/agent_case.py) from SciFact
+Both cases are built by [`examples/agent_case.py`](https://github.com/076923/vecscope/blob/main/examples/agent_case.py) from SciFact
 (BEIR): 5,183 abstracts and 300 test queries with 339 relevance judgments, embedded with
 bge-small-en-v1.5 (384 dims, unit length, the query instruction on queries). Each run used
 Claude Code 2.1 with the model claude-opus-5-5, and could call the vecscope tools and run

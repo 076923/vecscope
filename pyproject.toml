@@ -30,7 +30,7 @@ Homepage = "https://github.com/076923/vecscope"
 Repository = "https://github.com/076923/vecscope"
 Issues = "https://github.com/076923/vecscope/issues"
 Changelog = "https://github.com/076923/vecscope/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/076923/vecscope#readme"
+Documentation = "https://076923.github.io/vecscope/"
 
 [project.optional-dependencies]
 index = ["faiss-cpu>=1.8"]
@@ -42,6 +42,10 @@ milvus = ["pymilvus[milvus_lite]>=2.4"]
 weaviate = ["weaviate-client>=4.4"]
 stores = ["vecscope[index,qdrant,chroma,milvus,weaviate]"]
 dev = ["pytest>=8", "ruff>=0.5", "scipy>=1.10", "pyarrow>=14"]
+
+[dependency-groups]
+# the documentation site: zensical build --strict (see zensical.toml)
+docs = ["zensical>=0.1.0"]
 
 [project.scripts]
 vecscope = "vecscope.cli:main"
