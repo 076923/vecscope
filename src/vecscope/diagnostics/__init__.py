@@ -15,7 +15,17 @@ from vecscope.diagnostics.hubness import hubness
 from vecscope.diagnostics.queries import query_audit
 
 __all__ = [
-    "anisotropy", "ann_recall", "cluster_report", "collapse", "connectivity",
-    "distance_concentration", "duplicate_cutoff", "hubness", "metric_mismatch", "norms", "outliers",
-    "query_audit", "rogue_dimensions",
+    "anisotropy",
+    "ann_recall",
+    "cluster_report",
+    "collapse",
+    "connectivity",
+    "distance_concentration",
+    "duplicate_cutoff",
+    "hubness",
+    "metric_mismatch",
+    "norms",
+    "outliers",
+    "query_audit",
+    "rogue_dimensions",
 ]

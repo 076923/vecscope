@@ -53,14 +53,18 @@ def cluster_report(
         if m.size == 0:
             continue
         center = normalize(q[m].mean(axis=0, keepdims=True))[0]
-        report.append({
-            "cluster": int(c),
-            "size": int(m.size),
-            "share": float(m.size / n),
-            "mean_cosine_to_center": float((q[m] @ center).mean()),
-            "near_duplicate_ratio": float(near_dup[m].mean()),
-            "hub_share": float(nk[m].sum() / nk.sum()) if nk.sum() > 0 else 0.0,
-            "sample_ids": [int(i) for i in m[np.argsort(-(q[m] @ center), kind="stable")[:sample_ids]]],
-        })
+        report.append(
+            {
+                "cluster": int(c),
+                "size": int(m.size),
+                "share": float(m.size / n),
+                "mean_cosine_to_center": float((q[m] @ center).mean()),
+                "near_duplicate_ratio": float(near_dup[m].mean()),
+                "hub_share": float(nk[m].sum() / nk.sum()) if nk.sum() > 0 else 0.0,
+                "sample_ids": [
+                    int(i) for i in m[np.argsort(-(q[m] @ center), kind="stable")[:sample_ids]]
+                ],
+            }
+        )
     report.sort(key=lambda r: -r["size"])
     return report

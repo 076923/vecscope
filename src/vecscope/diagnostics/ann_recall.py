@@ -42,8 +42,13 @@ def tie_tolerance(kth: np.ndarray) -> np.ndarray:
     return 1e-6 + 2e-6 * np.asarray(kth, dtype=np.float64)
 
 
-def ann_recall(exact_knn_idx: np.ndarray, ann_idx: np.ndarray, floor: float = 0.8,
-               exact_dist: np.ndarray | None = None, vectors: np.ndarray | None = None) -> dict:
+def ann_recall(
+    exact_knn_idx: np.ndarray,
+    ann_idx: np.ndarray,
+    floor: float = 0.8,
+    exact_dist: np.ndarray | None = None,
+    vectors: np.ndarray | None = None,
+) -> dict:
     """recall@k of ``ann_idx`` against exact neighbors. Negative ids (faiss fillers, or the
     item itself masked out by the caller) are ignored; each row contributes its first k
     valid ids, so an index that returns self first should be queried with k + 1.
@@ -67,8 +72,9 @@ def ann_recall(exact_knn_idx: np.ndarray, ann_idx: np.ndarray, floor: float = 0.
 
         q = normalize(vectors)
         if ann_idx.size and ann_idx.max() >= q.shape[0]:
-            raise ValueError(f"ann_idx contains id {int(ann_idx.max())} but vectors has "
-                             f"{q.shape[0]} rows")
+            raise ValueError(
+                f"ann_idx contains id {int(ann_idx.max())} but vectors has {q.shape[0]} rows"
+            )
         if np.asarray(exact_dist).shape[1] < k:
             raise ValueError("exact_dist must have at least as many columns as exact_knn_idx")
     hits = np.empty(exact.shape[0])

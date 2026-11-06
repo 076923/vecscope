@@ -54,7 +54,9 @@ def test_query_model_mismatch_trips_query_findings_only():
     assert bad["query_shift"].verdict == "fail" and bad["query_shift"].value > 0.9
     assert healthy["query_shift"].verdict == "ok" and healthy["query_shift"].value < 0.1
     corpus_side = [n for n in good if n not in {"ood_queries", "query_gap", "query_hubness"}]
-    assert all(good[n].value == bad[n].value for n in corpus_side)  # queries never change the corpus
+    assert all(
+        good[n].value == bad[n].value for n in corpus_side
+    )  # queries never change the corpus
 
 
 def test_lowering_ann_search_parameter_lowers_ann_recall():
@@ -105,8 +107,14 @@ def test_sampled_audit_states_what_each_finding_can_say():
     x[:120] = x[120:240]  # 2% duplicate rows, spread through the corpus
     full = by_name(audit(x, k=10, sample=None))
     assert "sample" not in full["hubness"].explanation
-    stable = ("anisotropy", "effective_rank", "rogue_dimensions", "norms", "metric_mismatch",
-              "distance_concentration")
+    stable = (
+        "anisotropy",
+        "effective_rank",
+        "rogue_dimensions",
+        "norms",
+        "metric_mismatch",
+        "distance_concentration",
+    )
     for size in (1500, 3000):
         fraction = size / 6000
         part = by_name(audit(x, k=10, sample=size))
@@ -160,8 +168,10 @@ def test_compare_sample_scope_differs_from_full_scope_and_says_so():
     assert rows <= set(range(2000))
     # an index that returns the item itself first still works when it was queried with k + 1
     with_self = np.concatenate([np.arange(2000)[:, None], ia[:, :5]], axis=1)
-    assert compare(a, b, k=5, sample=0, neighbors_a=with_self,
-                   neighbors_b=ib).topk_overlap == full.topk_overlap
+    assert (
+        compare(a, b, k=5, sample=0, neighbors_a=with_self, neighbors_b=ib).topk_overlap
+        == full.topk_overlap
+    )
     with pytest.raises(ValueError, match="together"):
         compare(a, b, k=5, neighbors_a=ia)
     with pytest.raises(ValueError, match="fewer than k"):
@@ -185,13 +195,26 @@ def test_compare_cli_and_mcp_take_neighbor_files(tmp_path, capsys, monkeypatch):
     ib, _ = exact_knn(normalize(b), 5)
     for name, arr in (("a", a), ("b", b), ("na", ia), ("nb", ib)):
         np.save(tmp_path / f"{name}.npy", arr)
-    args = ["compare", str(tmp_path / "a.npy"), str(tmp_path / "b.npy"), "-k", "5",
-            "--sample", "200", "--json"]
+    args = [
+        "compare",
+        str(tmp_path / "a.npy"),
+        str(tmp_path / "b.npy"),
+        "-k",
+        "5",
+        "--sample",
+        "200",
+        "--json",
+    ]
     assert main(args) == 0
     plain = json.loads(capsys.readouterr().out)
     assert plain["neighbor_scope"] == "sample"
-    assert main(args + ["--neighbors-a", str(tmp_path / "na.npy"),
-                        "--neighbors-b", str(tmp_path / "nb.npy")]) == 0
+    assert (
+        main(
+            args
+            + ["--neighbors-a", str(tmp_path / "na.npy"), "--neighbors-b", str(tmp_path / "nb.npy")]
+        )
+        == 0
+    )
     sup = json.loads(capsys.readouterr().out)
     assert sup["neighbor_scope"] == "full" and sup["neighbor_source"] == "supplied"
     assert main(args + ["--neighbors-a", str(tmp_path / "na.npy")]) == 2
@@ -201,13 +224,22 @@ def test_compare_cli_and_mcp_take_neighbor_files(tmp_path, capsys, monkeypatch):
     pytest.importorskip("mcp")
     from vecscope.mcp_server import compare_embeddings
 
-    res = compare_embeddings(str(tmp_path / "a.npy"), str(tmp_path / "b.npy"), k=5, sample=200,
-                             neighbors_a_path=str(tmp_path / "na.npy"),
-                             neighbors_b_path=str(tmp_path / "nb.npy"))
+    res = compare_embeddings(
+        str(tmp_path / "a.npy"),
+        str(tmp_path / "b.npy"),
+        k=5,
+        sample=200,
+        neighbors_a_path=str(tmp_path / "na.npy"),
+        neighbors_b_path=str(tmp_path / "nb.npy"),
+    )
     assert res["neighbor_source"] == "supplied" and res["topk_overlap"] == sup["topk_overlap"]
     with pytest.raises(Exception, match="go together"):
-        compare_embeddings(str(tmp_path / "a.npy"), str(tmp_path / "b.npy"), k=5,
-                           neighbors_a_path=str(tmp_path / "na.npy"))
+        compare_embeddings(
+            str(tmp_path / "a.npy"),
+            str(tmp_path / "b.npy"),
+            k=5,
+            neighbors_a_path=str(tmp_path / "na.npy"),
+        )
 
 
 def test_gate_separates_absolute_thresholds_from_baseline(tmp_path, capsys):
@@ -233,17 +265,35 @@ def test_gate_separates_absolute_thresholds_from_baseline(tmp_path, capsys):
     assert "gate: pass (baseline)" in capsys.readouterr().out
     # baseline only, but the corpus regressed: duplicates added
     np.save(tmp_path / "worse.npy", np.concatenate([x, x[:100]]))
-    assert main(["audit", str(tmp_path / "worse.npy"), "-k", "5", "--fail-on", "none",
-                 "--baseline", str(base), "--json"]) == 1
+    assert (
+        main(
+            [
+                "audit",
+                str(tmp_path / "worse.npy"),
+                "-k",
+                "5",
+                "--fail-on",
+                "none",
+                "--baseline",
+                str(base),
+                "--json",
+            ]
+        )
+        == 1
+    )
     gate = json.loads(capsys.readouterr().out)["gate"]
     assert gate["absolute"] is False and "collapse" in gate["verdict_regressions"]
-    assert len(gate["reasons"]) == 1 and gate["reasons"][0].startswith("verdict worse than baseline:")
+    assert len(gate["reasons"]) == 1 and gate["reasons"][0].startswith(
+        "verdict worse than baseline:"
+    )
     assert "collapse" in gate["reasons"][0]
     assert main(["audit", str(tmp_path / "worse.npy"), "-k", "5", "--baseline", str(base)]) == 1
     out = capsys.readouterr().out
     assert "gate: FAIL; verdict fail reaches --fail-on fail; verdict worse than baseline:" in out
     d = {"regressions": [], "value_regressions": ["hubness"]}
     g = gate_decision("warn", "fail", d)
-    assert g["exit_code"] == 1 and g["reasons"] == ["value worse than baseline beyond tolerance: hubness"]
+    assert g["exit_code"] == 1 and g["reasons"] == [
+        "value worse than baseline beyond tolerance: hubness"
+    ]
     assert gate_decision("warn", "warn", None)["reasons"] == ["verdict warn reaches --fail-on warn"]
     assert gate_decision("fail", "none", None)["exit_code"] == 0

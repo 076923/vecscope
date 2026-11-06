@@ -14,14 +14,14 @@ def truth(c: np.ndarray, qids: np.ndarray, k: int, block: int = 256):
     idx = np.empty((qids.size, k), dtype=np.int64)
     dist = np.empty((qids.size, k))
     for s in range(0, qids.size, block):
-        q = qids[s:s + block]
+        q = qids[s : s + block]
         d = 1.0 - c64[q] @ c64.T
         d[np.arange(q.size), q] = np.inf
         part = np.argpartition(d, k, axis=1)[:, :k]
         pd = np.take_along_axis(d, part, axis=1)
         o = np.argsort(pd, axis=1, kind="stable")
-        idx[s:s + block] = np.take_along_axis(part, o, axis=1)
-        dist[s:s + block] = np.take_along_axis(pd, o, axis=1)
+        idx[s : s + block] = np.take_along_axis(part, o, axis=1)
+        dist[s : s + block] = np.take_along_axis(pd, o, axis=1)
     return idx, dist
 
 
@@ -38,7 +38,7 @@ def drop_self(idx: np.ndarray, qids: np.ndarray, k: int) -> np.ndarray:
     out = np.full((idx.shape[0], k), -1, dtype=np.int64)
     for i, row in enumerate(idx):
         keep = row[(row >= 0) & (row != qids[i])][:k]
-        out[i, :keep.size] = keep
+        out[i, : keep.size] = keep
     return out
 
 

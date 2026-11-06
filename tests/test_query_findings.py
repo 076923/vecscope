@@ -68,15 +68,30 @@ def test_query_shift_round_trips_through_json(space):
     assert _by(audit(corpus, k=10, queries=other, query_baseline=base))["query_shift"].value > 0.9
 
 
-@pytest.mark.parametrize("bad, err, match", [
-    ([], TypeError, "findings list"),
-    ({"findings": []}, ValueError, "no query_gap finding"),
-    ({"findings": [{"name": "query_gap", "details": {"median_query_nn_distance": 0.2}}]},
-     ValueError, "no query_gap finding"),
-    ({"findings": [{"name": "query_gap", "details": {"median_query_nn_distance": 0.2,
-                                                     "query_nn_mad": float("nan")}}]},
-     ValueError, "no query_gap finding"),
-])
+@pytest.mark.parametrize(
+    "bad, err, match",
+    [
+        ([], TypeError, "findings list"),
+        ({"findings": []}, ValueError, "no query_gap finding"),
+        (
+            {"findings": [{"name": "query_gap", "details": {"median_query_nn_distance": 0.2}}]},
+            ValueError,
+            "no query_gap finding",
+        ),
+        (
+            {
+                "findings": [
+                    {
+                        "name": "query_gap",
+                        "details": {"median_query_nn_distance": 0.2, "query_nn_mad": float("nan")},
+                    }
+                ]
+            },
+            ValueError,
+            "no query_gap finding",
+        ),
+    ],
+)
 def test_query_baseline_validation(space, bad, err, match):
     corpus, queries, _ = space
     with pytest.raises(err, match=match):
@@ -99,8 +114,17 @@ def test_cli_baseline_with_queries_adds_query_shift(tmp_path, capsys, space):
     np.save(tmp_path / "o.npy", other)
     main(["audit", str(tmp_path / "c.npy"), "--queries", str(tmp_path / "q.npy"), "--json"])
     (tmp_path / "base.json").write_text(capsys.readouterr().out)
-    code = main(["audit", str(tmp_path / "c.npy"), "--queries", str(tmp_path / "o.npy"),
-                 "--baseline", str(tmp_path / "base.json"), "--json"])
+    code = main(
+        [
+            "audit",
+            str(tmp_path / "c.npy"),
+            "--queries",
+            str(tmp_path / "o.npy"),
+            "--baseline",
+            str(tmp_path / "base.json"),
+            "--json",
+        ]
+    )
     out = json.loads(capsys.readouterr().out)
     names = {f["name"]: f for f in out["findings"]}
     assert code == 1 and names["query_shift"]["verdict"] == "fail"
@@ -109,8 +133,17 @@ def test_cli_baseline_with_queries_adds_query_shift(tmp_path, capsys, space):
     # a baseline without query distances still diffs; query_shift is skipped
     main(["audit", str(tmp_path / "c.npy"), "--json"])
     (tmp_path / "noq.json").write_text(capsys.readouterr().out)
-    main(["audit", str(tmp_path / "c.npy"), "--queries", str(tmp_path / "q.npy"),
-          "--baseline", str(tmp_path / "noq.json"), "--json"])
+    main(
+        [
+            "audit",
+            str(tmp_path / "c.npy"),
+            "--queries",
+            str(tmp_path / "q.npy"),
+            "--baseline",
+            str(tmp_path / "noq.json"),
+            "--json",
+        ]
+    )
     out = json.loads(capsys.readouterr().out)
     assert "query_shift" not in {f["name"] for f in out["findings"]}
 
@@ -126,8 +159,11 @@ def test_mcp_query_baseline_path(tmp_path, space, monkeypatch):
     np.save(tmp_path / "o.npy", other)
     base = audit_embeddings(str(tmp_path / "c.npy"), queries_path=str(tmp_path / "q.npy"))
     (tmp_path / "base.json").write_text(json.dumps(base))
-    res = audit_embeddings(str(tmp_path / "c.npy"), queries_path=str(tmp_path / "o.npy"),
-                           query_baseline_path=str(tmp_path / "base.json"))
+    res = audit_embeddings(
+        str(tmp_path / "c.npy"),
+        queries_path=str(tmp_path / "o.npy"),
+        query_baseline_path=str(tmp_path / "base.json"),
+    )
     assert "query_shift=" in res["summary"] and "query_gap=" in res["summary"]
 
 

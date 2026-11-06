@@ -118,8 +118,10 @@ def compare(
     if a.ndim != 2 or b.ndim != 2 or a.shape[1] < 1 or b.shape[1] < 1:
         raise ValueError("both inputs must be 2-d (n x dim) with at least one column")
     if a.shape[0] != b.shape[0]:
-        raise ValueError(f"row counts differ ({a.shape[0]} vs {b.shape[0]}); rows must be the "
-                         "same items in the same order")
+        raise ValueError(
+            f"row counts differ ({a.shape[0]} vs {b.shape[0]}); rows must be the "
+            "same items in the same order"
+        )
     if isinstance(k, bool) or not isinstance(k, (int, np.integer)) or k < 1:
         raise ValueError(f"k must be a positive integer, got {k!r}")
     if not (0.0 < float(near_dup_cos) <= 1.0):
@@ -142,8 +144,11 @@ def compare(
         neighbors_a = _checked_neighbors(neighbors_a, n_total, k, "neighbors_a")
         neighbors_b = _checked_neighbors(neighbors_b, n_total, k, "neighbors_b")
     sampled = sample is not None and n_total > sample
-    rows = (np.sort(np.random.default_rng(seed).choice(n_total, sample, replace=False))
-            if sampled else np.arange(n_total))
+    rows = (
+        np.sort(np.random.default_rng(seed).choice(n_total, sample, replace=False))
+        if sampled
+        else np.arange(n_total)
+    )
     n = int(rows.size)
     if k >= n:
         raise ValueError(f"k={k} must be smaller than the number of rows ({n})")
@@ -172,7 +177,9 @@ def compare(
         & (first_b[inv_b[ia[:, 0]]] == first_b[inv_b[ib[:, 0]]])
     )
     overlap = row_overlap(ia, ib)
-    own_a, own_b = (cnt_a[inv_a[rows]], cnt_b[inv_b[rows]]) if supplied else (cnt_a[inv_a], cnt_b[inv_b])
+    own_a, own_b = (
+        (cnt_a[inv_a[rows]], cnt_b[inv_b[rows]]) if supplied else (cnt_a[inv_a], cnt_b[inv_b])
+    )
     # as collapse: an exact copy counts whatever its cosine says (zero vectors)
     fa = ((1.0 - da[:, 0].astype(np.float64)) >= near_dup_cos) | (own_a > 1)
     fb = ((1.0 - db[:, 0].astype(np.float64)) >= near_dup_cos) | (own_b > 1)
@@ -182,12 +189,27 @@ def compare(
     worst = np.argsort(overlap, kind="stable")[:sample_disagreements]
     # report ids of the input rows: supplied ids already are, recomputed ones index the sample
     to_input = (lambda j: int(j)) if supplied else (lambda j: int(rows[j]))
-    dis = [{"row": int(rows[i]), "overlap": float(overlap[i]), "nearest_a": to_input(ia[i, 0]),
-            "nearest_b": to_input(ib[i, 0])} for i in worst]
+    dis = [
+        {
+            "row": int(rows[i]),
+            "overlap": float(overlap[i]),
+            "nearest_a": to_input(ia[i, 0]),
+            "nearest_b": to_input(ib[i, 0]),
+        }
+        for i in worst
+    ]
 
     res = CompareResult(
-        "vecscope", __version__, n, int(a.shape[1]), int(b.shape[1]), int(k),
-        float(near_dup_cos), bool(sampled), n_total, scope,
+        "vecscope",
+        __version__,
+        n,
+        int(a.shape[1]),
+        int(b.shape[1]),
+        int(k),
+        float(near_dup_cos),
+        bool(sampled),
+        n_total,
+        scope,
         "supplied" if supplied else "recomputed",
         nn1_agreement=float(nn1.mean()),
         topk_overlap=float(overlap.mean()),
@@ -206,10 +228,13 @@ def compare(
         f"{res.topk_overlap:.1%} of their top-{k} lists on average ({res.rows_with_no_overlap:.1%} "
         f"of rows share nothing). Near-duplicates: {res.near_duplicate_ratio_a:.1%} in A, "
         f"{res.near_duplicate_ratio_b:.1%} in B, {res.near_duplicate_both:.1%} in both"
-        + (f", and {same_nearest:.1%} of those agree on the partner" if same_nearest is not None
-           else "")
+        + (
+            f", and {same_nearest:.1%} of those agree on the partner"
+            if same_nearest is not None
+            else ""
+        )
         + ". Duplicates flagged by both spaces with the same partner are a property of the "
-          "items; duplicates flagged by one space only point at that model."
+        "items; duplicates flagged by one space only point at that model."
     )
     if scope == "sample":
         res.explanation += (
@@ -229,20 +254,31 @@ def compare(
 
 
 def render_compare(res: CompareResult) -> str:
-    head = (f"vecscope {res.version}  compare  n={res.n} dim={res.dim_a}/{res.dim_b} k={res.k}"
-            + (f"  (sampled from {res.n_total} rows)" if res.sampled else "")
-            + f"  neighbors={res.neighbor_source}/{res.neighbor_scope}")
-    same = (f"{res.same_nearest_among_both_flagged:.4f}"
-            if res.same_nearest_among_both_flagged is not None else "n/a")
-    lines = [head,
-             (f"  nn1_agreement={res.nn1_agreement:.4f}  topk_overlap={res.topk_overlap:.4f}  "
-              f"topk_overlap_p10={res.topk_overlap_p10:.4f}  rows_with_no_overlap="
-              f"{res.rows_with_no_overlap:.4f}"),
-             (f"  near_dup A={res.near_duplicate_ratio_a:.4f}  B={res.near_duplicate_ratio_b:.4f}  "
-              f"both={res.near_duplicate_both:.4f}  only_A={res.near_duplicate_only_a:.4f}  "
-              f"only_B={res.near_duplicate_only_b:.4f}  same_nearest_among_both={same}"),
-             f"{'':4}{res.explanation}",
-             "  largest disagreements (row: nearest in A / nearest in B, top-k overlap):"]
+    head = (
+        f"vecscope {res.version}  compare  n={res.n} dim={res.dim_a}/{res.dim_b} k={res.k}"
+        + (f"  (sampled from {res.n_total} rows)" if res.sampled else "")
+        + f"  neighbors={res.neighbor_source}/{res.neighbor_scope}"
+    )
+    same = (
+        f"{res.same_nearest_among_both_flagged:.4f}"
+        if res.same_nearest_among_both_flagged is not None
+        else "n/a"
+    )
+    lines = [
+        head,
+        (
+            f"  nn1_agreement={res.nn1_agreement:.4f}  topk_overlap={res.topk_overlap:.4f}  "
+            f"topk_overlap_p10={res.topk_overlap_p10:.4f}  rows_with_no_overlap="
+            f"{res.rows_with_no_overlap:.4f}"
+        ),
+        (
+            f"  near_dup A={res.near_duplicate_ratio_a:.4f}  B={res.near_duplicate_ratio_b:.4f}  "
+            f"both={res.near_duplicate_both:.4f}  only_A={res.near_duplicate_only_a:.4f}  "
+            f"only_B={res.near_duplicate_only_b:.4f}  same_nearest_among_both={same}"
+        ),
+        f"{'':4}{res.explanation}",
+        "  largest disagreements (row: nearest in A / nearest in B, top-k overlap):",
+    ]
     for d in res.sample_disagreements:
         lines.append(f"{'':4}{d['row']}: {d['nearest_a']} / {d['nearest_b']}  {d['overlap']:.2f}")
     return "\n".join(lines)

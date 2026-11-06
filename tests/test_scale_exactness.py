@@ -24,6 +24,7 @@ faiss = pytest.importorskip("faiss")
 
 def _gpu():
     from vecscope.sweep import gpu_available
+
     return gpu_available(faiss)
 
 
@@ -43,7 +44,9 @@ def test_exact_paths_match_float64_medium(kind):
     ki, kd = exact_knn(c, 10)
     assert _check(ki[qids], ref_dist, c64, qids)[0] == 0
     # reported float32 distances are within float32 rounding of float64
-    assert np.abs(kd[qids].astype(np.float64) - np.sort(d64(c64, qids, ki[qids]), axis=1)).max() < 5e-6
+    assert (
+        np.abs(kd[qids].astype(np.float64) - np.sort(d64(c64, qids, ki[qids]), axis=1)).max() < 5e-6
+    )
     qi, _ = query_knn(c, c[qids], 11)
     assert _check(drop_self(qi, qids, 10), ref_dist, c64, qids)[0] == 0
     flat = faiss.IndexFlatIP(128)

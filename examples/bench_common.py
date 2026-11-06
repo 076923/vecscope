@@ -53,9 +53,9 @@ def corpus(kind: str, n: int, dim: int, seed: int = 0, centers: int | None = Non
         elif kind == "duplicates":
             m = n // 10
             src = rng.choice(n - m, m, replace=False)
-            x[n - m:] = x[src]
+            x[n - m :] = x[src]
             half = m // 2
-            x[n - m + half:] += rng.standard_normal((m - half, dim), dtype=np.float32) * 1e-4
+            x[n - m + half :] += rng.standard_normal((m - half, dim), dtype=np.float32) * 1e-4
     else:
         raise ValueError(f"unknown corpus kind {kind!r}; known: {CORPORA}")
     x = x.astype(np.float32, copy=False)
@@ -69,7 +69,9 @@ def _clustered(rng, n, dim, n_c, spread):
 
 def _cmd(args: list[str]) -> str | None:
     try:
-        return subprocess.run(args, check=False, capture_output=True, text=True, timeout=10).stdout.strip()
+        return subprocess.run(
+            args, check=False, capture_output=True, text=True, timeout=10
+        ).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return None
 
@@ -86,12 +88,16 @@ def machine() -> dict:
         "cpu_model": platform.processor() or None,
         "logical_cpus": os.cpu_count(),
         "mem_total_gib": None,
-        "gpu": _cmd(["nvidia-smi", "--query-gpu=name,driver_version,memory.total",
-                     "--format=csv,noheader"]) or None,
+        "gpu": _cmd(
+            ["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"]
+        )
+        or None,
         "faiss": None,
         "faiss_gpus": 0,
-        "threads": {k: os.environ.get(k) for k in
-                    ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")},
+        "threads": {
+            k: os.environ.get(k)
+            for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+        },
         "time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     try:

@@ -36,6 +36,7 @@ def _groups(ev):
 
 # --------------------------------------------------------------------------------- plan
 
+
 def test_healthy_corpus_has_an_empty_plan():
     assert audit(_unit(_clustered(1500)), k=10).plan == []
 
@@ -48,7 +49,10 @@ def test_shared_offset_groups_anisotropy_with_the_collapse_it_causes():
     names = [f["name"] for f in first["findings"]]
     assert first["order"] == 1 and "anisotropy" in names
     # every cosine passes the near-duplicate cutoff, but there is no copy to remove
-    assert "collapse" in names or ev.findings[[f.name for f in ev.findings].index("collapse")].verdict == "ok"
+    assert (
+        "collapse" in names
+        or ev.findings[[f.name for f in ev.findings].index("collapse")].verdict == "ok"
+    )
     assert "subtract the corpus mean" in first["first_change"]
 
 
@@ -103,8 +107,12 @@ def test_query_side_steps_come_last_and_query_hubness_follows_corpus_hubs():
 
 def test_query_gap_next_to_duplicates_is_read_again_after_deduplicating():
     # near-copies shrink the corpus nearest-neighbor distance the gap divides by
-    dup = {"name": "collapse", "value": 0.75, "verdict": "fail",
-           "details": {"exact_duplicate_ratio": 0.0}}
+    dup = {
+        "name": "collapse",
+        "value": 0.75,
+        "verdict": "fail",
+        "details": {"exact_duplicate_ratio": 0.0},
+    }
     gap = {"name": "query_gap", "value": 4.0, "verdict": "fail", "details": {}}
     plan = build_plan([dup, gap])
     assert [s["group"] for s in plan] == ["input_integrity"]
@@ -119,10 +127,18 @@ def test_query_gap_next_to_duplicates_is_read_again_after_deduplicating():
 
 
 def test_islands_made_of_near_copies_go_with_the_duplicates():
-    dup = {"name": "collapse", "value": 0.03, "verdict": "warn",
-           "details": {"exact_duplicate_ratio": 0.0, "largest_near_duplicate_groups": [120, 40]}}
-    isl = {"name": "connectivity", "value": 0.02, "verdict": "warn",
-           "details": {"min_island_size": 500}}
+    dup = {
+        "name": "collapse",
+        "value": 0.03,
+        "verdict": "warn",
+        "details": {"exact_duplicate_ratio": 0.0, "largest_near_duplicate_groups": [120, 40]},
+    }
+    isl = {
+        "name": "connectivity",
+        "value": 0.02,
+        "verdict": "warn",
+        "details": {"min_island_size": 500},
+    }
     plan = build_plan([dup, isl])
     assert [s["group"] for s in plan] == ["input_integrity"]
     placed = {f["name"]: f["placed_because"] for f in plan[0]["findings"]}
@@ -146,8 +162,15 @@ def test_every_planned_finding_says_why_it_is_there():
 
 
 def test_inconclusive_findings_are_marked_in_the_plan():
-    findings = [{"name": "connectivity", "value": 0.02, "verdict": "warn", "details": {},
-                 "inconclusive": True}]
+    findings = [
+        {
+            "name": "connectivity",
+            "value": 0.02,
+            "verdict": "warn",
+            "details": {},
+            "inconclusive": True,
+        }
+    ]
     step = build_plan(findings)[0]
     assert step["only_inconclusive"] is True and step["findings"][0]["inconclusive"] is True
 
@@ -161,9 +184,12 @@ def test_plan_is_deterministic_and_in_json():
 
 # -------------------------------------------------------------------------- incremental
 
+
 @pytest.mark.parametrize("metric", ["cosine", "dot"])
 def test_extend_equals_full_exact_knn(metric):
-    x = _clustered(1300, seed=3) * np.random.default_rng(4).uniform(0.5, 2, (1300, 1)).astype(np.float32)
+    x = _clustered(1300, seed=3) * np.random.default_rng(4).uniform(0.5, 2, (1300, 1)).astype(
+        np.float32
+    )
     old_i, old_d = exact_knn(x[:1000], 10, metric=metric)
     ext_i, ext_d = extend_knn(x, old_i, old_d, 1000, 10, metric=metric)
     full_i, full_d = exact_knn(x, 10, metric=metric)
@@ -278,5 +304,6 @@ def test_cli_knn_cache(tmp_path, capsys):
     np.save(tmp_path / "c.npy", y)
     main(["audit", str(tmp_path / "c.npy"), "--knn-cache", str(cache)])
     assert "updated, 1 changed," in capsys.readouterr().out
-    assert main(["audit", str(tmp_path / "b.npy"), "--knn-cache", str(cache),
-                 "--sample", "500"]) == 2
+    assert (
+        main(["audit", str(tmp_path / "b.npy"), "--knn-cache", str(cache), "--sample", "500"]) == 2
+    )

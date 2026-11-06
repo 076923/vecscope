@@ -89,11 +89,13 @@ def query_audit(
         ref_median, ref_mad = reference
         cutoff_ref = float(ref_median + 3.0 * ref_mad)
         shifted = nearest > cutoff_ref
-        out.update({
-            "shifted_query_ratio": float(shifted.mean()),
-            "shift_cutoff_distance": cutoff_ref,
-            "reference_median_nn_distance": float(ref_median),
-            "reference_nn_mad": float(ref_mad),
-            "shifted_sample_ids": [int(i) for i in worst if shifted[i]],
-        })
+        out.update(
+            {
+                "shifted_query_ratio": float(shifted.mean()),
+                "shift_cutoff_distance": cutoff_ref,
+                "reference_median_nn_distance": float(ref_median),
+                "reference_nn_mad": float(ref_mad),
+                "shifted_sample_ids": [int(i) for i in worst if shifted[i]],
+            }
+        )
     return out

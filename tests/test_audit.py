@@ -69,7 +69,9 @@ def test_collapse_reports_group_structure():
     assert d["largest_near_duplicate_groups"][0] == 32
     assert d["near_duplicate_groups"] >= 100
     assert d["largest_near_duplicate_groups"][1] == 2  # the other copies pair up
-    assert d["sample_pairs"] and all(i != j and 0.99 <= cos <= 1.0 for i, j, cos in d["sample_pairs"])
+    assert d["sample_pairs"] and all(
+        i != j and 0.99 <= cos <= 1.0 for i, j, cos in d["sample_pairs"]
+    )
     assert len({tuple(p[:2]) for p in d["sample_pairs"]}) == len(d["sample_pairs"])
     big = {0, 600} | set(range(700, 730))  # rows of the 32-row group
     assert sum(p[0] in big or p[1] in big for p in d["sample_pairs"]) == 1  # one pair per group
@@ -98,7 +100,9 @@ def test_compare_two_spaces():
     assert noise.topk_overlap < 0.1 and noise.near_duplicate_only_a > 0
     assert noise.same_nearest_among_both_flagged is None
     assert len(noise.sample_disagreements) == 10
-    assert "nn1_agreement" in render_compare(noise) and '"topk_overlap"' in json.dumps(noise.to_dict())
+    assert "nn1_agreement" in render_compare(noise) and '"topk_overlap"' in json.dumps(
+        noise.to_dict()
+    )
     sampled = compare(a, a, k=5, sample=200)
     assert sampled.sampled and sampled.n == 200 and sampled.n_total == 550
     with pytest.raises(ValueError):
@@ -144,7 +148,9 @@ def test_diff_evidence_and_baseline_cli(tmp_path, capsys):
     loose = audit(good, k=5, thresholds={"collapse.near_duplicate_ratio": (0.5, 0.9)}).to_dict()
     assert diff_evidence(loose, old)["comparable"] is False  # thresholds differ
     by = {c["name"]: c for c in d["changes"]}
-    assert by["collapse"]["delta"] == pytest.approx(new["findings"][4]["value"] - old["findings"][4]["value"])
+    assert by["collapse"]["delta"] == pytest.approx(
+        new["findings"][4]["value"] - old["findings"][4]["value"]
+    )
     assert diff_evidence(old, old)["regressions"] == []
     with pytest.raises(ValueError, match="schema_version"):
         diff_evidence(new, {**old, "schema_version": 99})
@@ -173,7 +179,9 @@ def test_golden_evidence_for_shipped_examples():
     import pathlib
 
     root = pathlib.Path(__file__).resolve().parents[1]
-    spec = importlib.util.spec_from_file_location("make_examples", root / "examples" / "make_examples.py")
+    spec = importlib.util.spec_from_file_location(
+        "make_examples", root / "examples" / "make_examples.py"
+    )
     make_examples = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(make_examples)
     for name, x in make_examples.make_examples().items():  # the .npy files are not in git
@@ -189,8 +197,17 @@ def test_golden_evidence_for_shipped_examples():
             loose = f["name"] in {"hubness", "antihubs", "outliers", "connectivity"}
             # distance_concentration depends on a median of float32 distances, which a
             # different BLAS accumulation order moves by a few 1e-6 relative
-            tol = (5e-2, 1e-3) if loose else (1e-4, 1e-8) if f["name"] == "distance_concentration" else (1e-5, 1e-8)
-            assert f["value"] == pytest.approx(g["value"], rel=tol[0], abs=tol[1]), (name, f["name"])
+            tol = (
+                (5e-2, 1e-3)
+                if loose
+                else (1e-4, 1e-8)
+                if f["name"] == "distance_concentration"
+                else (1e-5, 1e-8)
+            )
+            assert f["value"] == pytest.approx(g["value"], rel=tol[0], abs=tol[1]), (
+                name,
+                f["name"],
+            )
             assert set(f["details"]) == set(g["details"]), (name, f["name"])
 
 
@@ -205,8 +222,13 @@ def test_neighbor_ids_written_as_floats_and_bad_baseline_file(tmp_path, capsys):
         load_neighbors(tmp_path / "frac.csv")
     with pytest.raises(FileNotFoundError):
         load_neighbors(tmp_path / "missing.csv")
-    np.save(tmp_path / "x.npy", np.random.default_rng(0).standard_normal((50, 8)).astype(np.float32))
-    assert main(["audit", str(tmp_path / "x.npy"), "-k", "5", "--baseline", str(tmp_path / "x.npy")]) == 2
+    np.save(
+        tmp_path / "x.npy", np.random.default_rng(0).standard_normal((50, 8)).astype(np.float32)
+    )
+    assert (
+        main(["audit", str(tmp_path / "x.npy"), "-k", "5", "--baseline", str(tmp_path / "x.npy")])
+        == 2
+    )
     assert "--baseline" in capsys.readouterr().err
 
 
@@ -231,7 +253,9 @@ def test_cli_reports_missing_gpu_as_user_error(tmp_path, capsys, monkeypatch):
     from vecscope.cli import main
 
     monkeypatch.setattr(sw, "gpu_available", lambda faiss: False)
-    np.save(tmp_path / "x.npy", np.random.default_rng(0).standard_normal((100, 8)).astype(np.float32))
+    np.save(
+        tmp_path / "x.npy", np.random.default_rng(0).standard_normal((100, 8)).astype(np.float32)
+    )
     assert main(["sweep", str(tmp_path / "x.npy"), "--device", "gpu"]) == 2
     assert "no GPU" in capsys.readouterr().err
 
@@ -273,8 +297,11 @@ def test_equal_warn_and_fail_override_keeps_the_default_direction():
     assert _verdict("hubness.skewness", 3.0, th) == "fail"
     rng = np.random.default_rng(0)
     x = rng.standard_normal((200, 16)).astype(np.float32)
-    f = next(f for f in audit(x, k=5, thresholds={"metric_mismatch.topk_overlap": (0.8, 0.8)}).findings
-             if f.name == "metric_mismatch")
+    f = next(
+        f
+        for f in audit(x, k=5, thresholds={"metric_mismatch.topk_overlap": (0.8, 0.8)}).findings
+        if f.name == "metric_mismatch"
+    )
     assert f.lower_is_worse and f.healthy_range.startswith("ok >=")
 
 
@@ -356,7 +383,10 @@ def test_short_distinct_rows_are_not_exact_copies_and_loader_messages(tmp_path):
     x = rng.standard_normal((400, 16)).astype(np.float32)
     x[:40] *= 1e-7  # tiny but distinct directions: not copies of each other
     c = next(f for f in audit(x, k=5).findings if f.name == "collapse")
-    assert c.details["exact_duplicate_ratio"] == 0.0 and c.details["largest_exact_duplicate_groups"] == []
+    assert (
+        c.details["exact_duplicate_ratio"] == 0.0
+        and c.details["largest_exact_duplicate_groups"] == []
+    )
     (tmp_path / "scalars.jsonl").write_text("1\n2\n3\n", encoding="utf-8")
     with pytest.raises(ValueError, match="list of numbers"):
         load_vectors(tmp_path / "scalars.jsonl")
@@ -390,7 +420,9 @@ def test_tie_aware_recall_still_counts_a_missed_unique_neighbor():
     assert tie_aware_hits([0.1, 0.2, 0.3, 0.4, 0.5], [0.5] * 5) == 1
     # a hit must not be wasted on a slot another id could still fill (maximum matching)
     assert tie_aware_hits([0.1, 0.100005, 0.100010], [0.100010, 0.100005, 0.1]) == 3
-    assert tie_aware_hits([0.1, 0.2, 0.2, 0.2, 0.3], [0.2, 0.2, 0.2, 0.2, 0.2]) == 3  # tie set capped
+    assert (
+        tie_aware_hits([0.1, 0.2, 0.2, 0.2, 0.3], [0.2, 0.2, 0.2, 0.2, 0.2]) == 3
+    )  # tie set capped
     rng = np.random.default_rng(0)
     x = rng.standard_normal((400, 32)).astype(np.float32)
     x[1] = x[0] + rng.standard_normal(32).astype(np.float32) * 0.05  # unique nearest of row 0
@@ -474,12 +506,23 @@ def test_near_dup_cutoff_is_part_of_baseline_comparability(tmp_path, capsys):
     assert diff_evidence(audit(x, k=5, near_dup_cos=0.5).to_dict(), old)["comparable"] is False
     (tmp_path / "b.json").write_text(json.dumps(old), encoding="utf-8")
     np.save(tmp_path / "x.npy", x)
-    main(["audit", str(tmp_path / "x.npy"), "-k", "5", "--near-dup", "0.5", "--baseline", str(tmp_path / "b.json")])
+    main(
+        [
+            "audit",
+            str(tmp_path / "x.npy"),
+            "-k",
+            "5",
+            "--near-dup",
+            "0.5",
+            "--baseline",
+            str(tmp_path / "b.json"),
+        ]
+    )
     assert "near-dup cutoff differ" in capsys.readouterr().out
     big = rng.standard_normal((50, 4)) * 1e300
     with pytest.raises(ValueError, match="Rescale"):
         compare(big, big, k=3)
-    z = np.concatenate([rng.integers(-5, 5, (20, 4)), np.full((3, 4), -2**63, np.int64)])
+    z = np.concatenate([rng.integers(-5, 5, (20, 4)), np.full((3, 4), -(2**63), np.int64)])
     with pytest.raises(ValueError, match="Rescale"):
         audit(z, k=3)
     y = np.repeat(rng.standard_normal((50, 1536)).astype(np.float32), 2, axis=0)
@@ -567,8 +610,9 @@ def test_query_and_json_values_beyond_float32_get_the_rescale_message(tmp_path, 
             audit(x, k=5, queries=rng.standard_normal((4, 8)) * 1e300)
         with pytest.raises(ValueError, match="real numbers"):
             audit(x, k=5, queries=np.array([["a"] * 8]))
-    (tmp_path / "big.json").write_text("[[1e39,1,2,3,4,5,6,7],[1,2,3,4,5,6,7,8],[2,3,4,5,6,7,8,9]]",
-                                       encoding="utf-8")
+    (tmp_path / "big.json").write_text(
+        "[[1e39,1,2,3,4,5,6,7],[1,2,3,4,5,6,7,8],[2,3,4,5,6,7,8,9]]", encoding="utf-8"
+    )
     assert main(["audit", str(tmp_path / "big.json"), "-k", "1"]) == 2
     assert "Rescale" in capsys.readouterr().err
 
@@ -680,8 +724,9 @@ def test_jsonl_streams_in_blocks_with_the_same_values_and_messages(tmp_path, mon
     x = np.random.default_rng(0).standard_normal((11, 3))
     lines = [json.dumps({"id": i, "embedding": r}) for i, r in enumerate(x.tolist())]
     path = tmp_path / "a.jsonl"
-    path.write_text("\ufeff" + "\n".join(lines[:5]) + "\n\n" + "\r\n".join(lines[5:]) + "\n",
-                    encoding="utf-8")
+    path.write_text(
+        "\ufeff" + "\n".join(lines[:5]) + "\n\n" + "\r\n".join(lines[5:]) + "\n", encoding="utf-8"
+    )
     assert np.array_equal(vio.load_vectors(path), x)
     assert np.array_equal(vio.load_vectors("b.jsonl", path.read_bytes()), x)
     bad = lines[:6] + [json.dumps({"id": 6, "embedding": [1.0, 2.0]})]
@@ -715,14 +760,22 @@ def test_parquet_reads_the_vector_column_in_batches(tmp_path, monkeypatch):
     data = (tmp_path / "v.parquet").read_bytes()
     assert np.array_equal(vio.load_vectors("w.parquet", data), x)
     ragged = [[1.0, 2.0]] * 5 + [[1.0]] + [[1.0, 2.0]] * 2
-    for rows, err in ((ragged, "different lengths"), ([[1.0, 2.0]] * 6 + [None], "row 6 is null"),
-                      ([[1.0, None]], "holds a null"), ([[]], "empty lists")):
-        pq.write_table(pa.table({"embedding": pa.array(rows, pa.list_(pa.float64()))}),
-                       tmp_path / "bad.parquet", row_group_size=4)
+    for rows, err in (
+        (ragged, "different lengths"),
+        ([[1.0, 2.0]] * 6 + [None], "row 6 is null"),
+        ([[1.0, None]], "holds a null"),
+        ([[]], "empty lists"),
+    ):
+        pq.write_table(
+            pa.table({"embedding": pa.array(rows, pa.list_(pa.float64()))}),
+            tmp_path / "bad.parquet",
+            row_group_size=4,
+        )
         with pytest.raises(ValueError, match=err):
             vio.load_vectors(tmp_path / "bad.parquet")
-    pq.write_table(pa.table({"embedding": pa.array([], pa.list_(pa.float64()))}),
-                   tmp_path / "none.parquet")
+    pq.write_table(
+        pa.table({"embedding": pa.array([], pa.list_(pa.float64()))}), tmp_path / "none.parquet"
+    )
     with pytest.raises(ValueError, match="empty"):
         vio.load_vectors(tmp_path / "none.parquet")
     (tmp_path / "junk.parquet").write_bytes(b"not parquet")
@@ -783,7 +836,9 @@ def test_unit_vectors_skip_metric_mismatch():
 def test_outliers_and_sample_ids():
     rng = np.random.default_rng(0)
     centers = rng.standard_normal((10, 64)).astype(np.float32)
-    clustered = centers[rng.integers(0, 10, 980)] + rng.standard_normal((980, 64)).astype(np.float32) * 0.1
+    clustered = (
+        centers[rng.integers(0, 10, 980)] + rng.standard_normal((980, 64)).astype(np.float32) * 0.1
+    )
     junk = rng.standard_normal((20, 64)).astype(np.float32)  # far from every cluster
     x = np.concatenate([junk, clustered])
     f = _by(audit(x, k=5))["outliers"]
@@ -796,7 +851,9 @@ def test_small_islands_fail_but_big_clusters_pass():
     big = centers[rng.integers(0, 5, 1000)] + rng.standard_normal((1000, 32)).astype(np.float32)
     assert _by(audit(big, k=3))["connectivity"].verdict == "ok"
     islands = rng.standard_normal((30, 32)).astype(np.float32) * 10
-    islands = np.repeat(islands, 5, axis=0) + rng.standard_normal((150, 32)).astype(np.float32) * 0.3
+    islands = (
+        np.repeat(islands, 5, axis=0) + rng.standard_normal((150, 32)).astype(np.float32) * 0.3
+    )
     f = _by(audit(np.concatenate([big, islands]), k=3))["connectivity"]
     assert f.verdict == "fail" and f.details["n_islands"] >= 25
 
@@ -824,7 +881,10 @@ def test_queries_in_and_out_of_distribution():
     good = _by(audit(corpus, k=5, queries=in_dist))
     bad = _by(audit(corpus, k=5, queries=ood))
     assert good["ood_queries"].verdict == "ok"
-    assert bad["ood_queries"].verdict == "fail" and len(bad["ood_queries"].details["ood_sample_ids"]) > 0
+    assert (
+        bad["ood_queries"].verdict == "fail"
+        and len(bad["ood_queries"].details["ood_sample_ids"]) > 0
+    )
 
 
 def test_queries_shape_is_validated():
@@ -832,8 +892,11 @@ def test_queries_shape_is_validated():
 
     rng = np.random.default_rng(0)
     with pytest.raises(ValueError):
-        audit(rng.standard_normal((100, 8)).astype(np.float32), k=3,
-              queries=rng.standard_normal((10, 4)).astype(np.float32))
+        audit(
+            rng.standard_normal((100, 8)).astype(np.float32),
+            k=3,
+            queries=rng.standard_normal((10, 4)).astype(np.float32),
+        )
 
 
 def test_cluster_report_sizes_and_ids():
@@ -874,10 +937,12 @@ def test_sweep_recommends_a_config():
 def test_sweep_recommendation_margin_is_deterministic():
     from vecscope.sweep import SweepPoint, _recommend
 
-    pts = [SweepPoint("hnsw", {"M": 8}, 0.961, 0.1, 900.0),
-           SweepPoint("hnsw", {"M": 16}, 0.983, 0.1, 700.0),
-           SweepPoint("hnsw", {"M": 32}, 0.990, 0.1, 500.0),
-           SweepPoint("ivf", {"nprobe": 1}, 0.90, 0.1, 2000.0)]
+    pts = [
+        SweepPoint("hnsw", {"M": 8}, 0.961, 0.1, 900.0),
+        SweepPoint("hnsw", {"M": 16}, 0.983, 0.1, 700.0),
+        SweepPoint("hnsw", {"M": 32}, 0.990, 0.1, 500.0),
+        SweepPoint("ivf", {"nprobe": 1}, 0.90, 0.1, 2000.0),
+    ]
     r = _recommend(pts, 10, 0.95, 0.02)
     assert r["params"] == {"M": 8} and r["tight"] is True
     assert abs(r["margin"] - 0.011) < 1e-9
@@ -909,8 +974,7 @@ def test_sweep_takes_the_production_nlist(tmp_path, capsys):
     from vecscope.sweep import sweep
 
     x = np.random.default_rng(0).standard_normal((800, 16)).astype(np.float32)
-    res = sweep(x, k=5, n_queries=50, nlist=16, device="cpu", latency_queries=0,
-                timing_repeats=1)
+    res = sweep(x, k=5, n_queries=50, nlist=16, device="cpu", latency_queries=0, timing_repeats=1)
     ivf = [p for p in res.points if p.index == "ivf"]
     assert {p.params["nlist"] for p in ivf} == {16} and ivf[-1].params["nprobe"] == 16
     assert any("supplied nlist=16" in c for c in res.caveats)
@@ -921,8 +985,27 @@ def test_sweep_takes_the_production_nlist(tmp_path, capsys):
             sweep(x, k=5, nlist=bad, device="cpu")
     path = tmp_path / "x.npy"
     np.save(path, x)
-    assert main(["sweep", str(path), "-k", "5", "--nlist", "8", "--n-queries", "20",
-                 "--latency-queries", "0", "--timing-repeats", "1", "--device", "cpu"]) == 0
+    assert (
+        main(
+            [
+                "sweep",
+                str(path),
+                "-k",
+                "5",
+                "--nlist",
+                "8",
+                "--n-queries",
+                "20",
+                "--latency-queries",
+                "0",
+                "--timing-repeats",
+                "1",
+                "--device",
+                "cpu",
+            ]
+        )
+        == 0
+    )
     assert "nlist=8, nprobe=8" in capsys.readouterr().out
 
 
@@ -979,7 +1062,12 @@ def test_mcp_audit_summary_and_verbose(tmp_path, monkeypatch):
     assert all(f["suggested_action"] for f in bad)
     desc = describe_findings()
     assert set(desc) == {f["name"] for f in full["findings"]} | {
-        "ann_recall", "ood_queries", "query_gap", "query_shift", "query_hubness"}
+        "ann_recall",
+        "ood_queries",
+        "query_gap",
+        "query_shift",
+        "query_hubness",
+    }
 
 
 def test_mcp_baseline_by_audit_id_and_summary(tmp_path, monkeypatch):
@@ -1006,8 +1094,12 @@ def test_mcp_baseline_by_audit_id_and_summary(tmp_path, monkeypatch):
     unit = x / np.linalg.norm(x, axis=1, keepdims=True)
     np.save(tmp_path / "b.npy", unit)
     np.save(tmp_path / "qb.npy", q / np.linalg.norm(q, axis=1, keepdims=True))
-    second = audit_embeddings(str(tmp_path / "b.npy"), k=5, baseline=first["audit_id"],
-                              **{**args, "queries_path": str(tmp_path / "qb.npy")})
+    second = audit_embeddings(
+        str(tmp_path / "b.npy"),
+        k=5,
+        baseline=first["audit_id"],
+        **{**args, "queries_path": str(tmp_path / "qb.npy")},
+    )
     d = second["baseline_diff"]
     assert "metric_mismatch" in d["improvements"] and d["retrieval_comparable"]
     assert "vs baseline: verdict" in second["summary"]
@@ -1029,11 +1121,17 @@ def test_mcp_baseline_by_audit_id_and_summary(tmp_path, monkeypatch):
         audit_embeddings(str(tmp_path / "b.npy"), tolerances={"collapse": 0.01})
     (tmp_path / "binary.tsv").write_bytes((tmp_path / "q.npy").read_bytes())
     with pytest.raises(Exception, match="not a text qrels file"):
-        audit_embeddings(str(tmp_path / "a.npy"), queries_path=str(tmp_path / "q.npy"),
-                         qrels_path=str(tmp_path / "binary.tsv"))
+        audit_embeddings(
+            str(tmp_path / "a.npy"),
+            queries_path=str(tmp_path / "q.npy"),
+            qrels_path=str(tmp_path / "binary.tsv"),
+        )
     with pytest.raises(Exception, match="unsupported qrels file"):
-        audit_embeddings(str(tmp_path / "a.npy"), queries_path=str(tmp_path / "q.npy"),
-                         qrels_path=str(tmp_path / "q.npy"))
+        audit_embeddings(
+            str(tmp_path / "a.npy"),
+            queries_path=str(tmp_path / "q.npy"),
+            qrels_path=str(tmp_path / "q.npy"),
+        )
 
 
 def test_threshold_override_changes_verdict_and_is_reported():
@@ -1063,7 +1161,9 @@ def test_connectivity_handles_long_chains():
     from vecscope.diagnostics.geometry import connectivity
 
     n = 6000  # a path graph: diameter n, one component, no islands
-    knn = np.stack([np.clip(np.arange(n) - 1, 0, n - 1), np.clip(np.arange(n) + 1, 0, n - 1)], axis=1)
+    knn = np.stack(
+        [np.clip(np.arange(n) - 1, 0, n - 1), np.clip(np.arange(n) + 1, 0, n - 1)], axis=1
+    )
     c = connectivity(knn)
     assert c["n_components"] == 1 and c["island_ratio"] == 0.0
 
@@ -1078,10 +1178,14 @@ def test_sweep_reaches_full_recall_with_duplicates_and_zero_rows():
     res = sweep(np.concatenate([base, base]), k=5, n_queries=100, device="cpu")
     assert max(p.recall_at_k for p in res.points) >= 0.99  # duplicates no longer cap recall
     # 8 copies per item at k=5: every neighbor set is a tie set, any member must count
-    res = sweep(np.repeat(base[:150], 8, axis=0), k=5, n_queries=100, device="cpu", timing_repeats=1)
+    res = sweep(
+        np.repeat(base[:150], 8, axis=0), k=5, n_queries=100, device="cpu", timing_repeats=1
+    )
     assert max(p.recall_at_k for p in res.points) >= 0.99
     # zero rows have no meaningful neighbors (all ties); the sweep must still run cleanly
-    res = sweep(np.concatenate([base, np.zeros((50, 16), np.float32)]), k=5, n_queries=100, device="cpu")
+    res = sweep(
+        np.concatenate([base, np.zeros((50, 16), np.float32)]), k=5, n_queries=100, device="cpu"
+    )
     assert all(0.0 <= p.recall_at_k <= 1.0 for p in res.points)
 
 
@@ -1099,7 +1203,9 @@ def test_ann_validation_and_self_ids():
     from vecscope._knn import exact_knn
 
     exact, _ = exact_knn(x, 5)
-    with_self = np.concatenate([np.arange(200)[:, None], exact], axis=1)  # index returned self first
+    with_self = np.concatenate(
+        [np.arange(200)[:, None], exact], axis=1
+    )  # index returned self first
     r = _by(audit(x, k=5, ann_neighbors=with_self, sample=None))["ann_recall"]
     assert r.value == 1.0
     # ties: 8 copies per item, an exact index that breaks ties differently is still perfect
@@ -1130,8 +1236,14 @@ def test_parquet_picks_vector_column_by_type(tmp_path):
 
     from vecscope.io import load_vectors
 
-    t = pa.table({"id": [1, 2], "embedding_model": ["m", "m"], "vector_id": [7, 8],
-                  "embedding": [[1.0, 2.0], [3.0, 4.0]]})
+    t = pa.table(
+        {
+            "id": [1, 2],
+            "embedding_model": ["m", "m"],
+            "vector_id": [7, 8],
+            "embedding": [[1.0, 2.0], [3.0, 4.0]],
+        }
+    )
     pq.write_table(t, tmp_path / "t.parquet")
     assert load_vectors(tmp_path / "t.parquet").shape == (2, 2)
 
@@ -1142,8 +1254,15 @@ def test_library_sample_zero_means_all_rows_and_bad_args_raise():
     rng = np.random.default_rng(0)
     x = rng.standard_normal((100, 8)).astype(np.float32)
     assert not audit(x, k=5, sample=0).sampled
-    for bad in ({"k": 0}, {"k": 2.5}, {"sample": 3}, {"clusters": -1}, {"near_dup_cos": 0},
-                {"thresholds": [("hubness.skewness", (1, 2))]}, {"thresholds": {"hubness.skewness": {"warn": 1}}}):
+    for bad in (
+        {"k": 0},
+        {"k": 2.5},
+        {"sample": 3},
+        {"clusters": -1},
+        {"near_dup_cos": 0},
+        {"thresholds": [("hubness.skewness", (1, 2))]},
+        {"thresholds": {"hubness.skewness": {"warn": 1}}},
+    ):
         with pytest.raises((ValueError, TypeError)):
             audit(x, **{"k": 5, **bad})
 
@@ -1200,7 +1319,9 @@ def test_value_regressions_with_tolerances(tmp_path, capsys):
     assert d["value_regressions"] == ["effective_rank"]
     # a finding that improves is never a value regression, whatever the tolerance
     f["value"] += 0.02
-    assert diff_evidence(lowered, old, tolerances={"effective_rank": 0.0})["value_regressions"] == []
+    assert (
+        diff_evidence(lowered, old, tolerances={"effective_rank": 0.0})["value_regressions"] == []
+    )
     with pytest.raises(ValueError, match="unknown finding"):
         diff_evidence(new, old, tolerances={"collapse.near_duplicate_ratio": 0.1})
     with pytest.raises(ValueError, match="finite number >= 0"):
@@ -1214,8 +1335,21 @@ def test_value_regressions_with_tolerances(tmp_path, capsys):
     tol.write_text(json.dumps({"collapse": 0.0}), encoding="utf-8")
     np.save(tmp_path / "worse.npy", worse)
     assert old["verdict"] != "fail"
-    assert main(["audit", str(tmp_path / "worse.npy"), "-k", "5", "--baseline", str(base),
-                 "--tolerances", str(tol)]) == 1
+    assert (
+        main(
+            [
+                "audit",
+                str(tmp_path / "worse.npy"),
+                "-k",
+                "5",
+                "--baseline",
+                str(base),
+                "--tolerances",
+                str(tol),
+            ]
+        )
+        == 1
+    )
     out = capsys.readouterr().out
     assert "VALUE WORSE" in out and "value regressions (beyond tolerance): collapse" in out
     # the same run without tolerances passes: verdicts did not change
@@ -1233,14 +1367,37 @@ def test_require_comparable_refuses_a_mismatched_baseline(tmp_path, capsys):
     np.save(tmp_path / "x.npy", x)
     base = tmp_path / "base.json"
     base.write_text(audit(x, k=5).to_json(), encoding="utf-8")
-    assert main(["audit", str(tmp_path / "x.npy"), "-k", "5", "--baseline", str(base),
-                 "--require-comparable", "--fail-on", "fail"]) in (0, 1)
+    assert main(
+        [
+            "audit",
+            str(tmp_path / "x.npy"),
+            "-k",
+            "5",
+            "--baseline",
+            str(base),
+            "--require-comparable",
+            "--fail-on",
+            "fail",
+        ]
+    ) in (0, 1)
     capsys.readouterr()
     # a different k makes the runs incomparable: a plain diff notes it, the strict flag refuses
     main(["audit", str(tmp_path / "x.npy"), "-k", "6", "--baseline", str(base)])
     assert "not directly comparable" in capsys.readouterr().out
-    assert main(["audit", str(tmp_path / "x.npy"), "-k", "6", "--baseline", str(base),
-                 "--require-comparable"]) == 2
+    assert (
+        main(
+            [
+                "audit",
+                str(tmp_path / "x.npy"),
+                "-k",
+                "6",
+                "--baseline",
+                str(base),
+                "--require-comparable",
+            ]
+        )
+        == 2
+    )
     assert "--require-comparable" in capsys.readouterr().err
 
 
@@ -1407,8 +1564,12 @@ def test_mcp_heavy_calls_take_turns_and_are_logged(tmp_path, monkeypatch, capsys
 
     monkeypatch.setattr(mcp_server, "audit", slow_audit)
     with ThreadPoolExecutor(3) as pool:
-        verdicts = list(pool.map(lambda _: mcp_server.audit_embeddings(
-            str(tmp_path / "x.npy"), k=5)["verdict"], range(3)))
+        verdicts = list(
+            pool.map(
+                lambda _: mcp_server.audit_embeddings(str(tmp_path / "x.npy"), k=5)["verdict"],
+                range(3),
+            )
+        )
     assert peak[0] == 1 and len(verdicts) == 3  # one at a time by default
     err = capsys.readouterr().err
     assert err.count("vecscope-mcp: audit_embeddings path=") == 3
@@ -1417,8 +1578,9 @@ def test_mcp_heavy_calls_take_turns_and_are_logged(tmp_path, monkeypatch, capsys
     monkeypatch.setenv(mcp_server.MAX_CONCURRENT_ENV, "3")
     peak[0] = 0
     with ThreadPoolExecutor(3) as pool:
-        list(pool.map(lambda _: mcp_server.audit_embeddings(str(tmp_path / "x.npy"), k=5),
-                      range(3)))
+        list(
+            pool.map(lambda _: mcp_server.audit_embeddings(str(tmp_path / "x.npy"), k=5), range(3))
+        )
     assert peak[0] > 1
     monkeypatch.setattr(mcp_server, "_SLOTS", None)
     monkeypatch.setenv(mcp_server.MAX_CONCURRENT_ENV, "0")
@@ -1450,8 +1612,9 @@ def test_mcp_parses_from_the_verified_handle(tmp_path, monkeypatch):
 
     x = np.random.default_rng(0).standard_normal((40, 3))
     np.save(tmp_path / "x.npy", x)
-    (tmp_path / "x.jsonl").write_text("\n".join(json.dumps({"v": r}) for r in x.tolist()),
-                                      encoding="utf-8")
+    (tmp_path / "x.jsonl").write_text(
+        "\n".join(json.dumps({"v": r}) for r in x.tolist()), encoding="utf-8"
+    )
     np.savetxt(tmp_path / "x.csv", x, delimiter=",")
     np.savetxt(tmp_path / "ids.tsv", np.arange(80).reshape(40, 2), fmt="%d")
     monkeypatch.setenv(mcp_server.ALLOWED_DIRS_ENV, str(tmp_path))
@@ -1488,10 +1651,14 @@ def test_mcp_server_round_trip_over_stdio(tmp_path):
     import vecscope
 
     src = str(Path(vecscope.__file__).resolve().parents[1])  # the checkout's src, or site-packages
-    env = {**os.environ, ALLOWED_DIRS_ENV: str(inside),
-           "PYTHONPATH": os.pathsep.join([src, os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
-    params = StdioServerParameters(command=sys.executable, args=["-m", "vecscope.mcp_server"],
-                                   env=env)
+    env = {
+        **os.environ,
+        ALLOWED_DIRS_ENV: str(inside),
+        "PYTHONPATH": os.pathsep.join([src, os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep),
+    }
+    params = StdioServerParameters(
+        command=sys.executable, args=["-m", "vecscope.mcp_server"], env=env
+    )
 
     async def run():
         async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
@@ -1510,7 +1677,9 @@ def test_mcp_server_round_trip_over_stdio(tmp_path):
 
     init, tools, ok, bad, desc = asyncio.run(run())
     assert attr(init, "serverInfo", "server_info").name == "vecscope"
-    assert {"audit_embeddings", "sweep_index", "compare_embeddings", "describe_findings"} <= set(tools)
+    assert {"audit_embeddings", "sweep_index", "compare_embeddings", "describe_findings"} <= set(
+        tools
+    )
     assert not attr(ok, "isError", "is_error") and not attr(desc, "isError", "is_error")
     payload = json.loads(ok.content[0].text)
     assert payload["n"] == 120 and payload["summary"].startswith("verdict=")

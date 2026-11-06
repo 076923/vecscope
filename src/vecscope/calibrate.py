@@ -55,7 +55,7 @@ def _ranks(a: np.ndarray) -> np.ndarray:
         j = i
         while j + 1 < a.size and a[order[j + 1]] == a[order[i]]:
             j += 1
-        ranks[order[i:j + 1]] = (i + j) / 2.0
+        ranks[order[i : j + 1]] = (i + j) / 2.0
         i = j + 1
     return ranks
 
@@ -118,8 +118,10 @@ def _bootstrap_ci(v: np.ndarray, q: np.ndarray) -> list[float] | None:
 def _quality(ev: Mapping, metric: str, ranking: str, what: str) -> float:
     r = ev.get("retrieval") if isinstance(ev, Mapping) else None
     if not r or ranking not in r or not r[ranking]:
-        raise ValueError(f"{what} has no retrieval.{ranking} block; audit it with --queries and "
-                         "--qrels (and --ranked for the ranked block)")
+        raise ValueError(
+            f"{what} has no retrieval.{ranking} block; audit it with --queries and "
+            "--qrels (and --ranked for the ranked block)"
+        )
     if metric not in r[ranking]:
         raise ValueError(f"{what}: unknown metric {metric!r}; one of {sorted(r[ranking])}")
     return float(r[ranking][metric])
@@ -129,8 +131,14 @@ def _values(ev: Mapping) -> dict[str, float]:
     return {f["name"]: float(f["value"]) for f in ev.get("findings", [])}
 
 
-def _fit(per_state: list[dict], quality: list[float], min_quality: float, min_rho: float,
-         include_low: bool, intervals: bool) -> tuple[list, dict, dict]:
+def _fit(
+    per_state: list[dict],
+    quality: list[float],
+    min_quality: float,
+    min_rho: float,
+    include_low: bool,
+    intervals: bool,
+) -> tuple[list, dict, dict]:
     """Rows, gate thresholds and exploratory thresholds from one set of states."""
     q = np.asarray(quality)
     ok = q >= min_quality
@@ -151,13 +159,22 @@ def _fit(per_state: list[dict], quality: list[float], min_quality: float, min_rh
         worst_ok = float(acc.min() if lower_worse else acc.max())
         best_bad = float(bad.max() if lower_worse else bad.min())
         separates = best_bad < worst_ok if lower_worse else best_bad > worst_ok
-        row = {"name": name, "threshold_key": key, "spearman_with_quality": rho,
-               "spearman_ci95": _bootstrap_ci(v, q) if intervals and rho is not None else None,
-               "p_value": None, "p_holm": None,
-               "tracks_quality": tracks, "lower_is_worse": lower_worse,
-               "worst_acceptable": worst_ok, "best_unacceptable": best_bad,
-               "separates": bool(separates), "default": [warn, fail], "proposed": None,
-               "confidence": None}
+        row = {
+            "name": name,
+            "threshold_key": key,
+            "spearman_with_quality": rho,
+            "spearman_ci95": _bootstrap_ci(v, q) if intervals and rho is not None else None,
+            "p_value": None,
+            "p_holm": None,
+            "tracks_quality": tracks,
+            "lower_is_worse": lower_worse,
+            "worst_acceptable": worst_ok,
+            "best_unacceptable": best_bad,
+            "separates": bool(separates),
+            "default": [warn, fail],
+            "proposed": None,
+            "confidence": None,
+        }
         if rho is not None:
             row["p_value"] = pvals[name] = _permutation_p(v, q, 1.0 if lower_worse else -1.0, perms)
         rows.append((row, v))
@@ -168,7 +185,10 @@ def _fit(per_state: list[dict], quality: list[float], min_quality: float, min_rh
         row["p_holm"] = holm.get(name)
         rho = row["spearman_with_quality"]
         if row["tracks_quality"] and row["separates"]:
-            worst_ok, gap = row["worst_acceptable"], row["best_unacceptable"] - row["worst_acceptable"]
+            worst_ok, gap = (
+                row["worst_acceptable"],
+                row["best_unacceptable"] - row["worst_acceptable"],
+            )
             pair = [worst_ok + gap / 3.0, worst_ok + 2.0 * gap / 3.0]
             row["proposed"] = pair
             if row["p_holm"] < ALPHA:
@@ -180,24 +200,36 @@ def _fit(per_state: list[dict], quality: list[float], min_quality: float, min_rh
                 exploratory[key] = pair
                 if include_low:
                     thresholds[key] = pair
-                row["advice"] = (f"tracks and separates these states, but with {len(per_state)} "
-                                 f"states and {len(pvals)} findings tested the correlation can be "
-                                 f"chance (Holm-adjusted p={row['p_holm']:.2g}): exploratory, "
-                                 "add states before gating on it")
+                row["advice"] = (
+                    f"tracks and separates these states, but with {len(per_state)} "
+                    f"states and {len(pvals)} findings tested the correlation can be "
+                    f"chance (Holm-adjusted p={row['p_holm']:.2g}): exploratory, "
+                    "add states before gating on it"
+                )
         elif rho is None:
             row["advice"] = "constant on these states: nothing to calibrate"
         elif abs(rho) < min_rho:
-            row["advice"] = ("does not move with quality on these states: keep the default as "
-                             "a reason to look, do not gate on it")
+            row["advice"] = (
+                "does not move with quality on these states: keep the default as "
+                "a reason to look, do not gate on it"
+            )
         elif not row["tracks_quality"]:
-            row["advice"] = ("moves with quality the other way: here a worse value goes with "
-                             "better retrieval, so it is not a quality gate on this data")
+            row["advice"] = (
+                "moves with quality the other way: here a worse value goes with "
+                "better retrieval, so it is not a quality gate on this data"
+            )
         else:
-            row["advice"] = ("moves with quality but overlaps between acceptable and "
-                             "unacceptable states: no threshold separates them")
+            row["advice"] = (
+                "moves with quality but overlaps between acceptable and "
+                "unacceptable states: no threshold separates them"
+            )
     out = [r for r, _ in rows]
-    out.sort(key=lambda r: ({"supported": 0, "low": 1}.get(r["confidence"], 2),
-                            -abs(r["spearman_with_quality"] or 0)))
+    out.sort(
+        key=lambda r: (
+            {"supported": 0, "low": 1}.get(r["confidence"], 2),
+            -abs(r["spearman_with_quality"] or 0),
+        )
+    )
     return out, thresholds, exploratory
 
 
@@ -226,28 +258,39 @@ def calibrate(
     quality = [_quality(ev, metric, ranking, n) for ev, n in zip(states, names)]
     fps = {(ev["retrieval"].get("qrels_fingerprint"), ev["retrieval"].get("k")) for ev in states}
     if len(fps) > 1 and not allow_mixed_qrels:
-        raise ValueError(f"the states were scored on {len(fps)} different qrels or k, so their "
-                         "quality values are not comparable; audit every state with the same "
-                         "--queries, --qrels and -k (or pass --allow-mixed-qrels)")
+        raise ValueError(
+            f"the states were scored on {len(fps)} different qrels or k, so their "
+            "quality values are not comparable; audit every state with the same "
+            "--queries, --qrels and -k (or pass --allow-mixed-qrels)"
+        )
     ok = [q >= min_quality for q in quality]
     if all(ok) or not any(ok):
-        raise ValueError(f"min_quality {min_quality} puts every state on one side ({metric} "
-                         f"{min(quality):.3f} to {max(quality):.3f}); calibration needs "
-                         "acceptable and unacceptable states")
+        raise ValueError(
+            f"min_quality {min_quality} puts every state on one side ({metric} "
+            f"{min(quality):.3f} to {max(quality):.3f}); calibration needs "
+            "acceptable and unacceptable states"
+        )
     per_state = [_values(ev) for ev in states]
-    rows, thresholds, exploratory = _fit(per_state, quality, min_quality, min_rho,
-                                         include_low_confidence, intervals=True)
+    rows, thresholds, exploratory = _fit(
+        per_state, quality, min_quality, min_rho, include_low_confidence, intervals=True
+    )
     out = {
-        "metric": metric, "ranking": ranking, "min_quality": min_quality,
-        "n_states": len(states), "recommended_states": RECOMMENDED_STATES, "alpha": ALPHA,
-        "states": [{"name": n, "quality": qv, "acceptable": a}
-                   for n, qv, a in zip(names, quality, ok)],
+        "metric": metric,
+        "ranking": ranking,
+        "min_quality": min_quality,
+        "n_states": len(states),
+        "recommended_states": RECOMMENDED_STATES,
+        "alpha": ALPHA,
+        "states": [
+            {"name": n, "quality": qv, "acceptable": a} for n, qv, a in zip(names, quality, ok)
+        ],
         "same_qrels": len(fps) == 1,
         "findings": rows,
         "thresholds": thresholds,
         "exploratory_thresholds": exploratory,
-        "leave_one_out": _leave_one_out(per_state, quality, min_quality, min_rho,
-                                        include_low_confidence),
+        "leave_one_out": _leave_one_out(
+            per_state, quality, min_quality, min_rho, include_low_confidence
+        ),
     }
     if holdout:
         out["holdout"] = _check(holdout, thresholds, min_quality, metric, ranking)
@@ -267,14 +310,25 @@ def _leave_one_out(per_state, quality, min_quality, min_rho, include_low) -> dic
             skipped += 1
             continue
         _, th, _ = _fit(rest, rq, min_quality, min_rho, include_low, intervals=False)
-        bad, pred = quality[i] < min_quality, bool(_flagged({"findings": [
-            {"name": n, "value": v} for n, v in per_state[i].items()]}, th))
+        bad, pred = (
+            quality[i] < min_quality,
+            bool(
+                _flagged(
+                    {"findings": [{"name": n, "value": v} for n, v in per_state[i].items()]}, th
+                )
+            ),
+        )
         caught += bad and pred
         missed += bad and not pred
         false_alarms += pred and not bad
         passed += not bad and not pred
-    return {"caught_unacceptable": caught, "missed_unacceptable": missed,
-            "false_alarms": false_alarms, "passed_acceptable": passed, "skipped": skipped}
+    return {
+        "caught_unacceptable": caught,
+        "missed_unacceptable": missed,
+        "false_alarms": false_alarms,
+        "passed_acceptable": passed,
+        "skipped": skipped,
+    }
 
 
 def _flagged(ev: Mapping, thresholds: Mapping[str, Sequence[float]]) -> list[str]:
@@ -298,27 +352,45 @@ def _check(holdout: Sequence[Mapping], thresholds, min_quality, metric, ranking)
         fn += bad and not pred
         tn += not bad and not pred
         rows.append({"index": i, "quality": qv, "acceptable": not bad, "flagged_by": flagged})
-    return {"states": rows, "caught_unacceptable": tp, "missed_unacceptable": fn,
-            "false_alarms": fp, "passed_acceptable": tn}
+    return {
+        "states": rows,
+        "caught_unacceptable": tp,
+        "missed_unacceptable": fn,
+        "false_alarms": fp,
+        "passed_acceptable": tn,
+    }
 
 
 def render_calibration(res: dict) -> str:
-    lines = [(f"calibration on {res['n_states']} states, acceptable when "
-              f"{res['ranking']} {res['metric']} >= {res['min_quality']}")]
+    lines = [
+        (
+            f"calibration on {res['n_states']} states, acceptable when "
+            f"{res['ranking']} {res['metric']} >= {res['min_quality']}"
+        )
+    ]
     for s in res["states"]:
-        lines.append(f"  {s['name']:<32} {s['quality']:.3f}  {'ok' if s['acceptable'] else 'below'}")
+        lines.append(
+            f"  {s['name']:<32} {s['quality']:.3f}  {'ok' if s['acceptable'] else 'below'}"
+        )
     if not res["same_qrels"]:
         lines.append("  note: the states were not all scored on the same qrels and k")
     if res["n_states"] < res["recommended_states"]:
-        lines.append(f"  note: {res['n_states']} states are few; correlations this small a set "
-                     f"shows can be chance, {res['recommended_states']} or more are recommended")
+        lines.append(
+            f"  note: {res['n_states']} states are few; correlations this small a set "
+            f"shows can be chance, {res['recommended_states']} or more are recommended"
+        )
     lines.append("")
-    lines.append(f"  {'finding':<22} {'rho':>6} {'95% interval':>14} {'p(holm)':>8}  "
-                 f"{'worst ok':>9} {'best bad':>9}  proposal")
+    lines.append(
+        f"  {'finding':<22} {'rho':>6} {'95% interval':>14} {'p(holm)':>8}  "
+        f"{'worst ok':>9} {'best bad':>9}  proposal"
+    )
     for r in res["findings"]:
         rho = "n/a" if r["spearman_with_quality"] is None else f"{r['spearman_with_quality']:+.2f}"
-        ci = ("" if r["spearman_ci95"] is None else
-              f"[{r['spearman_ci95'][0]:+.2f},{r['spearman_ci95'][1]:+.2f}]")
+        ci = (
+            ""
+            if r["spearman_ci95"] is None
+            else f"[{r['spearman_ci95'][0]:+.2f},{r['spearman_ci95'][1]:+.2f}]"
+        )
         p = "" if r["p_holm"] is None else f"{r['p_holm']:.3g}"
         if r["confidence"] == "supported":
             prop = f"warn {r['proposed'][0]:.4g}, fail {r['proposed'][1]:.4g}"
@@ -326,29 +398,41 @@ def render_calibration(res: dict) -> str:
             prop = f"exploratory: warn {r['proposed'][0]:.4g}, fail {r['proposed'][1]:.4g}"
         else:
             prop = r["advice"]
-        lines.append(f"  {r['name']:<22} {rho:>6} {ci:>14} {p:>8}  {r['worst_acceptable']:>9.4g} "
-                     f"{r['best_unacceptable']:>9.4g}  {prop}")
+        lines.append(
+            f"  {r['name']:<22} {rho:>6} {ci:>14} {p:>8}  {r['worst_acceptable']:>9.4g} "
+            f"{r['best_unacceptable']:>9.4g}  {prop}"
+        )
     loo = res.get("leave_one_out")
     if loo:
         judged = loo["caught_unacceptable"] + loo["missed_unacceptable"]
         lines.append("")
-        lines.append(f"  leave-one-out: caught {loo['caught_unacceptable']} of {judged} "
-                     f"unacceptable states, {loo['false_alarms']} false alarms on "
-                     f"{loo['false_alarms'] + loo['passed_acceptable']} acceptable ones"
-                     + (f" ({loo['skipped']} skipped)" if loo["skipped"] else ""))
+        lines.append(
+            f"  leave-one-out: caught {loo['caught_unacceptable']} of {judged} "
+            f"unacceptable states, {loo['false_alarms']} false alarms on "
+            f"{loo['false_alarms'] + loo['passed_acceptable']} acceptable ones"
+            + (f" ({loo['skipped']} skipped)" if loo["skipped"] else "")
+        )
     h = res.get("holdout")
     if h:
         lines.append("")
-        lines.append(f"  holdout: caught {h['caught_unacceptable']} of "
-                     f"{h['caught_unacceptable'] + h['missed_unacceptable']} unacceptable states, "
-                     f"{h['false_alarms']} false alarms on "
-                     f"{h['false_alarms'] + h['passed_acceptable']} acceptable ones")
-    if res["exploratory_thresholds"] and not set(res["exploratory_thresholds"]) <= set(res["thresholds"]):
+        lines.append(
+            f"  holdout: caught {h['caught_unacceptable']} of "
+            f"{h['caught_unacceptable'] + h['missed_unacceptable']} unacceptable states, "
+            f"{h['false_alarms']} false alarms on "
+            f"{h['false_alarms'] + h['passed_acceptable']} acceptable ones"
+        )
+    if res["exploratory_thresholds"] and not set(res["exploratory_thresholds"]) <= set(
+        res["thresholds"]
+    ):
         lines.append("")
-        lines.append("  exploratory pairs are not in the gate thresholds; add states, or pass "
-                     "--include-low-confidence to gate on them anyway")
+        lines.append(
+            "  exploratory pairs are not in the gate thresholds; add states, or pass "
+            "--include-low-confidence to gate on them anyway"
+        )
     if not res["thresholds"]:
         lines.append("")
-        lines.append("  no finding is supported as a gate on these states: keep the defaults as "
-                     "reasons to look and gate on retrieval quality itself")
+        lines.append(
+            "  no finding is supported as a gate on these states: keep the defaults as "
+            "reasons to look and gate on retrieval quality itself"
+        )
     return "\n".join(lines)

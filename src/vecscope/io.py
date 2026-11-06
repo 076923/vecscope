@@ -68,7 +68,7 @@ def _vector_key(row: dict) -> str:
             return key
     raise ValueError(
         f"no numeric list field found in JSON row with keys {list(row)}; "
-        "expected something like {\"embedding\": [0.1, -0.3, ...]}"
+        'expected something like {"embedding": [0.1, -0.3, ...]}'
     )
 
 
@@ -90,14 +90,16 @@ def _rows_to_array(rows, what: str) -> np.ndarray:
         if not _is_numeric_list(r):
             raise ValueError(
                 f"{what}: each row must be a list of numbers (or an object holding one)"
-                if not isinstance(r, list) else
-                f"{what}: rows must hold numbers only (no booleans, strings, nulls or nested "
-                f"lists), row {i} does not")
+                if not isinstance(r, list)
+                else f"{what}: rows must hold numbers only (no booleans, strings, nulls or nested "
+                f"lists), row {i} does not"
+            )
         if width is None:
             width = len(r)
         elif len(r) != width:
-            raise ValueError(f"{what}: vectors have different lengths (row 0 has {width}, "
-                             f"row {i} has {len(r)})")
+            raise ValueError(
+                f"{what}: vectors have different lengths (row 0 has {width}, row {i} has {len(r)})"
+            )
         block.append(r)
         if len(block) == _BLOCK_ROWS:
             blocks.append(_block(block, what))
@@ -139,8 +141,10 @@ def _np_load(p: _File):
     # np.load picks the format from the file's bytes, whatever the suffix says
     want_archive = p.suffix == ".npz"
     if want_archive != isinstance(loaded, np.lib.npyio.NpzFile):
-        raise ValueError(f"{p}: the file is {'an archive' if not want_archive else 'a single array'}"
-                         f", not what its {p.suffix} suffix says; rename it")
+        raise ValueError(
+            f"{p}: the file is {'an archive' if not want_archive else 'a single array'}"
+            f", not what its {p.suffix} suffix says; rename it"
+        )
     return loaded
 
 
@@ -182,16 +186,18 @@ def _parquet_matrix(p: _File) -> tuple[np.ndarray, str]:
     for batch in f.iter_batches(batch_size=_BLOCK_ROWS * 4, columns=[cols[0]]):
         arr = batch.column(0)
         if arr.null_count:
-            raise ValueError(f"{what}: rows must hold numbers only, row {at + _first_null(arr)} "
-                             "is null")
+            raise ValueError(
+                f"{what}: rows must hold numbers only, row {at + _first_null(arr)} is null"
+            )
         if pt.is_fixed_size_list(arr.type):
             widths = np.array([arr.type.list_size])
         else:
             widths = np.unique(np.diff(arr.offsets.to_numpy()))
         if widths.size != 1 or (out is not None and widths[0] != out.shape[1]):
             seen = [] if out is None else [out.shape[1]]
-            raise ValueError(f"{what}: vectors have different lengths "
-                             f"{sorted({*seen, *widths.tolist()})[:10]}")
+            raise ValueError(
+                f"{what}: vectors have different lengths {sorted({*seen, *widths.tolist()})[:10]}"
+            )
         values = arr.flatten()
         if values.null_count:
             raise ValueError(f"{what}: rows must hold numbers only, a vector holds a null")
@@ -200,7 +206,7 @@ def _parquet_matrix(p: _File) -> tuple[np.ndarray, str]:
             if block.shape[1] == 0:
                 raise ValueError(f"{what}: vectors are empty lists")
             out = np.empty((n, block.shape[1]), block.dtype)
-        out[at:at + len(block)] = block
+        out[at : at + len(block)] = block
         at += len(block)
     return out, what
 
@@ -272,8 +278,9 @@ def _text_matrix(p: _File) -> np.ndarray:
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)  # an empty file is named below
-                arr = np.loadtxt(text, delimiter="," if p.suffix == ".csv" else None,
-                                 dtype=np.float64, ndmin=2)
+                arr = np.loadtxt(
+                    text, delimiter="," if p.suffix == ".csv" else None, dtype=np.float64, ndmin=2
+                )
         except UnicodeDecodeError:
             raise ValueError(f"{p}: not a UTF-8 text file") from None
         finally:
@@ -285,8 +292,11 @@ def _text_matrix(p: _File) -> np.ndarray:
 
 def _whole_numbers(arr: np.ndarray) -> bool:
     """Finite whole numbers that fit an int64 (2**53 keeps them exact in float64)."""
-    return bool(np.isfinite(arr).all() and (np.abs(arr) < 2**53).all()
-                and np.all(np.equal(np.mod(arr, 1), 0)))
+    return bool(
+        np.isfinite(arr).all()
+        and (np.abs(arr) < 2**53).all()
+        and np.all(np.equal(np.mod(arr, 1), 0))
+    )
 
 
 def load_neighbors(path: str | Path, data: bytes | BinaryIO | None = None) -> np.ndarray:

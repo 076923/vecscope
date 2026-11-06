@@ -157,18 +157,24 @@ def sweep(
         raise ValueError("timing_repeats must be at least 1")
     if not (0.0 <= margin < 1.0):
         raise ValueError("margin must be in [0, 1)")
-    if isinstance(latency_queries, bool) or not isinstance(latency_queries, (int, np.integer)) \
-            or latency_queries < 0:
+    if (
+        isinstance(latency_queries, bool)
+        or not isinstance(latency_queries, (int, np.integer))
+        or latency_queries < 0
+    ):
         raise ValueError("latency_queries must be a non-negative integer (0 = skip)")
-    if nlist is not None and (isinstance(nlist, bool) or not isinstance(nlist, (int, np.integer))
-                              or nlist < 1):
+    if nlist is not None and (
+        isinstance(nlist, bool) or not isinstance(nlist, (int, np.integer)) or nlist < 1
+    ):
         raise ValueError(f"nlist must be a positive integer, got {nlist!r}")
     x = np.asarray(x)
     if x.dtype.kind not in "iufb":
         raise ValueError(f"embeddings must be real numbers, got dtype {x.dtype}")
     if x.ndim != 2 or x.shape[0] <= k or x.shape[1] < 1:
-        raise ValueError(f"need a 2-D matrix with more than k={k} rows and at least one column, "
-                         f"got shape {x.shape}")
+        raise ValueError(
+            f"need a 2-D matrix with more than k={k} rows and at least one column, "
+            f"got shape {x.shape}"
+        )
     if not np.isfinite(x).all():
         raise ValueError("embeddings contain NaN or Inf")
     check_magnitude(x)
@@ -178,8 +184,9 @@ def sweep(
         if queries.dtype.kind not in "iufb":
             raise ValueError(f"queries must be real numbers, got dtype {queries.dtype}")
         if queries.ndim != 2 or queries.shape[1] != x.shape[1] or queries.shape[0] == 0:
-            raise ValueError(f"queries must be shaped (m, {x.shape[1]}) with m >= 1, got "
-                             f"{queries.shape}")
+            raise ValueError(
+                f"queries must be shaped (m, {x.shape[1]}) with m >= 1, got {queries.shape}"
+            )
         if not np.isfinite(queries).all():
             raise ValueError("queries contain NaN or Inf")
         check_magnitude(queries, "queries")
@@ -255,9 +262,16 @@ def sweep(
             nbytes = size_of(index)
             for efs in HNSW_GRID["ef_search"]:
                 index.hnsw.efSearch = efs
-                points.append(measure(index, "hnsw",
-                                      {"M": m, "ef_construction": efc, "ef_search": efs},
-                                      build, nbytes, "cpu"))  # HNSW: CPU only
+                points.append(
+                    measure(
+                        index,
+                        "hnsw",
+                        {"M": m, "ef_construction": efc, "ef_search": efs},
+                        build,
+                        nbytes,
+                        "cpu",
+                    )
+                )  # HNSW: CPU only
 
     fixed_nlist = nlist is not None
     if fixed_nlist and nlist > n:
@@ -281,27 +295,57 @@ def sweep(
 
     rec = _recommend(points, k, target_recall, margin)
     caveats = [
-        (f"recall is measured on {q.shape[0]} queries drawn from the corpus itself"
-         if queries is None else
-         f"recall is measured on {q.shape[0]} supplied queries") + "; real query traffic "
+        (
+            f"recall is measured on {q.shape[0]} queries drawn from the corpus itself"
+            if queries is None
+            else f"recall is measured on {q.shape[0]} supplied queries"
+        )
+        + "; real query traffic "
         "can differ, pass it as queries when available",
-        ("HNSW recall at fixed parameters falls as the corpus grows, so a sweep on a sample is "
-         "optimistic for HNSW; " + (f"IVF uses the supplied nlist={nlist}, and its recall at a "
-         "given nprobe falls as each list grows" if fixed_nlist else "IVF nlist is set from "
-         "the row count (4*sqrt(n)), so its recall at a given nprobe can move either way with "
-         "size") + ". Re-run at production size before fixing parameters"),
-        (f"queries_per_second is the median of {timing_repeats} runs on this machine with one "
-         "query batch; it ranks settings against each other and is not a serving throughput"),
-        (f"latency_ms_p50/p95/p99 time {n_lat} queries one at a time in this process, with no "
-         "network, concurrency or serving stack; compare settings with them, do not quote "
-         "them as service latency" if n_lat else
-         "latency percentiles were skipped (latency_queries=0)"),
-        ("index_bytes is the serialized index (vectors plus graph or lists); the process "
-         "needs more while building, and a product-quantized index would be smaller"),
+        (
+            "HNSW recall at fixed parameters falls as the corpus grows, so a sweep on a sample is "
+            "optimistic for HNSW; "
+            + (
+                f"IVF uses the supplied nlist={nlist}, and its recall at a "
+                "given nprobe falls as each list grows"
+                if fixed_nlist
+                else "IVF nlist is set from "
+                "the row count (4*sqrt(n)), so its recall at a given nprobe can move either way with "
+                "size"
+            )
+            + ". Re-run at production size before fixing parameters"
+        ),
+        (
+            f"queries_per_second is the median of {timing_repeats} runs on this machine with one "
+            "query batch; it ranks settings against each other and is not a serving throughput"
+        ),
+        (
+            f"latency_ms_p50/p95/p99 time {n_lat} queries one at a time in this process, with no "
+            "network, concurrency or serving stack; compare settings with them, do not quote "
+            "them as service latency"
+            if n_lat
+            else "latency percentiles were skipped (latency_queries=0)"
+        ),
+        (
+            "index_bytes is the serialized index (vectors plus graph or lists); the process "
+            "needs more while building, and a product-quantized index would be smaller"
+        ),
     ]
-    return SweepResult("vecscope", __version__, int(n), int(d), int(k), int(q.shape[0]),
-                       target_recall, points, rec, device=dev, gpu_name=gpu_name,
-                       caveats=caveats, latency_queries=int(n_lat))
+    return SweepResult(
+        "vecscope",
+        __version__,
+        int(n),
+        int(d),
+        int(k),
+        int(q.shape[0]),
+        target_recall,
+        points,
+        rec,
+        device=dev,
+        gpu_name=gpu_name,
+        caveats=caveats,
+        latency_queries=int(n_lat),
+    )
 
 
 def _recommend(points: list[SweepPoint], k: int, target_recall: float, margin: float) -> dict:
@@ -309,19 +353,32 @@ def _recommend(points: list[SweepPoint], k: int, target_recall: float, margin: f
     exists) if its headroom over the target is below ``margin``."""
 
     def as_rec(p):
-        return {"index": p.index, "params": p.params, "recall_at_k": p.recall_at_k,
-                "queries_per_second": p.queries_per_second, "latency_ms_p95": p.latency_ms_p95,
-                "index_bytes": p.index_bytes}
+        return {
+            "index": p.index,
+            "params": p.params,
+            "recall_at_k": p.recall_at_k,
+            "queries_per_second": p.queries_per_second,
+            "latency_ms_p95": p.latency_ms_p95,
+            "index_bytes": p.index_bytes,
+        }
 
     ok = [p for p in points if p.recall_at_k >= target_recall]
     if not ok:
         best = max(points, key=lambda p: p.recall_at_k)
-        return {**as_rec(best), "margin": best.recall_at_k - target_recall, "tight": True,
-                "reason": f"no configuration reached recall@{k} >= {target_recall}; "
-                          "this is the best one. Expect a hard corpus (see audit findings)."}
+        return {
+            **as_rec(best),
+            "margin": best.recall_at_k - target_recall,
+            "tight": True,
+            "reason": f"no configuration reached recall@{k} >= {target_recall}; "
+            "this is the best one. Expect a hard corpus (see audit findings).",
+        }
     best = max(ok, key=lambda p: p.queries_per_second)
-    rec = {**as_rec(best), "margin": best.recall_at_k - target_recall, "tight": False,
-           "reason": f"fastest configuration with recall@{k} >= {target_recall}"}
+    rec = {
+        **as_rec(best),
+        "margin": best.recall_at_k - target_recall,
+        "tight": False,
+        "reason": f"fastest configuration with recall@{k} >= {target_recall}",
+    }
     if rec["margin"] >= margin:
         return rec
     rec["tight"] = True
@@ -329,25 +386,33 @@ def _recommend(points: list[SweepPoint], k: int, target_recall: float, margin: f
     if safer:
         alt = max(safer, key=lambda p: p.queries_per_second)
         rec["safer_alternative"] = as_rec(alt)
-        rec["reason"] += (f"; margin {rec['margin']:.3f} over the target is below {margin}, so a "
-                          "corpus larger than this one will likely miss the target. The fastest "
-                          f"setting with margin >= {margin} is {alt.index} "
-                          f"({', '.join(f'{a}={b}' for a, b in alt.params.items())}) at recall "
-                          f"{alt.recall_at_k:.3f}, {alt.queries_per_second:.0f} qps.")
+        rec["reason"] += (
+            f"; margin {rec['margin']:.3f} over the target is below {margin}, so a "
+            "corpus larger than this one will likely miss the target. The fastest "
+            f"setting with margin >= {margin} is {alt.index} "
+            f"({', '.join(f'{a}={b}' for a, b in alt.params.items())}) at recall "
+            f"{alt.recall_at_k:.3f}, {alt.queries_per_second:.0f} qps."
+        )
     else:
-        rec["reason"] += (f"; margin {rec['margin']:.3f} over the target is below {margin} and "
-                          "no setting in the grid has more headroom.")
+        rec["reason"] += (
+            f"; margin {rec['margin']:.3f} over the target is below {margin} and "
+            "no setting in the grid has more headroom."
+        )
     return rec
 
 
 def render_sweep(res: SweepResult) -> str:
-    head = (f"vecscope {res.version}  sweep  n={res.n} dim={res.dim} k={res.k} "
-            f"queries={res.n_queries} target_recall={res.target_recall}  device={res.device}")
+    head = (
+        f"vecscope {res.version}  sweep  n={res.n} dim={res.dim} k={res.k} "
+        f"queries={res.n_queries} target_recall={res.target_recall}  device={res.device}"
+    )
     if res.gpu_name:
         head += f" ({res.gpu_name}; HNSW stays on CPU)"
     lines = [head]
-    lines.append(f"  {'index':<6}{'params':<44}{'recall':>8}{'build s':>9}{'qps':>10}"
-                 f"{'p50 ms':>8}{'p95 ms':>8}{'MiB':>8}  dev")
+    lines.append(
+        f"  {'index':<6}{'params':<44}{'recall':>8}{'build s':>9}{'qps':>10}"
+        f"{'p50 ms':>8}{'p95 ms':>8}{'MiB':>8}  dev"
+    )
 
     def ms(v):
         return f"{v:>8.3f}" if v is not None else f"{'-':>8}"
@@ -356,9 +421,11 @@ def render_sweep(res: SweepResult) -> str:
         params = ", ".join(f"{a}={b}" for a, b in p.params.items())
         mark = "*" if p.recall_at_k >= res.target_recall else " "
         mib = f"{p.index_bytes / 2**20:>8.1f}" if p.index_bytes is not None else f"{'-':>8}"
-        lines.append(f" {mark}{p.index:<6}{params:<44}{p.recall_at_k:>8.3f}"
-                     f"{p.build_seconds:>9.2f}{p.queries_per_second:>10.0f}"
-                     f"{ms(p.latency_ms_p50)}{ms(p.latency_ms_p95)}{mib}  {p.device}")
+        lines.append(
+            f" {mark}{p.index:<6}{params:<44}{p.recall_at_k:>8.3f}"
+            f"{p.build_seconds:>9.2f}{p.queries_per_second:>10.0f}"
+            f"{ms(p.latency_ms_p50)}{ms(p.latency_ms_p95)}{mib}  {p.device}"
+        )
     r = res.recommendation
     params = ", ".join(f"{a}={b}" for a, b in r["params"].items())
     extra = ""
@@ -366,9 +433,11 @@ def render_sweep(res: SweepResult) -> str:
         extra += f"  p95={r['latency_ms_p95']:.3f}ms"
     if r.get("index_bytes") is not None:
         extra += f"  index={r['index_bytes'] / 2**20:.1f}MiB"
-    lines.append(f"  recommendation: {r['index']} ({params})  recall={r['recall_at_k']:.3f}  "
-                 f"qps={r['queries_per_second']:.0f}{extra}  margin={r['margin']:+.3f}"
-                 f"{'  TIGHT' if r.get('tight') else ''}  ({r['reason']})")
+    lines.append(
+        f"  recommendation: {r['index']} ({params})  recall={r['recall_at_k']:.3f}  "
+        f"qps={r['queries_per_second']:.0f}{extra}  margin={r['margin']:+.3f}"
+        f"{'  TIGHT' if r.get('tight') else ''}  ({r['reason']})"
+    )
     for c in res.caveats:
         lines.append(f"  note: {c}")
     return "\n".join(lines)

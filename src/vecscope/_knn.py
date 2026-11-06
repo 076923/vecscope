@@ -61,8 +61,9 @@ def exact_copy_groups(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray
     scale = float(np.median(norms[norms > 0])) if (norms > 0).any() else 1.0
     # one key per vector, compared as raw bytes: memory stays at one extra copy of the matrix
     rows = _copy_keys(x32, norms, scale)
-    _, first, inverse, counts = np.unique(rows, return_index=True, return_inverse=True,
-                                          return_counts=True)
+    _, first, inverse, counts = np.unique(
+        rows, return_index=True, return_inverse=True, return_counts=True
+    )
     return first, np.asarray(inverse).reshape(-1), counts
 
 

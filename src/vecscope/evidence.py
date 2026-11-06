@@ -39,10 +39,16 @@ THRESHOLDS = {
     "anisotropy.effective_rank_ratio": (0.10, 0.05),  # lower is worse; real models 0.09-0.18
     "collapse.near_duplicate_ratio": (0.02, 0.10),
     "ann_recall.recall_at_k": (0.95, 0.85),  # lower is worse
-    "rogue_dimensions.top1_dim_variance_ratio": (10.0, 50.0),  # x the uniform 1/dim share; real 1.5-3
+    "rogue_dimensions.top1_dim_variance_ratio": (
+        10.0,
+        50.0,
+    ),  # x the uniform 1/dim share; real 1.5-3
     "norms.norm_cv": (0.10, 0.30),
     "metric_mismatch.topk_overlap": (0.90, 0.70),  # lower is worse
-    "distance_concentration.contrast_over_noise": (1.4, 1.1),  # lower is worse; pure noise 1.0, real 1.43-2.9
+    "distance_concentration.contrast_over_noise": (
+        1.4,
+        1.1,
+    ),  # lower is worse; pure noise 1.0, real 1.43-2.9
     "outliers.outlier_ratio": (0.01, 0.05),
     "connectivity.island_ratio": (0.01, 0.10),
     # short queries against long passages are farther than passages are from each other by
@@ -152,8 +158,15 @@ def resolve_tolerances(tolerances: Mapping | None) -> dict:
     out = {}
     for name, tol in tolerances.items():
         if name not in _FINDING_KEYS:
-            raise ValueError(f"unknown finding {name!r} in tolerances; known: {sorted(_FINDING_KEYS)}")
-        if isinstance(tol, bool) or not isinstance(tol, (int, float)) or not np.isfinite(tol) or tol < 0:
+            raise ValueError(
+                f"unknown finding {name!r} in tolerances; known: {sorted(_FINDING_KEYS)}"
+            )
+        if (
+            isinstance(tol, bool)
+            or not isinstance(tol, (int, float))
+            or not np.isfinite(tol)
+            or tol < 0
+        ):
             raise ValueError(f"tolerance for {name!r} must be a finite number >= 0, got {tol!r}")
         out[name] = float(tol)
     return out
@@ -189,11 +202,15 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
             )
     for name, ev in (("new", new), ("baseline", old)):
         for f in ev["findings"]:
-            if (not isinstance(f, Mapping) or not isinstance(f.get("name"), str)
-                    or not isinstance(f.get("metric"), str)
-                    or not isinstance(f.get("verdict"), str) or f["verdict"] not in WORSE
-                    or isinstance(f.get("value"), bool)
-                    or not isinstance(f.get("value"), (int, float))):
+            if (
+                not isinstance(f, Mapping)
+                or not isinstance(f.get("name"), str)
+                or not isinstance(f.get("metric"), str)
+                or not isinstance(f.get("verdict"), str)
+                or f["verdict"] not in WORSE
+                or isinstance(f.get("value"), bool)
+                or not isinstance(f.get("value"), (int, float))
+            ):
                 raise ValueError(f"{name} evidence has a malformed finding: {f!r:.80}")
     a = {f["name"]: f for f in new["findings"]}
     b = {f["name"]: f for f in old["findings"]}
@@ -203,11 +220,19 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
         delta = fa["value"] - fb["value"]
         low = _finding_direction(fa)
         worsening = None if low is None else (-delta if low else delta)
-        row = {"name": name, "metric": fa["metric"], "value": fa["value"], "baseline_value": fb["value"],
-               "delta": delta, "lower_is_worse": low,
-               "worsened": None if worsening is None else bool(worsening > 0),
-               "worsening": worsening, "tolerance": tol.get(name),
-               "verdict": fa["verdict"], "baseline_verdict": fb["verdict"]}
+        row = {
+            "name": name,
+            "metric": fa["metric"],
+            "value": fa["value"],
+            "baseline_value": fb["value"],
+            "delta": delta,
+            "lower_is_worse": low,
+            "worsened": None if worsening is None else bool(worsening > 0),
+            "worsening": worsening,
+            "tolerance": tol.get(name),
+            "verdict": fa["verdict"],
+            "baseline_verdict": fb["verdict"],
+        }
         changes.append(row)
         if WORSE[fa["verdict"]] > WORSE[fb["verdict"]]:
             regressions.append(name)
@@ -222,9 +247,15 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
     for part in ("exact", "ranked"):
         pa, pb = ra.get(part) or {}, rb.get(part) or {}
         for metric in pa.keys() & pb.keys():
-            retrieval_changes.append({"ranking": part, "metric": metric, "value": pa[metric],
-                                      "baseline_value": pb[metric],
-                                      "delta": pa[metric] - pb[metric]})
+            retrieval_changes.append(
+                {
+                    "ranking": part,
+                    "metric": metric,
+                    "value": pa[metric],
+                    "baseline_value": pb[metric],
+                    "delta": pa[metric] - pb[metric],
+                }
+            )
     retrieval_changes.sort(key=lambda r: (r["ranking"], r["metric"]))
     return {
         "verdict": new.get("verdict"),
@@ -235,19 +266,23 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
         "improvements": improvements,
         "only_in_new": sorted(a.keys() - b.keys()),
         "only_in_baseline": sorted(b.keys() - a.keys()),
-        "comparable": new.get("n") == old.get("n") and new.get("dim") == old.get("dim")
-        and new.get("k") == old.get("k") and new.get("sampled") == old.get("sampled")
+        "comparable": new.get("n") == old.get("n")
+        and new.get("dim") == old.get("dim")
+        and new.get("k") == old.get("k")
+        and new.get("sampled") == old.get("sampled")
         and new.get("thresholds") == old.get("thresholds")
         and new.get("near_dup_cos") == old.get("near_dup_cos"),
         "changes": changes,
         "retrieval_changes": retrieval_changes,
         "retrieval_comparable": bool(ra and rb)
-        and ra.get("qrels_fingerprint") == rb.get("qrels_fingerprint") and ra.get("k") == rb.get("k"),
+        and ra.get("qrels_fingerprint") == rb.get("qrels_fingerprint")
+        and ra.get("k") == rb.get("k"),
     }
 
 
-def _apply_sampling(findings: list[Finding], fraction: float, th: dict,
-                    full_counts: np.ndarray | None = None) -> list[str]:
+def _apply_sampling(
+    findings: list[Finding], fraction: float, th: dict, full_counts: np.ndarray | None = None
+) -> list[str]:
     """Make a sampled audit say what each value can stand for, and keep a verdict that the
     sample cannot support from reading as a clean bill. Measured on synthetic corpora at
     200k x 384 with 100k/50k/20k samples (docs/verification.md) and in
@@ -274,9 +309,11 @@ def _apply_sampling(findings: list[Finding], fraction: float, th: dict,
     out = []
     for f in findings:
         if f.name in ("hubness", "antihubs"):
-            f.explanation += (f" Measured on a {pct} sample: hubness grows with density, so this "
-                              "is a lower bound for the full corpus (a full-corpus warn can read "
-                              "ok here); compare only runs with the same sample size.")
+            f.explanation += (
+                f" Measured on a {pct} sample: hubness grows with density, so this "
+                "is a lower bound for the full corpus (a full-corpus warn can read "
+                "ok here); compare only runs with the same sample size."
+            )
             if f.verdict != "fail":
                 f.inconclusive = True
         elif f.name == "collapse":
@@ -286,34 +323,44 @@ def _apply_sampling(findings: list[Finding], fraction: float, th: dict,
                 copied = float(full_counts[full_counts > 1].sum() / full_counts.sum())
                 f.details["full_corpus_exact_copy_share"] = copied
                 f.details["full_corpus_largest_exact_groups"] = [
-                    int(c) for c in np.sort(full_counts[full_counts > 1])[::-1][:5]]
+                    int(c) for c in np.sort(full_counts[full_counts > 1])[::-1][:5]
+                ]
                 if copied > est:
                     est = copied
-                    note = (f" Exact copies counted over every row cover {copied:.1%} of the "
-                            "corpus, more than the sample shows, so that share is the estimate.")
+                    note = (
+                        f" Exact copies counted over every row cover {copied:.1%} of the "
+                        "corpus, more than the sample shows, so that share is the estimate."
+                    )
             f.details["estimated_full_share"] = est
             f.details["sample_fraction"] = fraction
             f.verdict = _verdict("collapse.near_duplicate_ratio", est, th)
-            f.explanation += (f" Measured on a {pct} sample: a duplicate pair is seen only when "
-                              f"both rows were sampled, so the full-corpus share is estimated at "
-                              f"{est:.1%} (this value divided by {fraction:.2f}, or the exact "
-                              "copies counted over every row when more) and the verdict uses "
-                              "that estimate; audit every row (sample=0) to count near-duplicates."
-                              + note)
+            f.explanation += (
+                f" Measured on a {pct} sample: a duplicate pair is seen only when "
+                f"both rows were sampled, so the full-corpus share is estimated at "
+                f"{est:.1%} (this value divided by {fraction:.2f}, or the exact "
+                "copies counted over every row when more) and the verdict uses "
+                "that estimate; audit every row (sample=0) to count near-duplicates." + note
+            )
         elif f.name == "outliers":
-            f.explanation += (f" Measured on a {pct} sample: small samples over-count outliers, "
-                              "and details.sample_ids lists only those inside the sample.")
+            f.explanation += (
+                f" Measured on a {pct} sample: small samples over-count outliers, "
+                "and details.sample_ids lists only those inside the sample."
+            )
             if f.verdict != "ok":
                 f.inconclusive = True
         elif f.name == "connectivity":
-            f.explanation += (f" Measured on a {pct} sample: islands are those of the sample's "
-                              "k-NN graph and most full-corpus islands are not visible in it; "
-                              "audit every row (sample=0) to judge connectivity.")
+            f.explanation += (
+                f" Measured on a {pct} sample: islands are those of the sample's "
+                "k-NN graph and most full-corpus islands are not visible in it; "
+                "audit every row (sample=0) to judge connectivity."
+            )
             if f.verdict != "fail":
                 f.inconclusive = True
         if f.inconclusive:
-            f.explanation += (" This verdict is inconclusive for the full corpus and is not "
-                              "evidence that the finding is healthy.")
+            f.explanation += (
+                " This verdict is inconclusive for the full corpus and is not "
+                "evidence that the finding is healthy."
+            )
             out.append(f.name)
     return out
 
@@ -324,8 +371,9 @@ def _to_original_rows(findings: list[Finding], clusters: list[dict], rows: np.nd
         if "sample_ids" in f.details:
             f.details["sample_ids"] = [int(rows[i]) for i in f.details["sample_ids"]]
         if "sample_pairs" in f.details:
-            f.details["sample_pairs"] = [[int(rows[a]), int(rows[b]), cos]
-                                         for a, b, cos in f.details["sample_pairs"]]
+            f.details["sample_pairs"] = [
+                [int(rows[a]), int(rows[b]), cos] for a, b, cos in f.details["sample_pairs"]
+            ]
     for c in clusters:
         c["sample_ids"] = [int(rows[i]) for i in c["sample_ids"]]
 
@@ -344,7 +392,11 @@ def resolve_thresholds(overrides: dict | None) -> dict:
             )
         if key not in THRESHOLDS:
             raise ValueError(f"unknown threshold key {key!r}; known: {sorted(THRESHOLDS)}")
-        if isinstance(pair, (str, bytes, Mapping)) or not hasattr(pair, "__len__") or len(pair) != 2:
+        if (
+            isinstance(pair, (str, bytes, Mapping))
+            or not hasattr(pair, "__len__")
+            or len(pair) != 2
+        ):
             raise ValueError(f"threshold {key!r} must be a (warn, fail) pair")
         try:
             warn, fail = (float(pair[0]), float(pair[1]))
@@ -380,61 +432,98 @@ def _verdict(key: str, value: float, th: dict) -> str:
 # agent still has to test the change on real queries before adopting it.
 ACTIONS = {
     "hubness": (
-        ["high-dimensional concentration (dim >> effective rank)",
-         "strong shared direction (see anisotropy)",
-         "a few generic items close to the corpus mean"],
-        ("re-rank top-k with local scaling against the queries (CSLS: 2 cos(q, d) minus d's mean "
-         "cosine to its 10 nearest queries; scaling by corpus neighbors raised hubness in the "
-         "verification); if anisotropy also fails, center first"),
-        ("re-run the audit on the transformed vectors and compare hubness.skewness and "
-        "details.hub_share_top1pct; check that recall on held-out queries did not drop"),
+        [
+            "high-dimensional concentration (dim >> effective rank)",
+            "strong shared direction (see anisotropy)",
+            "a few generic items close to the corpus mean",
+        ],
+        (
+            "re-rank top-k with local scaling against the queries (CSLS: 2 cos(q, d) minus d's mean "
+            "cosine to its 10 nearest queries; scaling by corpus neighbors raised hubness in the "
+            "verification); if anisotropy also fails, center first"
+        ),
+        (
+            "re-run the audit on the transformed vectors and compare hubness.skewness and "
+            "details.hub_share_top1pct; check that recall on held-out queries did not drop"
+        ),
     ),
     "antihubs": (
         ["same causes as hubness", "items embedded from empty or near-empty text"],
         "inspect a sample of never-retrieved items; drop empty inputs, then apply the hubness fix",
-        ("antihub_excess (antihub_ratio minus the random baseline) should fall below warn_at "
-         "after the fix; spot-check that the dropped "
-        "items were genuinely empty"),
+        (
+            "antihub_excess (antihub_ratio minus the random baseline) should fall below warn_at "
+            "after the fix; spot-check that the dropped "
+            "items were genuinely empty"
+        ),
     ),
     "anisotropy": (
-        ["model emits a large shared component (common in older text embedding models)",
-         "un-normalized vectors with a constant offset"],
-        ("subtract the corpus mean vector and re-normalize, applying the same transform to "
-        "queries; details.mean_random_cosine_after_centering shows the expected result"),
-        ("re-audit the centered vectors; then compare retrieval quality on real queries "
-        "before and after, because centering changes the ranking"),
+        [
+            "model emits a large shared component (common in older text embedding models)",
+            "un-normalized vectors with a constant offset",
+        ],
+        (
+            "subtract the corpus mean vector and re-normalize, applying the same transform to "
+            "queries; details.mean_random_cosine_after_centering shows the expected result"
+        ),
+        (
+            "re-audit the centered vectors; then compare retrieval quality on real queries "
+            "before and after, because centering changes the ranking"
+        ),
     ),
     "effective_rank": (
-        ["model dimensions mostly unused", "corpus covers a very narrow topic",
-         "a rogue dimension dominates the variance"],
-        ("if rogue_dimensions also fails, standardize dimensions; otherwise consider PCA or "
-        "Matryoshka truncation to the effective rank to cut index size"),
-        ("re-audit after the transform; recall@k of the truncated index against the full "
-        "exact k-NN should stay above 0.95"),
+        [
+            "model dimensions mostly unused",
+            "corpus covers a very narrow topic",
+            "a rogue dimension dominates the variance",
+        ],
+        (
+            "if rogue_dimensions also fails, standardize dimensions; otherwise consider PCA or "
+            "Matryoshka truncation to the effective rank to cut index size"
+        ),
+        (
+            "re-audit after the transform; recall@k of the truncated index against the full "
+            "exact k-NN should stay above 0.95"
+        ),
     ),
     "collapse": (
-        ["duplicate or boilerplate documents", "chunking that repeats headers/footers",
-         "embedding failures returning a constant vector"],
-        ("read details.largest_near_duplicate_groups: a few huge groups point at an embedding "
-         "failure or boilerplate (re-embed or fix chunking), many small groups at duplicate "
-         "items (deduplicate or collapse them at serving time); details.sample_pairs lists row "
-         "pairs to inspect"),
-        ("near_duplicate_ratio should drop below warn_at; top-k on sample queries should no "
-        "longer repeat the same item"),
+        [
+            "duplicate or boilerplate documents",
+            "chunking that repeats headers/footers",
+            "embedding failures returning a constant vector",
+        ],
+        (
+            "read details.largest_near_duplicate_groups: a few huge groups point at an embedding "
+            "failure or boilerplate (re-embed or fix chunking), many small groups at duplicate "
+            "items (deduplicate or collapse them at serving time); details.sample_pairs lists row "
+            "pairs to inspect"
+        ),
+        (
+            "near_duplicate_ratio should drop below warn_at; top-k on sample queries should no "
+            "longer repeat the same item"
+        ),
     ),
     "ann_recall": (
-        ["ef_search / nprobe too low", "index built with too few links (HNSW M)",
-         "hard corpus: see distance_concentration and connectivity"],
-        ("raise ef_search (HNSW) or nprobe (IVF) first; rebuild with larger M / "
-        "ef_construction only if that is not enough; run `vecscope sweep` to pick values"),
+        [
+            "ef_search / nprobe too low",
+            "index built with too few links (HNSW M)",
+            "hard corpus: see distance_concentration and connectivity",
+        ],
+        (
+            "raise ef_search (HNSW) or nprobe (IVF) first; rebuild with larger M / "
+            "ef_construction only if that is not enough; run `vecscope sweep` to pick values"
+        ),
         "recall_at_k against exact k-NN reaches the target; queries_per_second stays acceptable",
     ),
     "rogue_dimensions": (
         ["model outputs a few high-variance coordinates (known in BERT-family encoders)"],
-        ("z-score each dimension or drop details.rogue_dims before indexing; apply the same "
-        "transform to queries"),
-        ("top1_dim_variance_ratio falls below warn_at; retrieval quality on real queries "
-        "does not regress"),
+        (
+            "z-score each dimension or drop details.rogue_dims before indexing; apply the same "
+            "transform to queries"
+        ),
+        (
+            "top1_dim_variance_ratio falls below warn_at; retrieval quality on real queries "
+            "does not regress"
+        ),
     ),
     "norms": (
         ["vectors not L2-normalized", "zero vectors from empty inputs or failed embedding calls"],
@@ -443,58 +532,89 @@ ACTIONS = {
     ),
     "metric_mismatch": (
         ["vector norms vary, so cosine and inner-product rankings diverge"],
-        ("decide which metric the index uses; normalize vectors if cosine is intended, or "
-        "keep norms deliberately if length should carry relevance"),
+        (
+            "decide which metric the index uses; normalize vectors if cosine is intended, or "
+            "keep norms deliberately if length should carry relevance"
+        ),
         "topk_overlap above warn_at, or a documented decision to keep inner product",
     ),
     "distance_concentration": (
-        ["curse of dimensionality on near-isotropic vectors", ("model with little structure "
-         "for this domain")],
-        ("try a different model or dimensionality reduction; add a re-ranker over a larger "
-        "candidate set"),
+        [
+            "curse of dimensionality on near-isotropic vectors",
+            ("model with little structure for this domain"),
+        ],
+        (
+            "try a different model or dimensionality reduction; add a re-ranker over a larger "
+            "candidate set"
+        ),
         "contrast_over_noise rises above warn_at; expect ann_recall to improve as well",
     ),
     "outliers": (
-        ["junk, empty or foreign-language documents", ("chunks of code or tables embedded as "
-         "prose"), "a few vectors from a different model"],
+        [
+            "junk, empty or foreign-language documents",
+            ("chunks of code or tables embedded as prose"),
+            "a few vectors from a different model",
+        ],
         "inspect details.sample_ids; remove or re-embed them",
         "outlier_ratio below warn_at; the removed items were confirmed irrelevant",
     ),
     "connectivity": (
-        ["tiny self-contained groups (near-duplicates, boilerplate) isolated from the rest",
-         "corpus assembled from disconnected sources"],
+        [
+            "tiny self-contained groups (near-duplicates, boilerplate) isolated from the rest",
+            "corpus assembled from disconnected sources",
+        ],
         "inspect details.sample_ids; deduplicate or merge; for HNSW raise M / ef_construction",
-        ("island_ratio below warn_at; ANN recall measured on items from former islands is "
-        "comparable to the rest"),
+        (
+            "island_ratio below warn_at; ANN recall measured on items from former islands is "
+            "comparable to the rest"
+        ),
     ),
     "ood_queries": (
-        ["queries embedded with a different model than the corpus",
-         "asymmetric model used without its query prefix / instruction",
-         "questions about topics the corpus does not cover"],
-        ("deprecated: read query_gap (and query_shift with a baseline) instead; confirm the "
-        "same model and prefix on both sides; inspect details.ood_sample_ids"),
-        ("ood_query_ratio below warn_at after fixing the query pipeline; otherwise extend "
-        "the corpus"),
+        [
+            "queries embedded with a different model than the corpus",
+            "asymmetric model used without its query prefix / instruction",
+            "questions about topics the corpus does not cover",
+        ],
+        (
+            "deprecated: read query_gap (and query_shift with a baseline) instead; confirm the "
+            "same model and prefix on both sides; inspect details.ood_sample_ids"
+        ),
+        (
+            "ood_query_ratio below warn_at after fixing the query pipeline; otherwise extend "
+            "the corpus"
+        ),
     ),
     "query_gap": (
-        ["queries embedded with a different model (or model version) than the corpus",
-         "a weak model for this domain: query and passage distances both grow",
-         "very short queries against very long passages"],
-        ("embed a handful of queries with the corpus model and compare query_gap_ratio; if "
-        "it drops, the query pipeline uses another model. A missing query prefix does not "
-        "move this number reliably, check the prefix in code"),
-        ("query_gap_ratio below warn_at after fixing the query pipeline, and nDCG or recall "
-        "on labeled queries back to the reference"),
+        [
+            "queries embedded with a different model (or model version) than the corpus",
+            "a weak model for this domain: query and passage distances both grow",
+            "very short queries against very long passages",
+        ],
+        (
+            "embed a handful of queries with the corpus model and compare query_gap_ratio; if "
+            "it drops, the query pipeline uses another model. A missing query prefix does not "
+            "move this number reliably, check the prefix in code"
+        ),
+        (
+            "query_gap_ratio below warn_at after fixing the query pipeline, and nDCG or recall "
+            "on labeled queries back to the reference"
+        ),
     ),
     "query_shift": (
-        ["the query pipeline changed since the reference (model, version, preprocessing)",
-         "new query traffic on topics the corpus does not cover",
-         "the corpus changed under the same queries"],
-        ("inspect details.shifted_sample_ids; if most queries moved, diff the query "
-        "pipeline against the one that produced the reference; if a few did, check their "
-        "topics against the corpus"),
-        ("shifted_query_ratio below warn_at against the same reference; labeled retrieval "
-        "quality unchanged"),
+        [
+            "the query pipeline changed since the reference (model, version, preprocessing)",
+            "new query traffic on topics the corpus does not cover",
+            "the corpus changed under the same queries",
+        ],
+        (
+            "inspect details.shifted_sample_ids; if most queries moved, diff the query "
+            "pipeline against the one that produced the reference; if a few did, check their "
+            "topics against the corpus"
+        ),
+        (
+            "shifted_query_ratio below warn_at against the same reference; labeled retrieval "
+            "quality unchanged"
+        ),
     ),
     "query_hubness": (
         ["a few generic items near the query mean", "queries that are too short or generic"],
@@ -567,8 +687,10 @@ def query_reference(baseline: Mapping) -> tuple[float, float]:
     """(median, MAD) of the query->corpus nearest distance from earlier evidence (an
     ``Evidence.to_dict()`` or ``--json`` output of an audit run with queries), for ``audit(..., query_baseline=...)``."""
     if not isinstance(baseline, Mapping) or not isinstance(baseline.get("findings"), list):
-        raise TypeError("query_baseline must be evidence with a findings list "
-                        "(Evidence.to_dict() or --json output)")
+        raise TypeError(
+            "query_baseline must be evidence with a findings list "
+            "(Evidence.to_dict() or --json output)"
+        )
     for f in baseline["findings"]:
         if isinstance(f, Mapping) and f.get("name") == "query_gap":
             d = f.get("details") or {}
@@ -579,13 +701,20 @@ def query_reference(baseline: Mapping) -> tuple[float, float]:
             if np.isfinite(med) and np.isfinite(mad) and med >= 0 and mad >= 0:
                 return med, mad
             break
-    raise ValueError("query_baseline has no query_gap finding with median_query_nn_distance "
-                     "and query_nn_mad; re-create it with --queries")
+    raise ValueError(
+        "query_baseline has no query_gap finding with median_query_nn_distance "
+        "and query_nn_mad; re-create it with --queries"
+    )
 
 
 def _core_findings(
-    x: np.ndarray, k: int, near_dup_cos: float, queries: np.ndarray | None, th: dict,
-    seed: int = 0, reference: tuple[float, float] | None = None,
+    x: np.ndarray,
+    k: int,
+    near_dup_cos: float,
+    queries: np.ndarray | None,
+    th: dict,
+    seed: int = 0,
+    reference: tuple[float, float] | None = None,
     knn: Mapping | None = None,
 ) -> tuple[list[Finding], np.ndarray, np.ndarray]:
     """Compute every finding that depends only on the (sampled) matrix and the queries.
@@ -597,7 +726,10 @@ def _core_findings(
     h = hubness(x, k, knn=knn_idx)
     findings.append(
         Finding(
-            "hubness", "skewness", h["skewness"], _verdict("hubness.skewness", h["skewness"], th),
+            "hubness",
+            "skewness",
+            h["skewness"],
+            _verdict("hubness.skewness", h["skewness"], th),
             f"k-occurrence skewness {h['skewness']:.2f}; top 1% of items take "
             f"{h['hub_share_top1pct']:.1%} of all neighbor slots (max N_k={h['max_k_occurrence']}, "
             f"expected {k}).",
@@ -606,7 +738,9 @@ def _core_findings(
     )
     findings.append(
         Finding(
-            "antihubs", "antihub_excess", h["antihub_excess"],
+            "antihubs",
+            "antihub_excess",
+            h["antihub_excess"],
             _verdict("hubness.antihub_excess", h["antihub_excess"], th),
             f"{h['antihub_ratio']:.1%} of items are never anyone's neighbor (random data at "
             f"k={k} would give {h['antihub_baseline']:.1%}); the excess is unreachable "
@@ -618,7 +752,9 @@ def _core_findings(
     a = anisotropy(x, seed=seed)
     findings.append(
         Finding(
-            "anisotropy", "mean_random_cosine", a["mean_random_cosine"],
+            "anisotropy",
+            "mean_random_cosine",
+            a["mean_random_cosine"],
             _verdict("anisotropy.mean_random_cosine", a["mean_random_cosine"], th),
             f"random pairs have mean cosine {a['mean_random_cosine']:.3f} (isotropic ~0); "
             f"mean unit vector has norm {a['mean_vector_norm']:.2f}; centering would bring the "
@@ -628,31 +764,48 @@ def _core_findings(
     )
     findings.append(
         Finding(
-            "effective_rank", "effective_rank_ratio", a["effective_rank_ratio"],
+            "effective_rank",
+            "effective_rank_ratio",
+            a["effective_rank_ratio"],
             _verdict("anisotropy.effective_rank_ratio", a["effective_rank_ratio"], th),
             f"effective rank {a['effective_rank']:.1f} of {a['max_attainable_rank']} attainable "
-            + (f"({a['dim']} dims" if a["max_attainable_rank"] == a["dim"] else
-               f"({a['dim']} dims, but only {a['max_attainable_rank'] + 1} rows were used, which "
-               "bounds the rank")
+            + (
+                f"({a['dim']} dims"
+                if a["max_attainable_rank"] == a["dim"]
+                else f"({a['dim']} dims, but only {a['max_attainable_rank'] + 1} rows were used, which "
+                "bounds the rank"
+            )
             + f"; {a['effective_rank_ratio']:.1%}); low values mean most dimensions carry nothing.",
-            {key: a[key] for key in ("dim", "effective_rank", "max_attainable_rank",
-                                     "effective_rank_ratio", "top1_pc_variance_share")},
+            {
+                key: a[key]
+                for key in (
+                    "dim",
+                    "effective_rank",
+                    "max_attainable_rank",
+                    "effective_rank_ratio",
+                    "top1_pc_variance_share",
+                )
+            },
         )
     )
 
     c = collapse(x, near_dup_cos, knn_dist=knn_dist, knn_idx=knn_idx)
     groups = c["largest_near_duplicate_groups"]
     if groups:
-        shape = (f"they form {c['near_duplicate_groups']} groups, the largest of "
-                 f"{groups[0]} rows; largest exact-duplicate group "
-                 f"{(c['largest_exact_duplicate_groups'] or [1])[0]} rows. Many small groups "
-                 "mean duplicate items, a few huge groups mean an embedding failure or "
-                 "boilerplate; see details.sample_pairs.")
+        shape = (
+            f"they form {c['near_duplicate_groups']} groups, the largest of "
+            f"{groups[0]} rows; largest exact-duplicate group "
+            f"{(c['largest_exact_duplicate_groups'] or [1])[0]} rows. Many small groups "
+            "mean duplicate items, a few huge groups mean an embedding failure or "
+            "boilerplate; see details.sample_pairs."
+        )
     else:
         shape = "no row has a near-duplicate."
     findings.append(
         Finding(
-            "collapse", "near_duplicate_ratio", c["near_duplicate_ratio"],
+            "collapse",
+            "near_duplicate_ratio",
+            c["near_duplicate_ratio"],
             _verdict("collapse.near_duplicate_ratio", c["near_duplicate_ratio"], th),
             f"{c['near_duplicate_ratio']:.1%} of items have a neighbor with cosine >= {near_dup_cos} "
             f"or an exact copy (exact duplicates {c['exact_duplicate_ratio']:.1%}); {shape}",
@@ -663,7 +816,9 @@ def _core_findings(
     g = rogue_dimensions(x)
     findings.append(
         Finding(
-            "rogue_dimensions", "top1_dim_variance_ratio", g["top1_dim_variance_ratio"],
+            "rogue_dimensions",
+            "top1_dim_variance_ratio",
+            g["top1_dim_variance_ratio"],
             _verdict("rogue_dimensions.top1_dim_variance_ratio", g["top1_dim_variance_ratio"], th),
             f"dimension {g['rogue_dims'][0]} alone holds {g['top1_dim_variance_share']:.1%} of "
             f"variance, {g['top1_dim_variance_ratio']:.1f}x the uniform share of "
@@ -676,7 +831,10 @@ def _core_findings(
     nm = norms(x)
     findings.append(
         Finding(
-            "norms", "norm_cv", nm["norm_cv"], _verdict("norms.norm_cv", nm["norm_cv"], th),
+            "norms",
+            "norm_cv",
+            nm["norm_cv"],
+            _verdict("norms.norm_cv", nm["norm_cv"], th),
             f"vector norms vary with CV {nm['norm_cv']:.3f} (median {nm['norm_median']:.3f}, "
             f"range {nm['norm_min']:.3f}-{nm['norm_max']:.3f}); {nm['zero_norm_ratio']:.2%} are "
             "zero vectors. Unequal norms bias inner-product search toward long vectors.",
@@ -685,14 +843,23 @@ def _core_findings(
     )
 
     if nm["norm_cv"] < 1e-3:
-        mm = {"k": int(k), "topk_overlap": 1.0, "queries_fully_agreeing_ratio": 1.0,
-              "min_overlap": 1.0, "skipped": "norms are uniform, cosine == inner product"}
+        mm = {
+            "k": int(k),
+            "topk_overlap": 1.0,
+            "queries_fully_agreeing_ratio": 1.0,
+            "min_overlap": 1.0,
+            "skipped": "norms are uniform, cosine == inner product",
+        }
     else:
-        dot_idx, _ = knn["dot"] if knn and knn.get("dot") is not None else exact_knn(x, k, metric="dot")
+        dot_idx, _ = (
+            knn["dot"] if knn and knn.get("dot") is not None else exact_knn(x, k, metric="dot")
+        )
         mm = metric_mismatch(knn_idx, dot_idx)
     findings.append(
         Finding(
-            "metric_mismatch", "topk_overlap", mm["topk_overlap"],
+            "metric_mismatch",
+            "topk_overlap",
+            mm["topk_overlap"],
             _verdict("metric_mismatch.topk_overlap", mm["topk_overlap"], th),
             f"cosine and inner-product top-{k} share {mm['topk_overlap']:.1%} of neighbors; "
             f"{mm['queries_fully_agreeing_ratio']:.1%} of items get identical lists. "
@@ -701,21 +868,30 @@ def _core_findings(
         )
     )
 
-    dc = distance_concentration(knn_dist[:, 0], a["mean_random_cosine"], dim=x.shape[1],
-                                seed=seed, x=x)
+    dc = distance_concentration(
+        knn_dist[:, 0], a["mean_random_cosine"], dim=x.shape[1], seed=seed, x=x
+    )
     findings.append(
         Finding(
-            "distance_concentration", "contrast_over_noise", dc["contrast_over_noise"],
+            "distance_concentration",
+            "contrast_over_noise",
+            dc["contrast_over_noise"],
             _verdict("distance_concentration.contrast_over_noise", dc["contrast_over_noise"], th),
-            (f"on {dc['baseline_rows']} rows a random item is "
-             f"{dc['relative_contrast_at_baseline_rows']:.2f}x farther than the nearest neighbor "
-             f"(random distance {dc['mean_random_distance']:.3f}); isotropic noise at "
-             f"{x.shape[1]}-d and the same rows would give {dc['noise_relative_contrast']:.2f}x, "
-             f"so the contrast is {dc['contrast_over_noise']:.2f}x that of noise. On all rows the "
-             f"contrast is {dc['relative_contrast']:.2f}x (median NN distance "
-             f"{dc['median_nn_distance']:.3f}). Near 1.0 means distances carry no signal."
-             + ("" if dc["distinct_neighbors"] else " No row has a neighbor that is not a copy "
-                "of it, so the nearest-neighbor distance is 0 everywhere; see collapse.")),
+            (
+                f"on {dc['baseline_rows']} rows a random item is "
+                f"{dc['relative_contrast_at_baseline_rows']:.2f}x farther than the nearest neighbor "
+                f"(random distance {dc['mean_random_distance']:.3f}); isotropic noise at "
+                f"{x.shape[1]}-d and the same rows would give {dc['noise_relative_contrast']:.2f}x, "
+                f"so the contrast is {dc['contrast_over_noise']:.2f}x that of noise. On all rows the "
+                f"contrast is {dc['relative_contrast']:.2f}x (median NN distance "
+                f"{dc['median_nn_distance']:.3f}). Near 1.0 means distances carry no signal."
+                + (
+                    ""
+                    if dc["distinct_neighbors"]
+                    else " No row has a neighbor that is not a copy "
+                    "of it, so the nearest-neighbor distance is 0 everywhere; see collapse."
+                )
+            ),
             dc,
         )
     )
@@ -723,7 +899,9 @@ def _core_findings(
     o = outliers(knn_dist[:, 0], dup_cutoff=duplicate_cutoff(dc["mean_random_distance"]))
     findings.append(
         Finding(
-            "outliers", "outlier_ratio", o["outlier_ratio"],
+            "outliers",
+            "outlier_ratio",
+            o["outlier_ratio"],
             _verdict("outliers.outlier_ratio", o["outlier_ratio"], th),
             f"{o['outlier_ratio']:.2%} of items have no neighbor within cosine distance "
             f"{o['cutoff_nn_distance']:.3f} (median {o['median_nn_distance']:.3f}); see "
@@ -735,7 +913,9 @@ def _core_findings(
     cn = connectivity(knn_idx)
     findings.append(
         Finding(
-            "connectivity", "island_ratio", cn["island_ratio"],
+            "connectivity",
+            "island_ratio",
+            cn["island_ratio"],
             _verdict("connectivity.island_ratio", cn["island_ratio"], th),
             f"{cn['island_ratio']:.2%} of items sit in {cn['n_islands']} small island(s) of the "
             f"k-NN graph (fewer than {cn['min_island_size']} items; {cn['n_components']} "
@@ -747,12 +927,19 @@ def _core_findings(
 
     if queries is not None:
         qv = np.asarray(queries, dtype=np.float32)
-        qa = query_audit(x, qv, k, knn_dist[:, 0],
-                         dup_cutoff=duplicate_cutoff(dc["mean_random_distance"]),
-                         reference=reference)
+        qa = query_audit(
+            x,
+            qv,
+            k,
+            knn_dist[:, 0],
+            dup_cutoff=duplicate_cutoff(dc["mean_random_distance"]),
+            reference=reference,
+        )
         findings.append(
             Finding(
-                "ood_queries", "ood_query_ratio", qa["ood_query_ratio"],
+                "ood_queries",
+                "ood_query_ratio",
+                qa["ood_query_ratio"],
                 _verdict("queries.ood_query_ratio", qa["ood_query_ratio"], th),
                 f"{qa['ood_query_ratio']:.1%} of {qa['n_queries']} queries are farther from "
                 f"their nearest corpus item (median {qa['median_query_nn_distance']:.3f}) than "
@@ -760,15 +947,21 @@ def _core_findings(
                 "Out-of-distribution queries: wrong model, missing query prefix, or uncovered "
                 "topics; see details.ood_sample_ids. Deprecated: this ratio also counts the "
                 "normal query/passage distance of asymmetric models; read query_gap instead."
-                + ("" if qa["corpus_has_distinct_neighbors"] else " No corpus row has a "
-                   "neighbor that is not a copy of it, so there is no reference distance and "
-                   "nothing is flagged; see collapse."),
+                + (
+                    ""
+                    if qa["corpus_has_distinct_neighbors"]
+                    else " No corpus row has a "
+                    "neighbor that is not a copy of it, so there is no reference distance and "
+                    "nothing is flagged; see collapse."
+                ),
                 {key: v for key, v in qa.items() if not key.startswith(("shift", "reference_"))},
             )
         )
         findings.append(
             Finding(
-                "query_gap", "query_gap_ratio", qa["query_gap_ratio"],
+                "query_gap",
+                "query_gap_ratio",
+                qa["query_gap_ratio"],
                 _verdict("queries.query_gap_ratio", qa["query_gap_ratio"], th),
                 f"the median query is {qa['median_query_nn_distance']:.3f} from its nearest "
                 f"corpus item, {qa['query_gap_ratio']:.2f}x the median corpus item's distance to "
@@ -776,18 +969,31 @@ def _core_findings(
                 "queries against long passages keep healthy pipelines at about 1 to 2.5; queries "
                 "embedded by a different model land at 5 to 10. A missing query prefix does not "
                 "reliably move it."
-                + ("" if qa["corpus_has_distinct_neighbors"] else " No corpus row has a "
-                   "neighbor that is not a copy of it, so there is no reference distance and "
-                   "the ratio is reported as 0; see collapse."),
-                {key: qa[key] for key in ("n_queries", "median_query_nn_distance",
-                                          "query_nn_mad", "median_corpus_nn_distance",
-                                          "corpus_has_distinct_neighbors")},
+                + (
+                    ""
+                    if qa["corpus_has_distinct_neighbors"]
+                    else " No corpus row has a "
+                    "neighbor that is not a copy of it, so there is no reference distance and "
+                    "the ratio is reported as 0; see collapse."
+                ),
+                {
+                    key: qa[key]
+                    for key in (
+                        "n_queries",
+                        "median_query_nn_distance",
+                        "query_nn_mad",
+                        "median_corpus_nn_distance",
+                        "corpus_has_distinct_neighbors",
+                    )
+                },
             )
         )
         if reference is not None:
             findings.append(
                 Finding(
-                    "query_shift", "shifted_query_ratio", qa["shifted_query_ratio"],
+                    "query_shift",
+                    "shifted_query_ratio",
+                    qa["shifted_query_ratio"],
                     _verdict("queries.shifted_query_ratio", qa["shifted_query_ratio"], th),
                     f"{qa['shifted_query_ratio']:.1%} of {qa['n_queries']} queries are farther "
                     f"from the corpus than {qa['shift_cutoff_distance']:.3f}, the reference "
@@ -796,15 +1002,24 @@ def _core_findings(
                     "query pipeline that changed model moves almost every query. Only "
                     "meaningful when the reference was audited on the same corpus and sample "
                     "size; see details.shifted_sample_ids.",
-                    {key: qa[key] for key in ("n_queries", "median_query_nn_distance",
-                                              "shift_cutoff_distance",
-                                              "reference_median_nn_distance",
-                                              "reference_nn_mad", "shifted_sample_ids")},
+                    {
+                        key: qa[key]
+                        for key in (
+                            "n_queries",
+                            "median_query_nn_distance",
+                            "shift_cutoff_distance",
+                            "reference_median_nn_distance",
+                            "reference_nn_mad",
+                            "shifted_sample_ids",
+                        )
+                    },
                 )
             )
         findings.append(
             Finding(
-                "query_hubness", "query_hubness_skewness", qa["query_hubness_skewness"],
+                "query_hubness",
+                "query_hubness_skewness",
+                qa["query_hubness_skewness"],
                 _verdict("queries.query_hubness_skewness", qa["query_hubness_skewness"], th),
                 f"k-occurrence skewness over query results {qa['query_hubness_skewness']:.2f} "
                 f"(max {qa['max_query_k_occurrence']} appearances); queries reach "
@@ -881,8 +1096,11 @@ def audit(
     if not (0.0 < float(near_dup_cos) <= 1.0):
         raise ValueError(f"near_dup_cos must be in (0, 1], got {near_dup_cos!r}")
     near_dup_cos = float(near_dup_cos)
-    if (isinstance(sample_repeats, bool) or not isinstance(sample_repeats, (int, np.integer))
-            or sample_repeats < 1):
+    if (
+        isinstance(sample_repeats, bool)
+        or not isinstance(sample_repeats, (int, np.integer))
+        or sample_repeats < 1
+    ):
         raise ValueError(f"sample_repeats must be a positive integer, got {sample_repeats!r}")
     sample_repeats = int(sample_repeats)
 
@@ -890,7 +1108,9 @@ def audit(
     if x.dtype.kind not in "iufb":
         raise ValueError(f"embeddings must be real numbers, got dtype {x.dtype}")
     if x.ndim != 2 or x.shape[0] < 3 or x.shape[1] < 1:
-        raise ValueError(f"expected a 2-D array with at least 3 rows and 1 column, got shape {x.shape}")
+        raise ValueError(
+            f"expected a 2-D array with at least 3 rows and 1 column, got shape {x.shape}"
+        )
     if x.dtype.kind == "b":
         x = x.astype(np.float32)
     if not np.isfinite(x).all():
@@ -934,8 +1154,10 @@ def audit(
             raise ValueError("query_baseline needs queries")
         reference = query_reference(query_baseline)
         if query_baseline.get("dim") not in (None, x.shape[1]):
-            raise ValueError(f"query_baseline was audited at dim={query_baseline.get('dim')}, "
-                             f"these vectors have dim={x.shape[1]}")
+            raise ValueError(
+                f"query_baseline was audited at dim={query_baseline.get('dim')}, "
+                f"these vectors have dim={x.shape[1]}"
+            )
     if queries is not None:
         queries = _checked_queries(queries, x.shape[1])
     if (qrels is not None or ranked is not None) and queries is None:
@@ -948,10 +1170,14 @@ def audit(
         ci = np.asarray(knn["cosine"][0])
         if ci.shape[0] != x.shape[0] or ci.shape[1] < min(k, x.shape[0] - 1):
             raise ValueError(f"knn lists are shaped {ci.shape}; need ({x.shape[0]}, >= {k})")
-        knn = {m: (np.asarray(v[0])[:, :k], np.asarray(v[1])[:, :k])
-               for m, v in knn.items() if v is not None}
-    findings, knn_idx, knn_dist = _core_findings(x, k, near_dup_cos, queries, th, seed,
-                                                 reference, knn)
+        knn = {
+            m: (np.asarray(v[0])[:, :k], np.asarray(v[1])[:, :k])
+            for m, v in knn.items()
+            if v is not None
+        }
+    findings, knn_idx, knn_dist = _core_findings(
+        x, k, near_dup_cos, queries, th, seed, reference, knn
+    )
     n_queries = 0 if queries is None else int(np.asarray(queries).shape[0])
     if ann_neighbors is not None:
         ann_neighbors = ann_neighbors.astype(np.int64)  # ids were checked to fit; -1 marks fillers
@@ -960,12 +1186,17 @@ def audit(
             ann_neighbors = np.where(own, -1, ann_neighbors)
         r = ann_recall(knn_idx, ann_neighbors, exact_dist=knn_dist, vectors=x)
         short = r["rows_with_fewer_than_k_ids_ratio"]
-        note = ("" if short == 0 else
-                f" {short:.1%} of rows supplied fewer than {r['k']} valid ids (self ids are "
-                f"dropped), which caps their recall below 1; query the index with k + 1.")
+        note = (
+            ""
+            if short == 0
+            else f" {short:.1%} of rows supplied fewer than {r['k']} valid ids (self ids are "
+            f"dropped), which caps their recall below 1; query the index with k + 1."
+        )
         findings.append(
             Finding(
-                "ann_recall", "recall_at_k", r["recall_at_k"],
+                "ann_recall",
+                "recall_at_k",
+                r["recall_at_k"],
                 _verdict("ann_recall.recall_at_k", r["recall_at_k"], th),
                 f"ANN recall@{r['k']} = {r['recall_at_k']:.3f}; "
                 f"{r['queries_below_floor_ratio']:.1%} of queries fall below {r['floor']:.0%}."
@@ -980,8 +1211,9 @@ def audit(
         verdicts: dict[str, set[str]] = {f.name: {f.verdict} for f in findings}
         for r in range(1, sample_repeats):
             rows_r = np.sort(np.random.default_rng(seed + r).choice(n_total, sample, replace=False))
-            rep, _, _ = _core_findings(x_full[rows_r], k, near_dup_cos, queries, th, seed,
-                                       reference)
+            rep, _, _ = _core_findings(
+                x_full[rows_r], k, near_dup_cos, queries, th, seed, reference
+            )
             for f in rep:
                 values[f.name].append(f.value)
                 verdicts[f.name].add(f.verdict)
@@ -995,22 +1227,34 @@ def audit(
     if qrels is not None:
         from vecscope.retrieval import evaluate_retrieval, parse_qrels
 
-        retrieval = evaluate_retrieval(x_full, queries, parse_qrels(qrels), k=k, ranked=ranked,
-                                       near_dup_cos=near_dup_cos)
+        retrieval = evaluate_retrieval(
+            x_full, queries, parse_qrels(qrels), k=k, ranked=ranked, near_dup_cos=near_dup_cos
+        )
     report = cluster_report(x, clusters, knn_idx, knn_dist, near_dup_cos, seed) if clusters else []
     inconclusive: list[str] = []
     if sampled:
         _to_original_rows(findings, report, rows)
-        inconclusive = _apply_sampling(findings, sample / n_total, th,
-                                       full_counts=exact_copy_counts(x_full))
+        inconclusive = _apply_sampling(
+            findings, sample / n_total, th, full_counts=exact_copy_counts(x_full)
+        )
     from vecscope.plan import build_plan
 
     findings = _attach_thresholds(findings, th)
     return Evidence(
-        "vecscope", __version__, int(x.shape[0]), int(x.shape[1]), int(k), findings,
-        n_total=n_total, sampled=sampled, n_queries=n_queries, clusters=report,
+        "vecscope",
+        __version__,
+        int(x.shape[0]),
+        int(x.shape[1]),
+        int(k),
+        findings,
+        n_total=n_total,
+        sampled=sampled,
+        n_queries=n_queries,
+        clusters=report,
         thresholds={k: list(v) for k, v in th.items()},
-        sample_repeats=sample_repeats, unstable_findings=unstable, near_dup_cos=near_dup_cos,
+        sample_repeats=sample_repeats,
+        unstable_findings=unstable,
+        near_dup_cos=near_dup_cos,
         inconclusive_findings=inconclusive,
         plan=build_plan([asdict(f) for f in findings], retrieval or None),
         retrieval=retrieval,

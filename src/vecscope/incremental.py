@@ -44,8 +44,9 @@ def fingerprint(x: np.ndarray) -> str:
 def row_digests(x: np.ndarray) -> np.ndarray:
     """A 16-byte BLAKE2b digest of each row as float32, to find the rows that changed."""
     x = np.ascontiguousarray(x, dtype=np.float32)
-    return np.asarray([hashlib.blake2b(r.tobytes(), digest_size=16).digest() for r in x],
-                      dtype="S16")
+    return np.asarray(
+        [hashlib.blake2b(r.tobytes(), digest_size=16).digest() for r in x], dtype="S16"
+    )
 
 
 def _prepared(x: np.ndarray, metric: str) -> np.ndarray:
@@ -56,15 +57,30 @@ def _dist(a: np.ndarray, b: np.ndarray, metric: str) -> np.ndarray:
     return 1.0 - a @ b.T if metric == "cosine" else -(a @ b.T)
 
 
-def extend_knn(x: np.ndarray, idx: np.ndarray, dist: np.ndarray, n_old: int, k: int,
-               metric: str = "cosine", block: int | None = None):
+def extend_knn(
+    x: np.ndarray,
+    idx: np.ndarray,
+    dist: np.ndarray,
+    n_old: int,
+    k: int,
+    metric: str = "cosine",
+    block: int | None = None,
+):
     """Exact k-NN of all rows of ``x`` from the lists ``idx``/``dist`` of its first ``n_old``
     rows. Rows from ``n_old`` on are new; ``metric`` is "cosine" or "dot" as in exact_knn."""
     return refresh_knn(x, idx, dist, n_old, (), k, metric, block)
 
 
-def refresh_knn(x: np.ndarray, idx: np.ndarray, dist: np.ndarray, n_old: int, changed, k: int,
-                metric: str = "cosine", block: int | None = None):
+def refresh_knn(
+    x: np.ndarray,
+    idx: np.ndarray,
+    dist: np.ndarray,
+    n_old: int,
+    changed,
+    k: int,
+    metric: str = "cosine",
+    block: int | None = None,
+):
     """Exact k-NN of all rows of ``x`` from the lists of its first ``n_old`` rows, where the
     rows at positions ``changed`` (all below ``n_old``) hold new vectors and rows from
     ``n_old`` on are appended."""
@@ -95,13 +111,16 @@ def refresh_knn(x: np.ndarray, idx: np.ndarray, dist: np.ndarray, n_old: int, ch
     m = dirty.size
     kk = min(k, m)
     for s in range(0, keep.size, block):
-        rows = keep[s:s + block]
+        rows = keep[s : s + block]
         if m == 0:
             out_idx[rows], out_dist[rows] = idx[rows, :k], dist[rows, :k]
             continue
         d_new = _dist(q[rows], q[dirty], metric).astype(np.float32)
-        part = (np.argpartition(d_new, kk - 1, axis=1)[:, :kk] if m > kk
-                else np.broadcast_to(np.arange(m), (rows.size, m)))
+        part = (
+            np.argpartition(d_new, kk - 1, axis=1)[:, :kk]
+            if m > kk
+            else np.broadcast_to(np.arange(m), (rows.size, m))
+        )
         pd = np.take_along_axis(d_new, part, axis=1)
         ids = dirty[part]
         within = np.lexsort((ids, pd), axis=1)  # by distance, then row id
@@ -112,7 +131,7 @@ def refresh_knn(x: np.ndarray, idx: np.ndarray, dist: np.ndarray, n_old: int, ch
         out_dist[rows] = np.take_along_axis(cand_d, order, axis=1)
     # recomputed rows: against every row, self excluded
     for s in range(0, full.size, block):
-        rows = full[s:s + block]
+        rows = full[s : s + block]
         d = _dist(q[rows], q, metric)
         d[np.arange(rows.size), rows] = np.inf
         part = np.argpartition(d, k, axis=1)[:, :k]
@@ -149,8 +168,10 @@ def cached_knn(x: np.ndarray, k: int, path: str | Path, metrics: tuple[str, ...]
         if version == 1:  # no row digests: rebuilt once in the current format
             cache, reason = None, "older cache format"
         elif version != CACHE_VERSION:
-            raise ValueError(f"{p}: k-NN cache version {cache.get('version')} is not "
-                             f"{CACHE_VERSION}; delete it to rebuild")
+            raise ValueError(
+                f"{p}: k-NN cache version {cache.get('version')} is not "
+                f"{CACHE_VERSION}; delete it to rebuild"
+            )
     digests = row_digests(x)
     status, n_old, changed = "created", 0, np.empty(0, dtype=np.int64)
     if cache is not None:
@@ -169,12 +190,13 @@ def cached_knn(x: np.ndarray, k: int, path: str | Path, metrics: tuple[str, ...]
                     lost |= is_changed[cache[f"{metric}_idx"][:, :k_eff]].any(axis=1)
             recompute = int(lost.sum()) + n - c_n
             if changed.size and recompute > _MAX_RECOMPUTE_SHARE * n:
-                reason = (f"{changed.size} changed rows would recompute {recompute} of {n} "
-                          "rows, as costly as a rebuild")
+                reason = (
+                    f"{changed.size} changed rows would recompute {recompute} of {n} "
+                    "rows, as costly as a rebuild"
+                )
                 changed = np.empty(0, dtype=np.int64)
             else:
-                status = ("updated" if changed.size else
-                          "reused" if c_n == n else "extended")
+                status = "updated" if changed.size else "reused" if c_n == n else "extended"
                 n_old, reason = c_n, None
     out = {}
     recomputed = 0 if status == "reused" else n if status == "created" else recompute
@@ -189,18 +211,30 @@ def cached_knn(x: np.ndarray, k: int, path: str | Path, metrics: tuple[str, ...]
         else:
             out[metric] = exact_knn(x, k_eff, metric=metric)
     if status != "reused" or any(f"{m}_idx" not in cache for m in metrics):
-        arrays = {"version": CACHE_VERSION, "n": n, "dim": dim, "k": k_eff,
-                  "fingerprint": fingerprint(x), "row_digests": digests}
+        arrays = {
+            "version": CACHE_VERSION,
+            "n": n,
+            "dim": dim,
+            "k": k_eff,
+            "fingerprint": fingerprint(x),
+            "row_digests": digests,
+        }
         for metric, (i, d) in out.items():
             arrays[f"{metric}_idx"], arrays[f"{metric}_dist"] = i, d
         tmp = p.with_name(p.name + ".tmp.npz")
         np.savez(tmp, **arrays)
         tmp.replace(p)
-    info = {"path": str(p), "status": status, "cached_rows": n_old,
-            "new_rows": n - n_old if status in ("extended", "updated") else
-            (0 if status == "reused" else n),
-            "changed_rows": int(changed.size), "recomputed_rows": recomputed,
-            "metrics": list(metrics)}
+    info = {
+        "path": str(p),
+        "status": status,
+        "cached_rows": n_old,
+        "new_rows": n - n_old
+        if status in ("extended", "updated")
+        else (0 if status == "reused" else n),
+        "changed_rows": int(changed.size),
+        "recomputed_rows": recomputed,
+        "metrics": list(metrics),
+    }
     if status == "created":
         info["reason"] = reason
     return out, info
@@ -211,6 +245,9 @@ def cached_knn_for_audit(x: np.ndarray, k: int, path: str | Path):
     the norms vary enough for metric_mismatch to compare the two (the audit's own rule)."""
     from vecscope.diagnostics import norms
 
-    metrics = ("cosine",) if norms(np.asarray(x, dtype=np.float32))["norm_cv"] < 1e-3 else (
-        "cosine", "dot")
+    metrics = (
+        ("cosine",)
+        if norms(np.asarray(x, dtype=np.float32))["norm_cv"] < 1e-3
+        else ("cosine", "dot")
+    )
     return cached_knn(x, k, path, metrics)

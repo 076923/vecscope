@@ -19,6 +19,7 @@ All notable changes to this project are documented here. The format follows
 - Workflows run with no default token permissions, pin actions to commit SHAs, and do not keep
   the checkout credentials. CI also builds the package, checks it with `twine`, and lints the
   workflows with zizmor. The release workflow checks that the built version matches the tag.
+- The code is formatted with `ruff format`, and CI and pre-commit check it.
 - The Korean README and the agent cases page link to repository files by URL, so the links work
   on the documentation site as well as on GitHub.
 

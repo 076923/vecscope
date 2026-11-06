@@ -86,20 +86,31 @@ def test_ranked_overlap_falls_with_a_worse_index(labeled):
     assert bad["overlap_with_exact"] < 0.6
 
 
-@pytest.mark.parametrize("obj", [
-    {"0": {"3": 1, "5": 0}},
-    [[0, 3, 1], [0, 5, 0]],
-    [{"query": 0, "doc": 3, "grade": 1}, {"query-id": 0, "corpus-id": 5, "score": 0}],
-])
+@pytest.mark.parametrize(
+    "obj",
+    [
+        {"0": {"3": 1, "5": 0}},
+        [[0, 3, 1], [0, 5, 0]],
+        [{"query": 0, "doc": 3, "grade": 1}, {"query-id": 0, "corpus-id": 5, "score": 0}],
+    ],
+)
 def test_parse_qrels_shapes(obj):
     assert parse_qrels(obj) == {0: {3: 1.0, 5: 0.0}}
 
 
-@pytest.mark.parametrize("obj, err", [
-    ({}, ValueError), ([[0, 1, 0]], ValueError), ([[0.5, 1]], ValueError),
-    ([[-1, 2]], ValueError), ([[True, 1]], TypeError), ("x", TypeError),
-    ({"0": [1]}, TypeError), ([[0, 1, "nan"]], ValueError),
-])
+@pytest.mark.parametrize(
+    "obj, err",
+    [
+        ({}, ValueError),
+        ([[0, 1, 0]], ValueError),
+        ([[0.5, 1]], ValueError),
+        ([[-1, 2]], ValueError),
+        ([[True, 1]], TypeError),
+        ("x", TypeError),
+        ({"0": [1]}, TypeError),
+        ([[0, 1, "nan"]], ValueError),
+    ],
+)
 def test_parse_qrels_rejects(obj, err):
     with pytest.raises(err):
         parse_qrels(obj)
@@ -108,7 +119,9 @@ def test_parse_qrels_rejects(obj, err):
 def test_load_qrels_formats(tmp_path):
     want = {0: {3: 1.0}, 2: {7: 2.0}}
     (tmp_path / "q.json").write_text(json.dumps({"0": {"3": 1}, "2": {"7": 2}}))
-    (tmp_path / "q.jsonl").write_text('{"query": 0, "doc": 3}\n{"query": 2, "doc": 7, "grade": 2}\n')
+    (tmp_path / "q.jsonl").write_text(
+        '{"query": 0, "doc": 3}\n{"query": 2, "doc": 7, "grade": 2}\n'
+    )
     (tmp_path / "q.tsv").write_text("query-id\tcorpus-id\tscore\n0\t3\t1\n2\t7\t2\n")
     (tmp_path / "q.csv").write_text("0,3,1\n2,7,2\n")
     for name in ("q.json", "q.jsonl", "q.tsv", "q.csv"):
@@ -180,16 +193,50 @@ def test_cli_qrels_and_ranked(tmp_path, capsys, labeled):
     np.save(tmp_path / "c.npy", corpus)
     np.save(tmp_path / "q.npy", queries)
     np.save(tmp_path / "r.npy", top)
-    (tmp_path / "qrels.json").write_text(json.dumps({str(q): {str(d): g for d, g in v.items()}
-                                                     for q, v in qrels.items()}))
-    assert main(["audit", str(tmp_path / "c.npy"), "--queries", str(tmp_path / "q.npy"),
-                 "--qrels", str(tmp_path / "qrels.json"), "--ranked", str(tmp_path / "r.npy"),
-                 "--fail-on", "none"]) == 0
+    (tmp_path / "qrels.json").write_text(
+        json.dumps({str(q): {str(d): g for d, g in v.items()} for q, v in qrels.items()})
+    )
+    assert (
+        main(
+            [
+                "audit",
+                str(tmp_path / "c.npy"),
+                "--queries",
+                str(tmp_path / "q.npy"),
+                "--qrels",
+                str(tmp_path / "qrels.json"),
+                "--ranked",
+                str(tmp_path / "r.npy"),
+                "--fail-on",
+                "none",
+            ]
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "retrieval (60 judged queries, k=10):" in out and "overlap_with_exact=1.0000" in out
-    main(["audit", str(tmp_path / "c.npy"), "--queries", str(tmp_path / "q.npy"),
-          "--qrels", str(tmp_path / "qrels.json"), "--json"])
+    main(
+        [
+            "audit",
+            str(tmp_path / "c.npy"),
+            "--queries",
+            str(tmp_path / "q.npy"),
+            "--qrels",
+            str(tmp_path / "qrels.json"),
+            "--json",
+        ]
+    )
     (tmp_path / "base.json").write_text(capsys.readouterr().out)
-    main(["audit", str(tmp_path / "c.npy"), "--queries", str(tmp_path / "q.npy"),
-          "--qrels", str(tmp_path / "qrels.json"), "--baseline", str(tmp_path / "base.json")])
+    main(
+        [
+            "audit",
+            str(tmp_path / "c.npy"),
+            "--queries",
+            str(tmp_path / "q.npy"),
+            "--qrels",
+            str(tmp_path / "qrels.json"),
+            "--baseline",
+            str(tmp_path / "base.json"),
+        ]
+    )
     assert "retrieval vs baseline:" in capsys.readouterr().out

@@ -29,21 +29,23 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from retrieval_quality import embed, load_beir
 
-PROMPTS = {"ingestion": """Our SciFact search keeps returning the same paper twice and some queries look
+PROMPTS = {
+    "ingestion": """Our SciFact search keeps returning the same paper twice and some queries look
 worse since the last ingestion. The corpus embeddings are corpus.npy, query embeddings
 queries.npy, relevance labels qrels.tsv (query row, corpus row, grade; rows are positions in
 those files) and the production index's top-10 per query prod_topk.npy (an inner-product
 index over corpus.npy). Use the vecscope MCP tools to find what is wrong, fix the corpus
 into corpus_fixed.npy (and recompute the production top-10 into prod_topk_fixed.npy the
 same way), and show with a re-audit that the fix worked. Do not change the queries.""",
-           "index": """Since we moved our SciFact search to a faiss IVF index (IndexIVFFlat, inner
+    "index": """Since we moved our SciFact search to a faiss IVF index (IndexIVFFlat, inner
 product, nlist=128, nprobe=1), answers got worse. The corpus embeddings are corpus.npy, query
 embeddings queries.npy, relevance labels qrels.tsv (query row, corpus row, grade; rows are
 positions in those files) and the production index's top-10 per query prod_topk.npy. Use the
 vecscope MCP tools to find whether the embeddings or the index are at fault, choose index
 settings (we would like to keep an IVF index, latency matters), recompute the production
 top-10 with them into prod_topk_fixed.npy, and show with a re-audit that the fix worked. Do
-not change corpus.npy or queries.npy."""}
+not change corpus.npy or queries.npy.""",
+}
 
 
 def main() -> None:
@@ -55,8 +57,14 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
 
     doc_ids, doc_text, q_ids, q_text, rel = load_beir("scifact")
-    docs, queries = embed("BAAI/bge-small-en-v1.5", "scifact", doc_text, q_text,
-                          "Represent this sentence for searching relevant passages: ", "")
+    docs, queries = embed(
+        "BAAI/bge-small-en-v1.5",
+        "scifact",
+        doc_text,
+        q_text,
+        "Represent this sentence for searching relevant passages: ",
+        "",
+    )
     docs = docs / np.linalg.norm(docs, axis=1, keepdims=True)
     queries = queries / np.linalg.norm(queries, axis=1, keepdims=True)
     corpus = docs.astype(np.float32)
@@ -69,8 +77,9 @@ def main() -> None:
     else:
         import faiss
 
-        index = faiss.IndexIVFFlat(faiss.IndexFlatIP(corpus.shape[1]), corpus.shape[1], 128,
-                                   faiss.METRIC_INNER_PRODUCT)
+        index = faiss.IndexIVFFlat(
+            faiss.IndexFlatIP(corpus.shape[1]), corpus.shape[1], 128, faiss.METRIC_INNER_PRODUCT
+        )
         index.train(corpus)
         index.add(corpus)
         index.nprobe = 1
@@ -79,14 +88,17 @@ def main() -> None:
     row = {d: i for i, d in enumerate(doc_ids)}
     with open(out / "qrels.tsv", "w", encoding="utf-8") as f:
         f.write("query\tdoc\tgrade\n")
-        f.writelines(f"{qi}\t{row[d]}\t{g}\n"
-                     for qi, qid in enumerate(q_ids) for d, g in rel[qid].items())
+        f.writelines(
+            f"{qi}\t{row[d]}\t{g}\n" for qi, qid in enumerate(q_ids) for d, g in rel[qid].items()
+        )
     np.save(out / "corpus.npy", corpus)
     np.save(out / "queries.npy", queries)
     np.save(out / "prod_topk.npy", top.astype(np.int64))
     (out / "PROMPT.txt").write_text(PROMPTS[args.case] + "\n", encoding="utf-8")
-    print(f"wrote {out}/: corpus {corpus.shape}, queries {queries.shape}, "
-          f"{sum(len(r) for r in rel.values())} judgments")
+    print(
+        f"wrote {out}/: corpus {corpus.shape}, queries {queries.shape}, "
+        f"{sum(len(r) for r in rel.values())} judgments"
+    )
 
 
 if __name__ == "__main__":

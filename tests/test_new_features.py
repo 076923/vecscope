@@ -17,7 +17,9 @@ from vecscope.compare import compare
 def _clustered(n=2000, d=32, centers=20, spread=0.6, seed=0):
     rng = np.random.default_rng(seed)
     c = rng.standard_normal((centers, d))
-    return (c[rng.integers(0, centers, n)] + rng.standard_normal((n, d)) * spread).astype(np.float32)
+    return (c[rng.integers(0, centers, n)] + rng.standard_normal((n, d)) * spread).astype(
+        np.float32
+    )
 
 
 # ----------------------------------------------------------------------- sweep: latency, size
@@ -28,8 +30,9 @@ from vecscope.sweep import render_sweep, sweep
 
 @pytest.fixture(scope="module")
 def small_sweep():
-    return sweep(_clustered(3000), k=5, n_queries=150, latency_queries=40, device="cpu",
-                 timing_repeats=1)
+    return sweep(
+        _clustered(3000), k=5, n_queries=150, latency_queries=40, device="cpu", timing_repeats=1
+    )
 
 
 def test_latency_percentiles_are_ordered_and_positive(small_sweep):
@@ -40,8 +43,9 @@ def test_latency_percentiles_are_ordered_and_positive(small_sweep):
 
 
 def test_latency_queries_zero_skips_and_says_so():
-    res = sweep(_clustered(1500), k=5, n_queries=100, latency_queries=0, device="cpu",
-                timing_repeats=1)
+    res = sweep(
+        _clustered(1500), k=5, n_queries=100, latency_queries=0, device="cpu", timing_repeats=1
+    )
     assert res.latency_queries == 0
     assert all(p.latency_ms_p50 is None and p.latency_ms_p99 is None for p in res.points)
     assert any("skipped" in c for c in res.caveats)
@@ -50,8 +54,9 @@ def test_latency_queries_zero_skips_and_says_so():
 
 
 def test_latency_queries_capped_at_query_count():
-    res = sweep(_clustered(1500), k=5, n_queries=30, latency_queries=500, device="cpu",
-                timing_repeats=1)
+    res = sweep(
+        _clustered(1500), k=5, n_queries=30, latency_queries=500, device="cpu", timing_repeats=1
+    )
     assert res.latency_queries == 30
 
 
@@ -85,8 +90,11 @@ def test_index_bytes_matches_independent_serialization(small_sweep):
             ref.train(x)
             ref.add(x)
             assert abs(s - faiss.serialize_index(ref).nbytes) / s < 0.01
-    hnsw = [s for (kind, m, _), s in sorted(size.items(), key=lambda kv: kv[0][1] or 0)
-            if kind == "hnsw"]
+    hnsw = [
+        s
+        for (kind, m, _), s in sorted(size.items(), key=lambda kv: kv[0][1] or 0)
+        if kind == "hnsw"
+    ]
     assert hnsw == sorted(hnsw), "a larger M must not give a smaller graph"
 
 
@@ -103,21 +111,41 @@ def test_recommendation_carries_latency_and_size(small_sweep):
 def test_to_dict_round_trips_through_json(small_sweep):
     d = json.loads(json.dumps(small_sweep.to_dict()))
     assert {"latency_ms_p50", "latency_ms_p95", "latency_ms_p99", "index_bytes"} <= set(
-        d["points"][0])
+        d["points"][0]
+    )
     assert d["latency_queries"] == 40
 
 
 def test_cli_sweep_latency_flag(tmp_path, capsys):
     p = tmp_path / "x.npy"
     np.save(p, _clustered(1200))
-    assert main(["sweep", str(p), "-k", "5", "--n-queries", "50", "--latency-queries", "0",
-                 "--device", "cpu", "--timing-repeats", "1", "--json"]) == 0
+    assert (
+        main(
+            [
+                "sweep",
+                str(p),
+                "-k",
+                "5",
+                "--n-queries",
+                "50",
+                "--latency-queries",
+                "0",
+                "--device",
+                "cpu",
+                "--timing-repeats",
+                "1",
+                "--json",
+            ]
+        )
+        == 0
+    )
     out = json.loads(capsys.readouterr().out)
     assert out["latency_queries"] == 0 and out["points"][0]["latency_ms_p50"] is None
 
 
 def _gpu_ok():
     from vecscope.sweep import gpu_available
+
     return gpu_available(faiss)
 
 
@@ -144,6 +172,7 @@ def test_gpu_sweep_matches_cpu_recall_and_ivf_size():
 
 # ----------------------------------------------------------------- compare: neighbors_a / b
 
+
 @pytest.fixture(scope="module")
 def two_spaces():
     a = _clustered(1500, d=32, seed=1)
@@ -162,8 +191,15 @@ def test_supplied_exact_neighbors_equal_recomputed_on_full_rows(two_spaces):
     sup = compare(a, b, k=k, sample=0, neighbors_a=ia, neighbors_b=ib)
     assert rec.neighbor_source == "recomputed" and sup.neighbor_source == "supplied"
     assert rec.neighbor_scope == sup.neighbor_scope == "full"
-    for f in ("nn1_agreement", "topk_overlap", "topk_overlap_p10", "rows_with_no_overlap",
-              "near_duplicate_ratio_a", "near_duplicate_ratio_b", "near_duplicate_both"):
+    for f in (
+        "nn1_agreement",
+        "topk_overlap",
+        "topk_overlap_p10",
+        "rows_with_no_overlap",
+        "near_duplicate_ratio_a",
+        "near_duplicate_ratio_b",
+        "near_duplicate_both",
+    ):
         assert getattr(rec, f) == pytest.approx(getattr(sup, f), abs=1e-6), f
 
 
@@ -212,14 +248,17 @@ def test_sampled_compare_without_neighbors_says_sample_scope(two_spaces):
     assert full.topk_overlap != res.topk_overlap
 
 
-@pytest.mark.parametrize("case,match", [
-    ("one_side", "together"),
-    ("shape", "shaped"),
-    ("float", "integer"),
-    ("range", "only"),
-    ("too_few", "fewer than k"),
-    ("empty", "no neighbor columns"),
-])
+@pytest.mark.parametrize(
+    "case,match",
+    [
+        ("one_side", "together"),
+        ("shape", "shaped"),
+        ("float", "integer"),
+        ("range", "only"),
+        ("too_few", "fewer than k"),
+        ("empty", "no neighbor columns"),
+    ],
+)
 def test_supplied_neighbors_validation(two_spaces, case, match):
     a, b = two_spaces
     n = a.shape[0]
@@ -249,14 +288,40 @@ def test_cli_compare_neighbors_must_come_in_pairs(tmp_path, capsys, two_spaces):
     np.save(tmp_path / "b.npy", b)
     ia, _ = exact_knn(normalize(a), 10)
     np.save(tmp_path / "na.npy", ia)
-    assert main(["compare", str(tmp_path / "a.npy"), str(tmp_path / "b.npy"), "--sample", "0",
-                 "--neighbors-a", str(tmp_path / "na.npy")]) == 2
+    assert (
+        main(
+            [
+                "compare",
+                str(tmp_path / "a.npy"),
+                str(tmp_path / "b.npy"),
+                "--sample",
+                "0",
+                "--neighbors-a",
+                str(tmp_path / "na.npy"),
+            ]
+        )
+        == 2
+    )
     assert "go together" in capsys.readouterr().err
     ib, _ = exact_knn(normalize(b), 10)
     np.save(tmp_path / "nb.npy", ib)
-    assert main(["compare", str(tmp_path / "a.npy"), str(tmp_path / "b.npy"), "--sample", "500",
-                 "--neighbors-a", str(tmp_path / "na.npy"), "--neighbors-b",
-                 str(tmp_path / "nb.npy"), "--json"]) == 0
+    assert (
+        main(
+            [
+                "compare",
+                str(tmp_path / "a.npy"),
+                str(tmp_path / "b.npy"),
+                "--sample",
+                "500",
+                "--neighbors-a",
+                str(tmp_path / "na.npy"),
+                "--neighbors-b",
+                str(tmp_path / "nb.npy"),
+                "--json",
+            ]
+        )
+        == 0
+    )
     out = json.loads(capsys.readouterr().out)
     assert out["neighbor_scope"] == "full" and out["neighbor_source"] == "supplied"
 
@@ -268,22 +333,33 @@ DIFF_VERDICT = {"regressions": ["hubness"], "value_regressions": []}
 DIFF_VALUE = {"regressions": [], "value_regressions": ["collapse"]}
 
 
-@pytest.mark.parametrize("verdict,fail_on,diff,code", [
-    ("ok", "fail", None, 0), ("warn", "fail", None, 0), ("fail", "fail", None, 1),
-    ("ok", "warn", None, 0), ("warn", "warn", None, 1), ("fail", "warn", None, 1),
-    ("fail", "none", None, 0), ("warn", "none", None, 0),
-    ("fail", "none", DIFF_CLEAN, 0), ("ok", "none", DIFF_VERDICT, 1),
-    ("ok", "none", DIFF_VALUE, 1), ("fail", "fail", DIFF_CLEAN, 1),
-    ("ok", "fail", DIFF_VALUE, 1),
-])
+@pytest.mark.parametrize(
+    "verdict,fail_on,diff,code",
+    [
+        ("ok", "fail", None, 0),
+        ("warn", "fail", None, 0),
+        ("fail", "fail", None, 1),
+        ("ok", "warn", None, 0),
+        ("warn", "warn", None, 1),
+        ("fail", "warn", None, 1),
+        ("fail", "none", None, 0),
+        ("warn", "none", None, 0),
+        ("fail", "none", DIFF_CLEAN, 0),
+        ("ok", "none", DIFF_VERDICT, 1),
+        ("ok", "none", DIFF_VALUE, 1),
+        ("fail", "fail", DIFF_CLEAN, 1),
+        ("ok", "fail", DIFF_VALUE, 1),
+    ],
+)
 def test_gate_decision_table(verdict, fail_on, diff, code):
     g = gate_decision(verdict, fail_on, diff)
     assert g["exit_code"] == code
     assert g["baseline"] is (diff is not None)
     assert bool(g["reasons"]) is bool(code)
-    assert g["absolute"] is (fail_on != "none" and
-                             {"ok": 0, "warn": 1, "fail": 2}[verdict] >=
-                             {"ok": 0, "warn": 1, "fail": 2}[fail_on])
+    assert g["absolute"] is (
+        fail_on != "none"
+        and {"ok": 0, "warn": 1, "fail": 2}[verdict] >= {"ok": 0, "warn": 1, "fail": 2}[fail_on]
+    )
 
 
 def _audit_json(tmp_path, x, name):
@@ -304,8 +380,7 @@ def test_cli_fail_on_none_judges_only_the_change(tmp_path, capsys):
     baseline.write_text(capsys.readouterr().out, encoding="utf-8")
     assert json.loads(baseline.read_text())["gate"]["absolute"] is True
 
-    assert main(["audit", str(pb), "--baseline", str(baseline), "--fail-on", "none",
-                 "--json"]) == 0
+    assert main(["audit", str(pb), "--baseline", str(baseline), "--fail-on", "none", "--json"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["gate"] == {**out["gate"], "exit_code": 0, "absolute": False, "baseline": True}
 
@@ -314,14 +389,41 @@ def test_cli_fail_on_none_judges_only_the_change(tmp_path, capsys):
     pw = _audit_json(tmp_path, worse, "worse")
     tol = tmp_path / "tol.json"
     tol.write_text(json.dumps({"collapse": 0.01}))
-    assert main(["audit", str(pw), "--baseline", str(baseline), "--fail-on", "none",
-                 "--tolerances", str(tol), "--json"]) == 1
+    assert (
+        main(
+            [
+                "audit",
+                str(pw),
+                "--baseline",
+                str(baseline),
+                "--fail-on",
+                "none",
+                "--tolerances",
+                str(tol),
+                "--json",
+            ]
+        )
+        == 1
+    )
     out = json.loads(capsys.readouterr().out)
     assert "collapse" in out["gate"]["value_regressions"]
     assert out["gate"]["absolute"] is False
 
-    assert main(["audit", str(pw), "--baseline", str(baseline), "--fail-on", "none",
-                 "--tolerances", str(tol)]) == 1
+    assert (
+        main(
+            [
+                "audit",
+                str(pw),
+                "--baseline",
+                str(baseline),
+                "--fail-on",
+                "none",
+                "--tolerances",
+                str(tol),
+            ]
+        )
+        == 1
+    )
     assert "gate: FAIL" in capsys.readouterr().out
 
 

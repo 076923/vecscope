@@ -12,12 +12,13 @@ cd vecscope
 python -m pip install -e ".[dev,index]"
 pytest -q
 ruff check src tests examples
+ruff format --check src tests examples
 ```
 
 `python examples/make_examples.py` writes three small matrices into `examples/` so you can try
 `vecscope audit examples/anisotropic.npy` right away.
 
-`pre-commit install` runs `ruff --fix` and the whitespace, YAML and TOML checks from
+`pre-commit install` runs `ruff --fix`, `ruff format` and the whitespace, YAML and TOML checks from
 `.pre-commit-config.yaml` on every commit (`pip install pre-commit` first). `.editorconfig`
 sets the indentation and line endings for editors that read it.
 

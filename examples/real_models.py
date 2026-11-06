@@ -22,29 +22,40 @@ from vecscope import audit
 
 DATASETS = {
     "cohere-v3-multilingual-ko": (
-        "Cohere/wikipedia-2023-11-embed-multilingual-v3", "ko/0000.parquet", "emb"
+        "Cohere/wikipedia-2023-11-embed-multilingual-v3",
+        "ko/0000.parquet",
+        "emb",
     ),
     "cohere-v3-multilingual-en": (
-        "Cohere/wikipedia-2023-11-embed-multilingual-v3", "en/0000.parquet", "emb"
+        "Cohere/wikipedia-2023-11-embed-multilingual-v3",
+        "en/0000.parquet",
+        "emb",
     ),
     "openai-ada-002-dbpedia": (
         "KShivendu/dbpedia-entities-openai-1M",
-        "data/train-00000-of-00026-3c7b99d1c7eda36e.parquet", "openai",
+        "data/train-00000-of-00026-3c7b99d1c7eda36e.parquet",
+        "openai",
     ),
     "openai-3-large-dbpedia": (
         "Qdrant/dbpedia-entities-openai3-text-embedding-3-large-1536-1M",
-        "data/train-00000-of-00026.parquet", "text-embedding-3-large-1536-embedding",
+        "data/train-00000-of-00026.parquet",
+        "text-embedding-3-large-1536-embedding",
     ),
     "all-MiniLM-L6-v2-wiki": (
         "maloyan/wikipedia-22-12-en-embeddings-all-MiniLM-L6-v2",
-        "data/train-00000-of-00145-437d77a320cee9e2.parquet", "emb",
+        "data/train-00000-of-00145-437d77a320cee9e2.parquet",
+        "emb",
     ),
     "bge-m3-wiki-en": ("Upstash/wikipedia-2024-06-bge-m3", "data/en/000.parquet", "embedding"),
     "mxbai-embed-large-wiki": (
-        "anton-l/wiki-embed-mxbai-embed-large-v1", "data/train-00000-of-00235.parquet", "embedding"
+        "anton-l/wiki-embed-mxbai-embed-large-v1",
+        "data/train-00000-of-00235.parquet",
+        "embedding",
     ),
     "gte-base-arxiv": (
-        "bluuebunny/arxiv_embeddings_Alibaba-NLP_gte-base-en-v1.5", "2024.parquet", "embedding"
+        "bluuebunny/arxiv_embeddings_Alibaba-NLP_gte-base-en-v1.5",
+        "2024.parquet",
+        "embedding",
     ),
 }
 
@@ -81,7 +92,9 @@ def main() -> None:
         results[name] = ev
         print(f"\n== {name}  n={ev.n} dim={ev.dim}  verdict={ev.verdict.upper()}")
         for f in ev.findings:
-            print(f"  [{f.verdict:4}] {f.name:<15} {f.value:.4f}  (warn {f.warn_at}, fail {f.fail_at})")
+            print(
+                f"  [{f.verdict:4}] {f.name:<15} {f.value:.4f}  (warn {f.warn_at}, fail {f.fail_at})"
+            )
 
     names = list(results)
     metrics = [f.name for f in next(iter(results.values())).findings]

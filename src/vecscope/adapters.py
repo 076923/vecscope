@@ -33,8 +33,16 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import numpy as np
 
-SCHEMES = ("faiss", "qdrant", "qdrant+local", "chroma", "chroma+local", "milvus",
-           "milvus+local", "weaviate")
+SCHEMES = (
+    "faiss",
+    "qdrant",
+    "qdrant+local",
+    "chroma",
+    "chroma+local",
+    "milvus",
+    "milvus+local",
+    "weaviate",
+)
 FAISS_SUFFIXES = (".faiss", ".index")
 _BATCH = 1024
 DEFAULT_TIMEOUT = 60.0
@@ -89,7 +97,7 @@ class Source:
             e = min(s + block, len(self.ids))
             for j, hit_ids in enumerate(self._search(self.vectors[s:e], k + 1)):
                 rows = [row_of[h] for h in hit_ids if h in row_of and row_of[h] != s + j][:k]
-                out[s + j, :len(rows)] = rows
+                out[s + j, : len(rows)] = rows
         return out
 
 
@@ -129,9 +137,11 @@ class _Rows:
         v = np.asarray(v, dtype=np.float32).ravel()
         self.nbytes += v.nbytes
         if self.max_bytes is not None and self.nbytes > self.max_bytes:
-            raise ValueError(f"{self.what} holds more than {self.max_bytes / 2**20:.0f} MiB of "
-                             "vectors, the most this reader may load; audit a smaller collection "
-                             "or raise the limit")
+            raise ValueError(
+                f"{self.what} holds more than {self.max_bytes / 2**20:.0f} MiB of "
+                "vectors, the most this reader may load; audit a smaller collection "
+                "or raise the limit"
+            )
         self.ids.append(i)
         self.vectors.append(v)
 
@@ -139,7 +149,11 @@ class _Rows:
 def _sorted(ids: list, vectors: list) -> tuple[list, np.ndarray]:
     if not ids:
         raise ValueError("the source holds no vectors")
-    key = (lambda i: (0, i, "")) if all(isinstance(i, int) for i in ids) else (lambda i: (1, 0, str(i)))
+    key = (
+        (lambda i: (0, i, ""))
+        if all(isinstance(i, int) for i in ids)
+        else (lambda i: (1, 0, str(i)))
+    )
     order = sorted(range(len(ids)), key=lambda r: key(ids[r]))
     ids = [ids[r] for r in order]
     if len(set(ids)) != len(ids):
@@ -174,8 +188,13 @@ def _redact(uri: str) -> str:
         netloc += f":{u.port}"
     if u.scheme.endswith("+local"):
         netloc = u.netloc.rpartition("@")[2]  # a Windows drive is the "host" here
-    query = urlencode([(k, v if k in _SAFE_OPTS else "REDACTED")
-                       for k, vs in parse_qs(u.query, keep_blank_values=True).items() for v in vs])
+    query = urlencode(
+        [
+            (k, v if k in _SAFE_OPTS else "REDACTED")
+            for k, vs in parse_qs(u.query, keep_blank_values=True).items()
+            for v in vs
+        ]
+    )
     return u._replace(netloc=netloc, query=query).geturl()
 
 
@@ -191,6 +210,7 @@ def _secrets(uri: str) -> list[str]:
 
 
 # ----------------------------------------------------------------------------- backends
+
 
 def _faiss(path: str, data: bytes | None = None, max_bytes: int | None = None) -> Source:
     try:
@@ -220,13 +240,17 @@ def _faiss(path: str, data: bytes | None = None, max_bytes: int | None = None) -
     if n == 0:
         raise ValueError(f"{p}: the index is empty")
     if max_bytes is not None and n * index.d * 4 > max_bytes:
-        raise ValueError(f"{p}: {n} vectors of {index.d} dims exceed the "
-                         f"{max_bytes / 2**20:.0f} MiB this reader may load")
+        raise ValueError(
+            f"{p}: {n} vectors of {index.d} dims exceed the "
+            f"{max_bytes / 2**20:.0f} MiB this reader may load"
+        )
     try:
         vectors = inner.reconstruct_n(0, n)
     except RuntimeError as e:
-        raise ValueError(f"{p}: this index type cannot return its vectors ({e}); export the "
-                         "vectors to .npy instead") from None
+        raise ValueError(
+            f"{p}: this index type cannot return its vectors ({e}); export the "
+            "vectors to .npy instead"
+        ) from None
     ids = ids if ids is not None else list(range(n))
     ids, arr = _sorted(ids, list(vectors))
     metric = "inner_product" if index.metric_type == faiss.METRIC_INNER_PRODUCT else "l2"
@@ -235,29 +259,46 @@ def _faiss(path: str, data: bytes | None = None, max_bytes: int | None = None) -
         _, labels = index.search(np.ascontiguousarray(q, dtype=np.float32), k)
         return [[int(i) for i in row if i >= 0] for row in labels]
 
-    return Source(arr, ids, {"backend": "faiss", "uri": str(p), "index_metric": metric,
-                             "index_type": type(faiss.downcast_index(inner)).__name__}, search)
+    return Source(
+        arr,
+        ids,
+        {
+            "backend": "faiss",
+            "uri": str(p),
+            "index_metric": metric,
+            "index_type": type(faiss.downcast_index(inner)).__name__,
+        },
+        search,
+    )
 
 
 def _qdrant(uri: str, max_bytes: int | None = None) -> Source:
     try:
         from qdrant_client import QdrantClient, models
     except ImportError as e:
-        raise ImportError("reading Qdrant needs qdrant-client: pip install 'vecscope[qdrant]'") from e
+        raise ImportError(
+            "reading Qdrant needs qdrant-client: pip install 'vecscope[qdrant]'"
+        ) from e
     u, o = urlparse(uri), _opts(urlparse(uri))
     if u.scheme == "qdrant+local":
         client, collection = QdrantClient(path=local_path(uri)), o.get("collection")
     else:
-        client = QdrantClient(host=u.hostname, port=u.port or 6333, https=o.get("https") == "1",
-                              api_key=_api_key(o), timeout=max(1, round(_timeout(o))))
+        client = QdrantClient(
+            host=u.hostname,
+            port=u.port or 6333,
+            https=o.get("https") == "1",
+            api_key=_api_key(o),
+            timeout=max(1, round(_timeout(o))),
+        )
         collection = u.path.strip("/")
     if not collection:
         raise ValueError(f"{_redact(uri)}: name the collection")
     name = o.get("vector")
     rows, offset = _Rows(max_bytes, f"qdrant collection {collection}"), None
     while True:
-        points, offset = client.scroll(collection, limit=_BATCH, offset=offset, with_vectors=True,
-                                       with_payload=False)
+        points, offset = client.scroll(
+            collection, limit=_BATCH, offset=offset, with_vectors=True, with_payload=False
+        )
         for pt in points:
             rows.add(pt.id, _pick_vector(pt.vector, name, "qdrant"))
         if offset is None:
@@ -268,8 +309,13 @@ def _qdrant(uri: str, max_bytes: int | None = None) -> Source:
         reqs = [models.QueryRequest(query=v.tolist(), limit=k, using=name) for v in q]
         return [[p.id for p in r.points] for r in client.query_batch_points(collection, reqs)]
 
-    return Source(arr, ids, {"backend": "qdrant", "uri": _redact(uri), "collection": collection,
-                             "vector": name}, search, release=client.close)
+    return Source(
+        arr,
+        ids,
+        {"backend": "qdrant", "uri": _redact(uri), "collection": collection, "vector": name},
+        search,
+        release=client.close,
+    )
 
 
 def _chroma(uri: str, max_bytes: int | None = None) -> Source:
@@ -283,9 +329,12 @@ def _chroma(uri: str, max_bytes: int | None = None) -> Source:
     else:
         key = _api_key(o)
         timeout = _timeout(o)
-        client = chromadb.HttpClient(host=u.hostname, port=u.port or 8000,
-                                     ssl=o.get("https") == "1",
-                                     headers={"x-chroma-token": key} if key else None)
+        client = chromadb.HttpClient(
+            host=u.hostname,
+            port=u.port or 8000,
+            ssl=o.get("https") == "1",
+            headers={"x-chroma-token": key} if key else None,
+        )
         # the Chroma HTTP client takes no timeout; set it on its session for the reads
         session = getattr(getattr(client, "_server", None), "_session", None)
         if session is not None and hasattr(session, "timeout"):
@@ -310,8 +359,9 @@ def _chroma(uri: str, max_bytes: int | None = None) -> Source:
         res = col.query(query_embeddings=q.tolist(), n_results=k, include=[])
         return [list(r) for r in res["ids"]]
 
-    return Source(arr, ids, {"backend": "chroma", "uri": _redact(uri), "collection": collection},
-                  search)
+    return Source(
+        arr, ids, {"backend": "chroma", "uri": _redact(uri), "collection": collection}, search
+    )
 
 
 def _milvus(uri: str, max_bytes: int | None = None) -> Source:
@@ -324,16 +374,22 @@ def _milvus(uri: str, max_bytes: int | None = None) -> Source:
         client, collection = MilvusClient(uri=local_path(uri)), o.get("collection")
     else:
         scheme = "https" if o.get("https") == "1" else "http"
-        client = MilvusClient(uri=f"{scheme}://{u.hostname}:{u.port or 19530}",
-                              token=_api_key(o) or "", timeout=_timeout(o))
+        client = MilvusClient(
+            uri=f"{scheme}://{u.hostname}:{u.port or 19530}",
+            token=_api_key(o) or "",
+            timeout=_timeout(o),
+        )
         collection = u.path.strip("/")
     if not collection:
         raise ValueError(f"{_redact(uri)}: name the collection")
     desc = client.describe_collection(collection)
     fields = {f["name"]: f for f in desc["fields"]}
     pk = o.get("pk") or next(f["name"] for f in desc["fields"] if f.get("is_primary"))
-    vec_fields = [n for n, f in fields.items()
-                  if "VECTOR" in getattr(f.get("type"), "name", str(f.get("type"))).upper()]
+    vec_fields = [
+        n
+        for n, f in fields.items()
+        if "VECTOR" in getattr(f.get("type"), "name", str(f.get("type"))).upper()
+    ]
     name = o.get("vector") or (vec_fields[0] if len(vec_fields) == 1 else None)
     if name is None:
         raise ValueError(f"milvus: collection has vector fields {vec_fields}; pass vector=")
@@ -361,12 +417,22 @@ def _milvus(uri: str, max_bytes: int | None = None) -> Source:
     ids, arr = _sorted(rows.ids, rows.vectors)
 
     def search(q, k):
-        res = client.search(collection, data=q.tolist(), limit=k, anns_field=name,
-                            output_fields=[])
+        res = client.search(collection, data=q.tolist(), limit=k, anns_field=name, output_fields=[])
         return [[h["id"] for h in hits] for hits in res]
 
-    src = Source(arr, ids, {"backend": "milvus", "uri": _redact(uri), "collection": collection,
-                            "vector": name, "loaded_by_vecscope": loaded_here}, search)
+    src = Source(
+        arr,
+        ids,
+        {
+            "backend": "milvus",
+            "uri": _redact(uri),
+            "collection": collection,
+            "vector": name,
+            "loaded_by_vecscope": loaded_here,
+        },
+        search,
+    )
+
     def release():
         if loaded_here:
             client.release_collection(collection)
@@ -381,17 +447,23 @@ def _weaviate(uri: str, max_bytes: int | None = None) -> Source:
         import weaviate
         from weaviate.classes.init import AdditionalConfig, Auth, Timeout
     except ImportError as e:
-        raise ImportError("reading Weaviate needs weaviate-client: pip install "
-                          "'vecscope[weaviate]'") from e
+        raise ImportError(
+            "reading Weaviate needs weaviate-client: pip install 'vecscope[weaviate]'"
+        ) from e
     u, o = urlparse(uri), _opts(urlparse(uri))
     secure = o.get("https") == "1"
     key = _api_key(o)
     t = _timeout(o)
     client = weaviate.connect_to_custom(
-        http_host=u.hostname, http_port=u.port or 8080, http_secure=secure,
-        grpc_host=u.hostname, grpc_port=int(o.get("grpc_port", 50051)), grpc_secure=secure,
+        http_host=u.hostname,
+        http_port=u.port or 8080,
+        http_secure=secure,
+        grpc_host=u.hostname,
+        grpc_port=int(o.get("grpc_port", 50051)),
+        grpc_secure=secure,
         auth_credentials=Auth.api_key(key) if key else None,
-        additional_config=AdditionalConfig(timeout=Timeout(init=t, query=t, insert=t)))
+        additional_config=AdditionalConfig(timeout=Timeout(init=t, query=t, insert=t)),
+    )
     collection = u.path.strip("/")
     if not collection:
         client.close()
@@ -414,8 +486,13 @@ def _weaviate(uri: str, max_bytes: int | None = None) -> Source:
             out.append([str(obj.uuid) for obj in res.objects])
         return out
 
-    return Source(arr, ids, {"backend": "weaviate", "uri": _redact(uri), "collection": collection,
-                             "vector": name}, search, release=client.close)
+    return Source(
+        arr,
+        ids,
+        {"backend": "weaviate", "uri": _redact(uri), "collection": collection, "vector": name},
+        search,
+        release=client.close,
+    )
 
 
 def load_source(uri: str, data: bytes | None = None, max_bytes: int | None = None) -> Source:
@@ -436,7 +513,9 @@ def load_source(uri: str, data: bytes | None = None, max_bytes: int | None = Non
     elif scheme == "weaviate":
         read, args = _weaviate, (uri, max_bytes)
     else:
-        raise ValueError(f"unsupported source {_redact(uri)!r}; known schemes: {', '.join(SCHEMES)}")
+        raise ValueError(
+            f"unsupported source {_redact(uri)!r}; known schemes: {', '.join(SCHEMES)}"
+        )
     try:
         src = read(*args)
     except ImportError:
@@ -449,8 +528,14 @@ def load_source(uri: str, data: bytes | None = None, max_bytes: int | None = Non
         if msg == str(e) and isinstance(e, (ValueError, FileNotFoundError, PermissionError)):
             raise
         raise ValueError(f"{_redact(uri)}: {type(e).__name__}: {msg}") from None
-    src.info.update({"n": len(src.ids), "dim": int(src.vectors.shape[1]),
-                     "id_order": "ascending id", "fingerprint": fingerprint(src.vectors)})
+    src.info.update(
+        {
+            "n": len(src.ids),
+            "dim": int(src.vectors.shape[1]),
+            "id_order": "ascending id",
+            "fingerprint": fingerprint(src.vectors),
+        }
+    )
     return src
 
 

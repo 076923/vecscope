@@ -23,8 +23,15 @@ def _states(levels, seed):
     t = rng.choice(1500, 100, replace=False)
     q = (clean[t] + rng.standard_normal((100, 32)) * 0.2).astype(np.float32)
     qrels = {i: {int(x): 1} for i, x in enumerate(t)}
-    return [audit((clean + rng.standard_normal(clean.shape) * lv).astype(np.float32), k=10,
-                  queries=q, qrels=qrels).to_dict() for lv in levels]
+    return [
+        audit(
+            (clean + rng.standard_normal(clean.shape) * lv).astype(np.float32),
+            k=10,
+            queries=q,
+            qrels=qrels,
+        ).to_dict()
+        for lv in levels
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +53,9 @@ def test_permutation_p_is_exact_on_few_states_and_holm_adjusts():
     assert adj == {"a": 0.03, "b": 0.04, "c": 0.5}
     # above eight states the orderings are a seeded sample: same p every run
     v12 = np.arange(12.0)
-    assert _permutation_p(v12, v12, 1.0, _orderings(12)) == _permutation_p(v12, v12, 1.0, _orderings(12))
+    assert _permutation_p(v12, v12, 1.0, _orderings(12)) == _permutation_p(
+        v12, v12, 1.0, _orderings(12)
+    )
 
 
 def test_few_states_give_exploratory_pairs_only(train, tmp_path, capsys):
@@ -68,8 +77,20 @@ def test_few_states_give_exploratory_pairs_only(train, tmp_path, capsys):
     assert json.loads(out.read_text()) == {}
     text = capsys.readouterr().out
     assert "exploratory" in text and "10 or more are recommended" in text
-    assert main(["calibrate", *paths, "--min-quality", "0.6", "--out", str(out),
-                 "--include-low-confidence"]) == 0
+    assert (
+        main(
+            [
+                "calibrate",
+                *paths,
+                "--min-quality",
+                "0.6",
+                "--out",
+                str(out),
+                "--include-low-confidence",
+            ]
+        )
+        == 0
+    )
     assert json.loads(out.read_text())
 
 
@@ -83,8 +104,16 @@ def test_mixed_qrels_are_refused_unless_allowed(train):
 
 def test_leave_one_out_judges_each_state_with_the_others(train):
     loo = calibrate(train, 0.6)["leave_one_out"]
-    judged = sum(loo[k] for k in ("caught_unacceptable", "missed_unacceptable", "false_alarms",
-                                  "passed_acceptable", "skipped"))
+    judged = sum(
+        loo[k]
+        for k in (
+            "caught_unacceptable",
+            "missed_unacceptable",
+            "false_alarms",
+            "passed_acceptable",
+            "skipped",
+        )
+    )
     assert judged == len(train) and loo["false_alarms"] == 0
     assert calibrate(train[2:5], 0.6)["leave_one_out"] is None
 
@@ -102,10 +131,18 @@ def test_proposes_only_for_findings_that_track_and_separate(train):
     assert "the other way" in rows["anisotropy"]["advice"]
     assert "constant" in rows["collapse"]["advice"]
     assert dc["confidence"] == "supported" and dc["p_holm"] < 0.05
-    assert set(res["thresholds"]) == {r["threshold_key"] for r in res["findings"]
-                                      if r["confidence"] == "supported"}
+    assert set(res["thresholds"]) == {
+        r["threshold_key"] for r in res["findings"] if r["confidence"] == "supported"
+    }
     assert res["same_qrels"] and [s["acceptable"] for s in res["states"]] == [
-        True, True, True, True, False, False, False]
+        True,
+        True,
+        True,
+        True,
+        False,
+        False,
+        False,
+    ]
 
 
 def test_proposal_is_used_by_audit_and_checked_on_holdout(train, tmp_path):
@@ -143,6 +180,10 @@ def test_cli_calibrate(train, tmp_path, capsys):
     assert "distance_concentration" in text and "noise0.json" in text
     proposed = json.loads(out.read_text())
     assert "distance_concentration.contrast_over_noise" in proposed
-    np.save(tmp_path / "x.npy", np.random.default_rng(0).standard_normal((300, 8)).astype(np.float32))
-    assert main(["audit", str(tmp_path / "x.npy"), "--thresholds", str(out), "--fail-on", "none"]) == 0
+    np.save(
+        tmp_path / "x.npy", np.random.default_rng(0).standard_normal((300, 8)).astype(np.float32)
+    )
+    assert (
+        main(["audit", str(tmp_path / "x.npy"), "--thresholds", str(out), "--fail-on", "none"]) == 0
+    )
     assert main(["calibrate", *paths[:2], "--min-quality", "0.6"]) == 2

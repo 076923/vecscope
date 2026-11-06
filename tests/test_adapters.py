@@ -83,10 +83,12 @@ def test_qdrant_local(tmp_path, data):
 
     x, ids = data
     client = qc.QdrantClient(path=str(tmp_path / "qd"))
-    client.create_collection("docs", vectors_config=models.VectorParams(
-        size=16, distance=models.Distance.COSINE))
-    client.upsert("docs", [models.PointStruct(id=i, vector=x[j].tolist())
-                           for j, i in enumerate(ids)])
+    client.create_collection(
+        "docs", vectors_config=models.VectorParams(size=16, distance=models.Distance.COSINE)
+    )
+    client.upsert(
+        "docs", [models.PointStruct(id=i, vector=x[j].tolist()) for j, i in enumerate(ids)]
+    )
     client.close()
     src = load_source(f"qdrant+local://{tmp_path / 'qd'}?collection=docs")
     _check(src, x, ids)
@@ -99,7 +101,8 @@ def test_chroma_local(tmp_path, data):
     chromadb = pytest.importorskip("chromadb")
     x, ids = data
     col = chromadb.PersistentClient(path=str(tmp_path / "ch")).create_collection(
-        "docs", metadata={"hnsw:space": "cosine"})
+        "docs", metadata={"hnsw:space": "cosine"}
+    )
     col.add(ids=[f"d{i}" for i in ids], embeddings=x.tolist())
     src = load_source(f"chroma+local://{tmp_path / 'ch'}?collection=docs")
     str_ids = [f"d{i}" for i in ids]  # string ids sort as strings
@@ -125,15 +128,18 @@ def test_milvus_lite(tmp_path, data):
     client.close()
 
 
-@pytest.mark.skipif(os.environ.get("VECSCOPE_TEST_WEAVIATE") != "1",
-                    reason="embedded Weaviate downloads a server binary; set VECSCOPE_TEST_WEAVIATE=1")
+@pytest.mark.skipif(
+    os.environ.get("VECSCOPE_TEST_WEAVIATE") != "1",
+    reason="embedded Weaviate downloads a server binary; set VECSCOPE_TEST_WEAVIATE=1",
+)
 def test_weaviate_embedded(tmp_path, data):
     weaviate = pytest.importorskip("weaviate")
     from weaviate.classes.config import Configure
 
     x, _ = data
-    client = weaviate.connect_to_embedded(persistence_data_path=str(tmp_path / "wv"),
-                                          port=8079, grpc_port=50060)
+    client = weaviate.connect_to_embedded(
+        persistence_data_path=str(tmp_path / "wv"), port=8079, grpc_port=50060
+    )
     try:
         client.collections.create("Docs", vector_config=Configure.Vectors.self_provided())
         with client.collections.get("Docs").batch.fixed_size(100) as b:
@@ -156,8 +162,10 @@ def test_api_key_comes_from_the_environment_only(monkeypatch):
     with pytest.raises(ValueError, match="empty"):
         _api_key({"api_key_env": "VS_KEY"})
     # user info and every query value that is not a known option stay out of the evidence
-    assert (_redact("qdrant://user:pw@host:6333/c?x=1&vector=dense&api_key=abc")
-            == "qdrant://host:6333/c?x=REDACTED&vector=dense&api_key=REDACTED")
+    assert (
+        _redact("qdrant://user:pw@host:6333/c?x=1&vector=dense&api_key=abc")
+        == "qdrant://host:6333/c?x=REDACTED&vector=dense&api_key=REDACTED"
+    )
     assert _redact("/data/x.faiss") == "/data/x.faiss"
 
 
@@ -241,8 +249,20 @@ def test_cli_reads_a_faiss_index_and_its_neighbors(tmp_path, capsys, data):
     index.hnsw.efSearch = 4  # a deliberately weak setting
     index.add(x)
     faiss.write_index(index, str(tmp_path / "h.faiss"))
-    code = main(["audit", str(tmp_path / "h.faiss"), "-k", "10", "--ann-from-source",
-                 "--save-ids", str(tmp_path / "ids.json"), "--json", "--fail-on", "none"])
+    code = main(
+        [
+            "audit",
+            str(tmp_path / "h.faiss"),
+            "-k",
+            "10",
+            "--ann-from-source",
+            "--save-ids",
+            str(tmp_path / "ids.json"),
+            "--json",
+            "--fail-on",
+            "none",
+        ]
+    )
     out = json.loads(capsys.readouterr().out)
     assert code == 0 and out["source"]["backend"] == "faiss"
     assert json.loads((tmp_path / "ids.json").read_text()) == list(range(300))
@@ -274,4 +294,5 @@ def test_mcp_refuses_network_stores_without_opt_in(monkeypatch, tmp_path, data):
         mcp_server.audit_embeddings(str(outside / "f.faiss"))
     res = mcp_server.audit_embeddings(str(inside / "f.faiss"), k=5, ann_from_source=True)
     assert res["source"]["backend"] == "faiss" and any(
-        f["name"] == "ann_recall" for f in res["findings"])
+        f["name"] == "ann_recall" for f in res["findings"]
+    )

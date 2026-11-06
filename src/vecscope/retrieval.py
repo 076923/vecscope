@@ -38,7 +38,9 @@ def _row(value, what: str) -> int:
     except (TypeError, ValueError):
         raise ValueError(f"qrels: {what} must be an integer row position, got {value!r}") from None
     if not math.isfinite(f) or f != int(f) or f < 0:
-        raise ValueError(f"qrels: {what} must be a non-negative integer row position, got {value!r}")
+        raise ValueError(
+            f"qrels: {what} must be a non-negative integer row position, got {value!r}"
+        )
     return int(f)
 
 
@@ -145,18 +147,25 @@ def _scores(ranked: np.ndarray, qrels: dict, k: int, judged: list[int]) -> dict:
     for q in judged:
         rel = qrels[q]
         ids = [int(i) for i in ranked[q][:k] if i >= 0]
-        dcg = sum((2.0 ** rel.get(d, 0.0) - 1.0) / math.log2(r + 2)
-                  for r, d in enumerate(ids) if rel.get(d, 0.0) > 0)
+        dcg = sum(
+            (2.0 ** rel.get(d, 0.0) - 1.0) / math.log2(r + 2)
+            for r, d in enumerate(ids)
+            if rel.get(d, 0.0) > 0
+        )
         ideal = sorted((g for g in rel.values() if g > 0), reverse=True)[:k]
-        idcg = sum((2.0 ** g - 1.0) / math.log2(r + 2) for r, g in enumerate(ideal))
+        idcg = sum((2.0**g - 1.0) / math.log2(r + 2) for r, g in enumerate(ideal))
         ndcg.append(dcg / idcg)
         n_rel = sum(1 for g in rel.values() if g > 0)
         found = [r for r, d in enumerate(ids) if rel.get(d, 0.0) > 0]
         recall.append(len(found) / n_rel)
         rr.append(1.0 / (found[0] + 1) if found else 0.0)
         hit.append(1.0 if found else 0.0)
-    return {"ndcg_at_k": float(np.mean(ndcg)), "recall_at_k": float(np.mean(recall)),
-            "mrr_at_k": float(np.mean(rr)), "hit_rate_at_k": float(np.mean(hit))}
+    return {
+        "ndcg_at_k": float(np.mean(ndcg)),
+        "recall_at_k": float(np.mean(recall)),
+        "mrr_at_k": float(np.mean(rr)),
+        "hit_rate_at_k": float(np.mean(hit)),
+    }
 
 
 def _duplicate_share(c: np.ndarray, ranked: np.ndarray, k: int, near_dup_cos: float) -> float:
@@ -207,35 +216,47 @@ def evaluate_retrieval(
         "unscored_queries": int(m) - len(judged),
         "qrels_fingerprint": qrels_fingerprint(qrels),
         "near_dup_cos": float(near_dup_cos),
-        "exact": {**_scores(exact, qrels, k, judged),
-                  "duplicate_result_share": _duplicate_share(c, exact, k, near_dup_cos)},
+        "exact": {
+            **_scores(exact, qrels, k, judged),
+            "duplicate_result_share": _duplicate_share(c, exact, k, near_dup_cos),
+        },
         "ranked": None,
     }
     if ranked is not None:
         r = np.asarray(ranked)
         if r.ndim != 2 or r.shape[0] != m or not np.issubdtype(r.dtype, np.integer):
-            raise ValueError(f"ranked must be integer corpus row ids shaped ({m}, k), got "
-                             f"{r.shape} {r.dtype}")
+            raise ValueError(
+                f"ranked must be integer corpus row ids shaped ({m}, k), got {r.shape} {r.dtype}"
+            )
         if r.shape[1] < k:
             raise ValueError(f"ranked has {r.shape[1]} columns; at least k={k} are needed")
         if r.size and r.max() >= n:
             raise ValueError(f"ranked contains row {int(r.max())} but the corpus has {n} rows")
         r = r[:, :k].astype(np.int64)
         overlap = np.mean([np.intersect1d(a[a >= 0], b).size / k for a, b in zip(r, exact)])
-        out["ranked"] = {**_scores(r, qrels, k, judged),
-                         "duplicate_result_share": _duplicate_share(c, r, k, near_dup_cos),
-                         "overlap_with_exact": float(overlap)}
+        out["ranked"] = {
+            **_scores(r, qrels, k, judged),
+            "duplicate_result_share": _duplicate_share(c, r, k, near_dup_cos),
+            "overlap_with_exact": float(overlap),
+        }
     e = out["exact"]
     out["explanation"] = (
         f"exact cosine top-{k} over {len(judged)} judged queries: nDCG@{k} {e['ndcg_at_k']:.4f}, "
         f"recall@{k} {e['recall_at_k']:.4f}, MRR@{k} {e['mrr_at_k']:.4f}; "
         f"{e['duplicate_result_share']:.1%} of result slots repeat a near-duplicate of a "
         "higher-ranked result."
-        + ("" if out["ranked"] is None else
-           f" The supplied ranking scores nDCG@{k} {out['ranked']['ndcg_at_k']:.4f} and shares "
-           f"{out['ranked']['overlap_with_exact']:.1%} of its top-{k} with exact search.")
-        + ("" if m == len(judged) else
-           f" {m - len(judged)} of {m} queries have no relevant judgment and are not scored.")
+        + (
+            ""
+            if out["ranked"] is None
+            else f" The supplied ranking scores nDCG@{k} {out['ranked']['ndcg_at_k']:.4f} and shares "
+            f"{out['ranked']['overlap_with_exact']:.1%} of its top-{k} with exact search."
+        )
+        + (
+            ""
+            if m == len(judged)
+            else f" {m - len(judged)} of {m} queries have no relevant judgment and are not scored."
+        )
         + " These are the numbers a change should move; compare them against a baseline "
-          "with the same qrels_fingerprint.")
+        "with the same qrels_fingerprint."
+    )
     return out

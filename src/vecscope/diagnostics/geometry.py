@@ -22,9 +22,13 @@ def rogue_dimensions(x: np.ndarray, top: int = 3) -> dict:
     total = var.sum()
     expected = 1.0 / x.shape[1]
     if total <= 0:  # constant matrix: every dimension is equally (un)informative
-        return {"top1_dim_variance_share": 0.0, "top1_dim_variance_ratio": 0.0,
-                "top3_dim_variance_share": 0.0, "expected_share": expected,
-                "rogue_dims": [0, 1, 2][: x.shape[1]]}
+        return {
+            "top1_dim_variance_share": 0.0,
+            "top1_dim_variance_ratio": 0.0,
+            "top3_dim_variance_share": 0.0,
+            "expected_share": expected,
+            "rogue_dims": [0, 1, 2][: x.shape[1]],
+        }
     share = var / total
     order = np.argsort(-share, kind="stable")
     return {
@@ -103,9 +107,14 @@ def _median_distinct(nn: np.ndarray, cutoff: float) -> float:
     return float(np.median(distinct)) if distinct.size else 0.0
 
 
-def distance_concentration(nn_dist: np.ndarray, random_pair_cos: float, dim: int | None = None,
-                           seed: int = 0, x: np.ndarray | None = None,
-                           cap: int = BASELINE_ROWS) -> dict:
+def distance_concentration(
+    nn_dist: np.ndarray,
+    random_pair_cos: float,
+    dim: int | None = None,
+    seed: int = 0,
+    x: np.ndarray | None = None,
+    cap: int = BASELINE_ROWS,
+) -> dict:
     """Relative contrast on cosine distance (mean random distance over median NN distance),
     and the same number divided by what isotropic noise of this dimension would give.
 
@@ -150,12 +159,18 @@ def distance_concentration(nn_dist: np.ndarray, random_pair_cos: float, dim: int
     return out
 
 
-def outliers(nn_dist: np.ndarray, factor: float = 3.0, sample_ids: int = 10,
-             dup_cutoff: float = 1e-4) -> dict:
+def outliers(
+    nn_dist: np.ndarray, factor: float = 3.0, sample_ids: int = 10, dup_cutoff: float = 1e-4
+) -> dict:
     nn = np.asarray(nn_dist, dtype=np.float64)
     if not (nn > dup_cutoff).any():  # every nearest neighbor is a copy: nothing to compare
-        return {"outlier_ratio": 0.0, "cutoff_nn_distance": 0.0, "median_nn_distance": 0.0,
-                "sample_ids": [], "distinct_neighbors": False}
+        return {
+            "outlier_ratio": 0.0,
+            "cutoff_nn_distance": 0.0,
+            "median_nn_distance": 0.0,
+            "sample_ids": [],
+            "distinct_neighbors": False,
+        }
     distinct = nn[nn > dup_cutoff]
     median = float(np.median(distinct))
     mad = float(np.median(np.abs(distinct - median)))

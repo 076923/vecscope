@@ -15,7 +15,9 @@ from vecscope.diagnostics.anisotropy import anisotropy
 
 def _clustered(rng, n=1500, d=32, centers=25, spread=0.7):
     c = rng.standard_normal((centers, d))
-    return (c[rng.integers(0, centers, n)] + rng.standard_normal((n, d)) * spread).astype(np.float32)
+    return (c[rng.integers(0, centers, n)] + rng.standard_normal((n, d)) * spread).astype(
+        np.float32
+    )
 
 
 def _values(ev):
@@ -124,7 +126,8 @@ def test_distance_concentration_formula():
     dc = distance_concentration(d[:, 0], mean_cos, dim=32, x=x)
     assert dc["relative_contrast"] == pytest.approx((1 - mean_cos) / np.median(d[:, 0]), rel=1e-6)
     assert dc["contrast_over_noise"] == pytest.approx(
-        dc["relative_contrast"] / dc["noise_relative_contrast"], rel=1e-6)  # n <= baseline rows
+        dc["relative_contrast"] / dc["noise_relative_contrast"], rel=1e-6
+    )  # n <= baseline rows
 
 
 # ----------------------------------------------------------------------------- invariances
@@ -163,4 +166,7 @@ def test_audit_is_invariant_to_rotation_and_uniform_scale():
 def test_audit_is_deterministic_across_calls():
     rng = np.random.default_rng(0)
     x = rng.standard_normal((12000, 16)).astype(np.float32)  # sampled path too
-    assert audit(x, k=5, sample=4000, clusters=3).to_json() == audit(x, k=5, sample=4000, clusters=3).to_json()
+    assert (
+        audit(x, k=5, sample=4000, clusters=3).to_json()
+        == audit(x, k=5, sample=4000, clusters=3).to_json()
+    )

@@ -38,10 +38,16 @@ def measure(x: np.ndarray, k: int, sample: int | None) -> dict:
     seconds = time.perf_counter() - t
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
-    return {"rows": int(x.shape[0]), "dim": int(x.shape[1]), "k": k,
-            "sample": 0 if sample is None else sample, "audited_rows": ev.n,
-            "seconds": round(seconds, 2), "peak_gib": round(peak / 2**30, 2),
-            "verdict": ev.verdict}
+    return {
+        "rows": int(x.shape[0]),
+        "dim": int(x.shape[1]),
+        "k": k,
+        "sample": 0 if sample is None else sample,
+        "audited_rows": ev.n,
+        "seconds": round(seconds, 2),
+        "peak_gib": round(peak / 2**30, 2),
+        "verdict": ev.verdict,
+    }
 
 
 def main() -> None:
@@ -65,7 +71,9 @@ def main() -> None:
             runs.append(measure(x, args.k, args.sample))
         for r in runs:
             rows.append(r)
-            print(f"| {r['rows']:,} | {r['audited_rows']:,} | {r['seconds']} | {r['peak_gib']} GiB |")
+            print(
+                f"| {r['rows']:,} | {r['audited_rows']:,} | {r['seconds']} | {r['peak_gib']} GiB |"
+            )
         del x
     if args.json:
         payload = {"machine": machine(), "corpus": args.corpus, "seed": args.seed, "rows": rows}

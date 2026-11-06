@@ -33,8 +33,12 @@ def main() -> None:
     p.add_argument("--dim", type=int, default=768)
     p.add_argument("-k", type=int, default=10)
     p.add_argument("--corpus", choices=CORPORA, nargs="+", default=["clustered", "zipf"])
-    p.add_argument("--centers", type=int, default=None,
-                   help="fixed cluster count for clustered-type corpora (default n // 200)")
+    p.add_argument(
+        "--centers",
+        type=int,
+        default=None,
+        help="fixed cluster count for clustered-type corpora (default n // 200)",
+    )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n-queries", type=int, default=1000)
     p.add_argument("--latency-queries", type=int, default=200)
@@ -46,8 +50,14 @@ def main() -> None:
         print(f"vecscope {__version__}  corpus={kind} rows={args.rows} dim={args.dim} k={args.k}")
         x = corpus(kind, args.rows, args.dim, seed=args.seed, centers=args.centers)
         t = time.perf_counter()
-        res = sweep(x, k=args.k, n_queries=args.n_queries, device=args.device,
-                    latency_queries=args.latency_queries, seed=args.seed)
+        res = sweep(
+            x,
+            k=args.k,
+            n_queries=args.n_queries,
+            device=args.device,
+            latency_queries=args.latency_queries,
+            seed=args.seed,
+        )
         print(render_sweep(res))
         print(f"total sweep time: {time.perf_counter() - t:.1f} s\n")
         out["sweeps"].append({"corpus": kind, **res.to_dict()})
