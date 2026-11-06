@@ -174,7 +174,7 @@ def test_client_errors_are_scrubbed_of_secrets(monkeypatch):
 
     monkeypatch.setenv("VS_KEY", "s3cret-key")
 
-    def leaky(uri, max_bytes=None):
+    def leaky(uri, max_bytes=None, max_rows=None):
         raise RuntimeError("401 for api-key s3cret-key, token tok-1234, user alice:pw1234")
 
     monkeypatch.setattr(adapters, "_qdrant", leaky)
@@ -190,7 +190,7 @@ def test_timeout_option_and_an_unreachable_store():
     from vecscope.adapters import _timeout
 
     assert _timeout({}) == 60.0 and _timeout({"timeout": "2.5"}) == 2.5
-    for bad in ("x", "0", "-1"):
+    for bad in ("x", "0", "-1", "inf", "nan", None):
         with pytest.raises(ValueError, match="timeout"):
             _timeout({"timeout": bad})
     pytest.importorskip("qdrant_client")

@@ -26,6 +26,7 @@ matrix; ``Source.info["fingerprint"]`` lets a baseline tell whether the contents
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +46,7 @@ SCHEMES = (
 )
 FAISS_SUFFIXES = (".faiss", ".index")
 _BATCH = 1024
+MAX_TIMEOUT = 3600.0  # seconds; a request to a store may not wait longer than this
 DEFAULT_TIMEOUT = 60.0
 # query options that are recorded as given; every other value is redacted
 _SAFE_OPTS = ("collection", "vector", "https", "pk", "grpc_port", "api_key_env", "timeout")
@@ -116,22 +118,29 @@ def _api_key(o: dict) -> str | None:
 
 
 def _timeout(o: dict) -> float:
+    """``timeout=`` seconds from the URI options: a finite positive number of seconds, at most
+    ``MAX_TIMEOUT``, so a store that never answers cannot hold a request open forever."""
+    raw = o.get("timeout", DEFAULT_TIMEOUT)
     try:
-        t = float(o.get("timeout", DEFAULT_TIMEOUT))
-    except ValueError:
-        raise ValueError(f"timeout={o['timeout']!r} is not a number of seconds") from None
-    if not t > 0:
-        raise ValueError(f"timeout must be positive, got {t}")
+        t = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"timeout={raw!r} is not a number of seconds") from None
+    if not math.isfinite(t) or t <= 0:
+        raise ValueError(f"timeout must be a finite positive number of seconds, got {raw!r}")
+    if t > MAX_TIMEOUT:
+        raise ValueError(f"timeout={raw!r} is over the {MAX_TIMEOUT:.0f} s most a request may wait")
     return t
 
 
 class _Rows:
     """Ids and float32 vectors as they are read, refusing more than ``max_bytes`` of vectors
-    (a client's list of Python floats is several times larger than the array it becomes)."""
+    or more than ``max_rows`` rows. Each vector is converted to a float32 array as it
+    arrives, so the client's list of Python floats (several times larger than the array it
+    becomes) lives only as long as one batch."""
 
-    def __init__(self, max_bytes: int | None, what: str):
+    def __init__(self, max_bytes: int | None, what: str, max_rows: int | None = None):
         self.ids, self.vectors, self.nbytes = [], [], 0
-        self.max_bytes, self.what = max_bytes, what
+        self.max_bytes, self.max_rows, self.what = max_bytes, max_rows, what
 
     def add(self, i, v) -> None:
         v = np.asarray(v, dtype=np.float32).ravel()
@@ -141,6 +150,11 @@ class _Rows:
                 f"{self.what} holds more than {self.max_bytes / 2**20:.0f} MiB of "
                 "vectors, the most this reader may load; audit a smaller collection "
                 "or raise the limit"
+            )
+        if self.max_rows is not None and len(self.ids) >= self.max_rows:
+            raise ValueError(
+                f"{self.what} holds more than {self.max_rows} rows, the most this reader "
+                "may load; audit a smaller collection or raise the limit"
             )
         self.ids.append(i)
         self.vectors.append(v)
@@ -272,7 +286,7 @@ def _faiss(path: str, data: bytes | None = None, max_bytes: int | None = None) -
     )
 
 
-def _qdrant(uri: str, max_bytes: int | None = None) -> Source:
+def _qdrant(uri: str, max_bytes: int | None = None, max_rows: int | None = None) -> Source:
     try:
         from qdrant_client import QdrantClient, models
     except ImportError as e:
@@ -294,7 +308,7 @@ def _qdrant(uri: str, max_bytes: int | None = None) -> Source:
     if not collection:
         raise ValueError(f"{_redact(uri)}: name the collection")
     name = o.get("vector")
-    rows, offset = _Rows(max_bytes, f"qdrant collection {collection}"), None
+    rows, offset = _Rows(max_bytes, f"qdrant collection {collection}", max_rows), None
     while True:
         points, offset = client.scroll(
             collection, limit=_BATCH, offset=offset, with_vectors=True, with_payload=False
@@ -318,7 +332,7 @@ def _qdrant(uri: str, max_bytes: int | None = None) -> Source:
     )
 
 
-def _chroma(uri: str, max_bytes: int | None = None) -> Source:
+def _chroma(uri: str, max_bytes: int | None = None, max_rows: int | None = None) -> Source:
     try:
         import chromadb
     except ImportError as e:
@@ -345,7 +359,7 @@ def _chroma(uri: str, max_bytes: int | None = None) -> Source:
     if not collection:
         raise ValueError(f"{_redact(uri)}: name the collection")
     col = client.get_collection(collection)
-    rows, offset = _Rows(max_bytes, f"chroma collection {collection}"), 0
+    rows, offset = _Rows(max_bytes, f"chroma collection {collection}", max_rows), 0
     while True:
         got = col.get(include=["embeddings"], limit=_BATCH, offset=offset)
         if not got["ids"]:
@@ -364,7 +378,7 @@ def _chroma(uri: str, max_bytes: int | None = None) -> Source:
     )
 
 
-def _milvus(uri: str, max_bytes: int | None = None) -> Source:
+def _milvus(uri: str, max_bytes: int | None = None, max_rows: int | None = None) -> Source:
     try:
         from pymilvus import MilvusClient
     except ImportError as e:
@@ -399,7 +413,7 @@ def _milvus(uri: str, max_bytes: int | None = None) -> Source:
     loaded_here = "notload" in state.replace("_", "")
     if loaded_here:
         client.load_collection(collection)
-    rows = _Rows(max_bytes, f"milvus collection {collection}")
+    rows = _Rows(max_bytes, f"milvus collection {collection}", max_rows)
     it = client.query_iterator(collection, batch_size=_BATCH, output_fields=[pk, name])
     try:
         while True:
@@ -442,7 +456,7 @@ def _milvus(uri: str, max_bytes: int | None = None) -> Source:
     return src
 
 
-def _weaviate(uri: str, max_bytes: int | None = None) -> Source:
+def _weaviate(uri: str, max_bytes: int | None = None, max_rows: int | None = None) -> Source:
     try:
         import weaviate
         from weaviate.classes.init import AdditionalConfig, Auth, Timeout
@@ -470,7 +484,7 @@ def _weaviate(uri: str, max_bytes: int | None = None) -> Source:
         raise ValueError(f"{_redact(uri)}: name the collection")
     col = client.collections.get(collection)
     name = o.get("vector")
-    rows = _Rows(max_bytes, f"weaviate collection {collection}")
+    rows = _Rows(max_bytes, f"weaviate collection {collection}", max_rows)
     try:
         for obj in col.iterator(include_vector=True):
             rows.add(str(obj.uuid), _pick_vector(obj.vector, name, "weaviate"))
@@ -495,23 +509,29 @@ def _weaviate(uri: str, max_bytes: int | None = None) -> Source:
     )
 
 
-def load_source(uri: str, data: bytes | None = None, max_bytes: int | None = None) -> Source:
+def load_source(
+    uri: str,
+    data: bytes | None = None,
+    max_bytes: int | None = None,
+    max_rows: int | None = None,
+) -> Source:
     """Vectors (ascending id order), their ids, and a search function from a vector store.
     ``data`` is a faiss index file's content when the caller has already read it;
-    ``max_bytes`` caps the float32 vectors read."""
+    ``max_bytes`` caps the float32 vectors read and ``max_rows`` the rows read from a store
+    (a faiss index is checked by its caller, which knows its size up front)."""
     from vecscope.incremental import fingerprint
 
     scheme = scheme_of(uri)
     if scheme == "faiss" or Path(str(uri)).suffix.lower() in FAISS_SUFFIXES and not scheme:
         read, args = _faiss, (str(uri), data, max_bytes)
     elif scheme.startswith("qdrant"):
-        read, args = _qdrant, (uri, max_bytes)
+        read, args = _qdrant, (uri, max_bytes, max_rows)
     elif scheme.startswith("chroma"):
-        read, args = _chroma, (uri, max_bytes)
+        read, args = _chroma, (uri, max_bytes, max_rows)
     elif scheme.startswith("milvus"):
-        read, args = _milvus, (uri, max_bytes)
+        read, args = _milvus, (uri, max_bytes, max_rows)
     elif scheme == "weaviate":
-        read, args = _weaviate, (uri, max_bytes)
+        read, args = _weaviate, (uri, max_bytes, max_rows)
     else:
         raise ValueError(
             f"unsupported source {_redact(uri)!r}; known schemes: {', '.join(SCHEMES)}"

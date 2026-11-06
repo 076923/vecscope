@@ -21,7 +21,10 @@ with a per-request timeout (``timeout=`` in the URI, default 60 s).
 A file larger than ``--max-read-mb`` (default 4096, ``VECSCOPE_MAX_READ_MB``, 0 = no limit)
 is refused before it is read, and a store stops being read once its vectors pass that size,
 so one request cannot exhaust the server's memory. Files are parsed straight from the
-verified handle, never copied into memory first.
+verified handle, never copied into memory first. ``--max-rows`` and ``--max-dim``
+(``VECSCOPE_MAX_ROWS``, ``VECSCOPE_MAX_DIM``, default 0 = no limit) refuse a matrix with more
+rows or columns than that, whatever its byte size, and a ``MemoryError`` while reading or
+auditing is reported to the agent as such instead of killing the call silently.
 
 The SDK runs every tool call in its own thread. Audits, sweeps and compares take one of
 ``--max-concurrent`` slots (default 1, ``VECSCOPE_MAX_CONCURRENT``) and further calls wait,
@@ -61,12 +64,14 @@ except ImportError:  # mcp 1.x
 from vecscope.evidence import ACTIONS, THRESHOLDS, audit, diff_evidence, same_corpus
 from vecscope.io import load_neighbors, load_vectors
 
-_USER_ERRORS = (ValueError, TypeError, FileNotFoundError, ImportError, OSError)
+_USER_ERRORS = (ValueError, TypeError, FileNotFoundError, ImportError, OSError, MemoryError)
 ALLOWED_DIRS_ENV = "VECSCOPE_ALLOWED_DIRS"
 ALLOW_NETWORK_ENV = "VECSCOPE_ALLOW_NETWORK"
 ALLOW_ANY_ENV = "VECSCOPE_ALLOW_ANY"
 MAX_READ_ENV = "VECSCOPE_MAX_READ_MB"
 DEFAULT_MAX_READ_MB = 4096
+MAX_ROWS_ENV = "VECSCOPE_MAX_ROWS"
+MAX_DIM_ENV = "VECSCOPE_MAX_DIM"
 MAX_CONCURRENT_ENV = "VECSCOPE_MAX_CONCURRENT"
 # the most a call may ask for of a setting that multiplies its cost; the CLI has no caps
 LIMITS = {
@@ -177,6 +182,13 @@ def _call(tool: str, **paths):
 
 def _user_error(e: Exception) -> ToolError:
     """Return a ToolError whose message reaches the agent (plain exceptions are masked)."""
+    if isinstance(e, MemoryError):
+        return ToolError(
+            "MemoryError: the server ran out of memory on this call; audit a sample "
+            "(sample=, the default is 100000 rows), a smaller file or collection, or start "
+            "the server on a machine with more memory. Its limits are --max-read-mb, "
+            "--max-rows and --max-dim"
+        )
     return ToolError(f"{type(e).__name__}: {e}")
 
 
@@ -201,6 +213,43 @@ def max_read_bytes() -> int | None:
     except ValueError:
         raise ValueError(f"{MAX_READ_ENV}={raw!r} is not a number of MiB") from None
     return None if mb <= 0 else int(mb * 2**20)
+
+
+def _count_limit(env: str) -> int | None:
+    raw = os.environ.get(env, "")
+    if not raw.strip():
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        raise ValueError(f"{env}={raw!r} is not a whole number") from None
+    return None if n <= 0 else n
+
+
+def max_rows() -> int | None:
+    """The most rows one matrix may have, from VECSCOPE_MAX_ROWS (unset or 0 = no limit)."""
+    return _count_limit(MAX_ROWS_ENV)
+
+
+def max_dim() -> int | None:
+    """The most columns one matrix may have, from VECSCOPE_MAX_DIM (unset or 0 = no limit)."""
+    return _count_limit(MAX_DIM_ENV)
+
+
+def check_shape(x, what: str = "path"):
+    """Refuse a matrix over --max-rows or --max-dim; returns it unchanged otherwise."""
+    rows, dim = max_rows(), max_dim()
+    if rows is not None and x.shape[0] > rows:
+        raise ValueError(
+            f"{what} has {x.shape[0]} rows, over the {rows} this server audits "
+            f"(--max-rows / {MAX_ROWS_ENV}); audit a smaller file or raise the limit"
+        )
+    if dim is not None and x.shape[1] > dim:
+        raise ValueError(
+            f"{what} has {x.shape[1]} columns, over the {dim} this server audits "
+            f"(--max-dim / {MAX_DIM_ENV}); audit a smaller file or raise the limit"
+        )
+    return x
 
 
 @contextlib.contextmanager
@@ -271,7 +320,7 @@ def _json_file(path: str, what: str) -> dict:
 
 def _vectors(path: str, what: str = "path"):
     with open_checked(path, what) as fh:
-        return load_vectors(path, fh)
+        return check_shape(load_vectors(path, fh), what)
 
 
 def _neighbors(path: str | None, what: str):
@@ -288,19 +337,26 @@ def _open_source(path: str):
 
     scheme = scheme_of(path)
     if scheme in ("", "faiss"):  # one index file: read through a verified handle
-        return load_source(
+        src = load_source(
             path, read_checked(local_path(path) if scheme else path), max_bytes=max_read_bytes()
         )
-    if scheme.endswith("+local"):
-        # a local database directory: its client opens the files itself, so only the
-        # directory is checked
-        check_path(local_path(path))
-    elif os.environ.get(ALLOW_NETWORK_ENV) != "1":
-        raise PermissionError(
-            f"{scheme} sources reach the network; start the server with "
-            f"--allow-network (or {ALLOW_NETWORK_ENV}=1) to read them"
-        )
-    return load_source(path, max_bytes=max_read_bytes())
+    else:
+        if scheme.endswith("+local"):
+            # a local database directory: its client opens the files itself, so only the
+            # directory is checked
+            check_path(local_path(path))
+        elif os.environ.get(ALLOW_NETWORK_ENV) != "1":
+            raise PermissionError(
+                f"{scheme} sources reach the network; start the server with "
+                f"--allow-network (or {ALLOW_NETWORK_ENV}=1) to read them"
+            )
+        src = load_source(path, max_bytes=max_read_bytes(), max_rows=max_rows())
+    try:
+        check_shape(src.vectors, "path")
+    except ValueError:
+        src.close()
+        raise
+    return src
 
 
 def check_path(path: str | None, what: str = "path") -> str | None:
@@ -377,7 +433,9 @@ def _summary(ev: dict) -> str:
     bad = [f for f in ev["findings"] if f["verdict"] != "ok"]
     head = f"verdict={ev['verdict']} n={ev['n']} dim={ev['dim']} k={ev['k']}"
     if ev.get("sampled"):
-        head += f" (sampled from {ev['n_total']} rows)"
+        head += f" scope=sampled ({ev['n']} of {ev['n_total']} rows: estimates, not a full audit)"
+    else:
+        head += " scope=full"
     if ev.get("unstable_findings"):
         head += f"; verdict unstable across sample repeats: {', '.join(ev['unstable_findings'])}"
     if ev.get("inconclusive_findings"):
@@ -385,6 +443,8 @@ def _summary(ev: dict) -> str:
             f"; inconclusive on this sample (not evidence of health): "
             f"{', '.join(ev['inconclusive_findings'])}"
         )
+    if ev.get("needs_full_audit"):
+        head += f"; needs a full audit (sample=0) to settle: {', '.join(ev['needs_full_audit'])}"
     if not bad:
         head += "; all findings ok"
     else:
@@ -481,8 +541,12 @@ def audit_embeddings(
     `verbose=False` drops details, causes, actions and explanations of findings that are ok
     and the thresholds table; it saves most when most findings are ok.
 
-    The response starts with `summary` (one line: non-ok findings, retrieval, the first plan
-    step and the baseline comparison), `verdict` and `audit_id`. Each finding carries value,
+    The response starts with `summary` (one line: the evidence scope, non-ok findings,
+    retrieval, the first plan step and the baseline comparison), `verdict` and `audit_id`.
+    `evidence_scope` is "full" when every row was audited and "sampled" otherwise; a
+    sampled response lists in `needs_full_audit` the findings whose verdict cannot stand for
+    the corpus (the inconclusive and the unstable ones). Report those as unsettled, never as
+    healthy, and re-run with sample=0 to settle them. Each finding carries value,
     healthy_range, warn_at, fail_at, explanation, details, likely_causes, suggested_action and
     verify_by. Treat actions as hypotheses: apply the smallest change, re-audit, and compare
     retrieval on real queries before adopting.
@@ -760,6 +824,22 @@ def main(argv: list[str] | None = None) -> None:
         f"(default {DEFAULT_MAX_READ_MB}; 0 = no limit); same as {MAX_READ_ENV}",
     )
     p.add_argument(
+        "--max-rows",
+        type=int,
+        default=None,
+        metavar="N",
+        help="refuse a matrix with more rows than this, whatever its byte size "
+        f"(default 0 = no limit); same as {MAX_ROWS_ENV}",
+    )
+    p.add_argument(
+        "--max-dim",
+        type=int,
+        default=None,
+        metavar="N",
+        help="refuse a matrix with more columns than this (default 0 = no limit); "
+        f"same as {MAX_DIM_ENV}",
+    )
+    p.add_argument(
         "--max-concurrent",
         type=int,
         default=None,
@@ -780,6 +860,14 @@ def main(argv: list[str] | None = None) -> None:
         if args.max_read_mb < 0:
             p.error("--max-read-mb must be 0 (no limit) or positive")
         os.environ[MAX_READ_ENV] = str(args.max_read_mb)
+    for flag, env, value in (
+        ("--max-rows", MAX_ROWS_ENV, args.max_rows),
+        ("--max-dim", MAX_DIM_ENV, args.max_dim),
+    ):
+        if value is not None:
+            if value < 0:
+                p.error(f"{flag} must be 0 (no limit) or positive")
+            os.environ[env] = str(value)
     if args.allow_network:
         os.environ[ALLOW_NETWORK_ENV] = "1"
     if args.allow_any:
