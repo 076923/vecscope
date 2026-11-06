@@ -4,10 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.12.0] - 2026-11-06
 
 ### Added
 
+- `evidence_scope` (`full` or `sampled`) and `needs_full_audit` (the inconclusive and unstable
+  findings of a sampled audit) at the top level of the evidence JSON, and the MCP summary line
+  starts with the scope, so a sampled estimate is never read as a full audit.
+- MCP server options `--max-rows` and `--max-dim` (`VECSCOPE_MAX_ROWS`, `VECSCOPE_MAX_DIM`)
+  refuse a matrix over the limit whatever its byte size; a store stops being read at
+  `--max-rows`. A `MemoryError` during a call is returned to the agent as a tool error that
+  names the ways out.
+- `tests/test_mcp_security.py` pins the server's guards: paths outside the allowed
+  directories, the read, row and column limits, network stores without opt-in, secrets kept
+  out of errors, the timeout option, the `MemoryError` path and the scope of a sampled response.
 - Documentation site at <https://076923.github.io/vecscope/>, built with Zensical from the README,
   `docs/` and the Korean translations, and deployed by `.github/workflows/docs.yml`.
 - `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `CITATION.cff`, a logo and social preview
@@ -16,12 +26,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `docs/verification.md` is organized into five areas (algorithm exactness, thresholds and
+  retrieval quality, sampled audits, ANN recall and index sweeps, MCP security and operations),
+  each ending with what it does not cover.
 - Workflows run with no default token permissions, pin actions to commit SHAs, and do not keep
   the checkout credentials. CI also builds the package, checks it with `twine`, and lints the
   workflows with zizmor. The release workflow checks that the built version matches the tag.
 - The code is formatted with `ruff format`, and CI and pre-commit check it.
 - The Korean README and the agent cases page link to repository files by URL, so the links work
   on the documentation site as well as on GitHub.
+
+### Fixed
+
+- The `timeout=` option of a network store rejects `inf`, `nan`, non-numeric and missing
+  values and caps the wait at 3600 s; before, `timeout=inf` passed the positive check and
+  disabled the timeout.
 
 ## [0.11.0] - 2026-11-01
 

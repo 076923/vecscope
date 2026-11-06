@@ -486,7 +486,8 @@ vecscope audit "weaviate://localhost:8080/Docs?grpc_port=50051"
 - `https=1`
 - `pk=`(Milvus 기본 키)
 - `api_key_env=NAME`(키는 그 환경 변수에서 읽고, URI에 직접 적은 키는 쓰지 않음)
-- `timeout=`(네트워크 저장소 요청 하나의 제한 시간, 초 단위, 기본값 60)
+- `timeout=`(네트워크 저장소 요청 하나의 제한 시간, 초 단위, 기본값 60. 유한한 양수여야 하고 최대
+  3600)
 
 읽기만 하며, 로드되지 않은 Milvus 컬렉션만 읽는 동안 로드했다가 다시 해제합니다.
 
@@ -629,8 +630,13 @@ args = ["--allow-dir", "/data/embeddings"]
 - `--max-read-mb`(기본값 4096, `VECSCOPE_MAX_READ_MB`, 0이면 제한 없음)보다 큰 파일은 읽기 전에
   거부합니다.
 - 저장소도 벡터가 같은 크기를 넘으면 읽기를 멈춥니다.
+- `--max-rows`와 `--max-dim`(`VECSCOPE_MAX_ROWS`, `VECSCOPE_MAX_DIM`, 기본값 0이면 제한 없음)은
+  바이트 크기와 상관없이 행이나 열이 그보다 많은 행렬을 거부합니다. 질의 파일도 같은 기준으로
+  확인하고, 저장소는 `--max-rows`에서 읽기를 멈춥니다.
 - 파일은 확인한 핸들에서 바로 파싱하고, 먼저 메모리에 통째로 복사하지 않습니다. 500,000 x 384
   `.npy` 파일(0.72 GiB)을 MCP로 읽을 때 최대 메모리는 CLI와 같은 0.79 GiB입니다.
+- 읽기나 감사 중에 `MemoryError`가 나면 호출을 조용히 끝내지 않고, 빠져나갈 방법(표본, 더 작은
+  입력, 위의 상한)을 적은 도구 오류로 에이전트에게 돌려줍니다.
 
 병렬 호출과 비용이 큰 설정에도 한도가 있습니다.
 
@@ -950,6 +956,10 @@ zipf)을 받고 실행 환경 정보를 JSON에 함께 기록합니다.
 
 그래서 표본 감사는 다음과 같이 처리합니다.
 
+- `evidence_scope`를 `sampled`로 둡니다(모든 행을 감사했으면 `full`). 코퍼스 전체를 대신할 수
+  없는 판정, 즉 불확정(inconclusive) 항목과 `--sample-repeats`를 썼을 때의 불안정 항목을
+  `needs_full_audit`에 나열합니다. JSON을 받는 쪽은 항목별 주의 문구를 읽지 않아도 이 두 키로
+  게이트를 걸 수 있습니다.
 - 표에서 inconclusive로 표시한 판정들이 `inconclusive_findings` 목록으로 들어갑니다.
 - 그 판정들은 텍스트 출력에서는 `INCONCLUSIVE (sampled)`로, gate 줄에서는 이름으로
   표시됩니다.

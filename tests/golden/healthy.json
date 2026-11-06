@@ -407,6 +407,8 @@
  "unstable_findings": [],
  "near_dup_cos": 0.99,
  "inconclusive_findings": [],
+ "evidence_scope": "full",
+ "needs_full_audit": [],
  "plan": [],
  "retrieval": {},
  "source": {},

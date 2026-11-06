@@ -2,17 +2,22 @@
 
 # Verification
 
-This page records how vecscope's claims were checked and what the measurements show:
+This page records how vecscope's claims were checked and what the measurements show, in five
+areas:
 
-- exactness against float64
-- the ANN recall scorer
-- sampled audits
-- the thresholds against retrieval quality on labeled data
-- the query findings
-- what happens to retrieval when a fix from the plan is applied
-- an agent following the plan over MCP
+1. [Algorithm exactness](#1-algorithm-exactness): the k-NN, the incremental audit and the
+   published tables against float64 and against a full recomputation
+2. [Thresholds and retrieval quality](#2-thresholds-and-retrieval-quality): every finding
+   against nDCG@10 on labeled data, the query findings, and what retrieval does when a plan
+   step is applied
+3. [Sampled audits](#3-sampled-audits): what a sample can and cannot stand for
+4. [ANN recall and index sweeps](#4-ann-recall-and-index-sweeps): the recall scorer and the
+   sweep
+5. [MCP security and operations](#5-mcp-security-and-operations): the server's guards and
+   agents following the plan over MCP
 
-The thresholds and the plan rules are set from these results.
+The thresholds and the plan rules are set from these results. Each area ends with what it
+does not cover; the [limitations](#limitations) collect them.
 
 - Environment: AMD EPYC 7R13, 8 vCPU, 26 GB RAM, NVIDIA L4; Python 3.12.3, numpy 2.2.6,
   faiss 1.15.1, sentence-transformers 3.4.1, torch 2.6.0
@@ -25,23 +30,30 @@ The thresholds and the plan rules are set from these results.
     and MultiLongDoc ko)
 - Vector stores: faiss 1.15.1, Qdrant client 1.20 (local mode), Chroma 1.5, Milvus Lite 3.2,
   Weaviate client 4.24
+- Tests: `pytest -q` and `pytest -m slow` pass; the vector store tests run against real
+  local Qdrant, Chroma and Milvus Lite instances and a faiss index file
 
-## Results
+## 1. Algorithm exactness
 
-| area | result |
+| claim | result |
 |---|---|
-| tests | `pytest -q` and `pytest -m slow` pass; the vector store tests run against real local Qdrant, Chroma and Milvus Lite instances and a faiss index file |
 | exact k-NN (`exact_knn`, `query_knn`, faiss flat CPU and GPU) | 0 rank errors against float64 on six shapes at 100k x 768 and on 76 (model, dataset) pairs of real embeddings; float32 distance error at most 5.9e-7 |
-| ANN recall scoring | tie slack is `1e-6 + 2e-6 x distance`, about three times the float32 error. On 24 index settings at 100k x 768 the score is within 1e-4 of a strict float64 scorer (at most one query in 1,000) and exact copies still count as interchangeable; on real queries within 3.1e-4 (one query in 323) |
-| sampled audit, values | distribution findings within 2.3% of the full value; hubness and antihubs a lower bound everywhere; the collapse `estimated_full_share` is 1.015 to 1.026 x the full share |
-| sampled audit, verdicts | every sampled verdict below the full-corpus one is listed in `inconclusive_findings` (clustered and duplicates hubness and antihubs, zipf antihubs and connectivity) |
-| `sample_repeats` | `value_range` is the spread between samples; it often does not contain the full-corpus value, so it is not an interval estimate |
-| thresholds | on the 18 pipelines that reproduce published nDCG@10 within 0.007, no `anisotropy`, `query_gap` or `query_hubness` verdict is worse than `ok`; all 11 English-only models on Korean data raise `hubness` or `query_hubness` |
 | README "Real embeddings" table | all 88 values and verdicts reproduced on the first 40k rows of each set |
 | incremental audit (`--knn-cache`) | on 100k x 768 with 5k or 20k appended rows, verdicts identical to a full audit and values within 7e-5 relative; 15 s and 47 s against 94 s and 123 s for the full audit. With 1,000 rows re-embedded in place, 10,625 rows recomputed, same verdicts, values within 4e-5, 19 s against 95 s; with 10,000 the update took 83 s against 89 s, which is why the cache rebuilds once more than half the rows would be recomputed; re-run with that rule, 10,000 changed rows rebuilt it in 87 s against 87 s |
-| sweep | recommendations identical across three seeds; IVF recall at a fixed nprobe can rise or fall with corpus size depending on how the data's clusters line up with nlist |
+| determinism | two runs on the same input produce identical JSON (fixed seeds, exact neighbors); the golden files under `tests/golden/` pin the example matrices |
 
-## Finding values against nDCG@10
+Not covered: exactness on real corpora over 20,000 rows was checked on synthetic data; the
+real-data check covers the 76 smaller pairs.
+
+## 2. Thresholds and retrieval quality
+
+| claim | result |
+|---|---|
+| thresholds | on the 18 pipelines that reproduce published nDCG@10 within 0.007, no `anisotropy`, `query_gap` or `query_hubness` verdict is worse than `ok`; all 11 English-only models on Korean data raise `hubness` or `query_hubness` |
+| a finding the plan acts on tracks retrieval | deduplicating, z-scoring a dominant coordinate and raising ef_search each recover nDCG@10 ([interventions](#interventions)) |
+| a change the plan does not ask for is not free | centering a healthy model removed `anisotropy` and cost up to 0.034 nDCG@10 |
+
+### Finding values against nDCG@10
 
 Spearman correlation between each finding's value and nDCG@10 across the 19 models, per
 dataset. A negative value means the finding rises as retrieval gets worse.
@@ -89,7 +101,7 @@ What this supports:
   an English-only model on Korean) raises several findings at once. The count of warnings
   separates such pipelines; a single `fail` does not.
 
-## Korean data and document length
+### Korean data and document length
 
 Three more Korean sets from MTEB, none used to set a threshold, differ mainly in document
 length. Documents were truncated to 512 tokens for every model.
@@ -126,7 +138,7 @@ gte-multilingual-base and Qwen3-Embedding-0.6B.
     every model confirms. The plan puts `query_gap` with the duplicates, so the queries are
     not blamed for it.
 
-## Query findings
+### Query findings
 
 `query_gap` and `query_shift` were chosen from three candidates measured on the cached
 embeddings of the 19 models on SciFact, NFCorpus and ko-strategyqa. Every (model, dataset)
@@ -171,7 +183,7 @@ Three of the fault criteria turned out to describe something other than a query-
   and documents equally badly, so nothing is asymmetric between them; `query_hubness`
   fails 10 of the 11 (11 to 30) and warns on the last (8.3).
 
-## Interventions
+### Interventions
 
 Does retrieval quality move when a plan step is applied?
 
@@ -207,12 +219,67 @@ What this supports:
   "Index sweep"), not here.
 - Centering a healthy model does not help: it removed `anisotropy` and cost up to 0.034
   nDCG@10. The plan only proposes it when `anisotropy` is not `ok`, and its re-measure line
-  says to check retrieval on labeled queries.
+  says to check retrieval on labeled queries. A plan step is a hypothesis to test on the
+  corpus at hand, not a diagnosis; an agent that applies one must re-audit and compare
+  retrieval before adopting it.
 - A dominant coordinate also spreads the norms and splits cosine from inner product.
   Normalizing does not remove the coordinate, so the plan puts those findings in the
   `dominant_dimension` step with the z-score change.
 
-## Agent integration
+Not covered: the thresholds and the query findings were fitted on the data above, with no
+held-out split, and false positives and misses were not tracked per model, language,
+document length or corpus size beyond the nine datasets here. On very short templated
+documents and on narrow-domain corpora some defaults (`collapse`, `effective_rank`,
+`query_gap`) flag good models; calibrate on such data before gating. Production query logs
+and private corpora were not measured.
+
+## 3. Sampled audits
+
+| claim | result |
+|---|---|
+| values | distribution findings within 2.3% of the full value; hubness and antihubs a lower bound everywhere; the collapse `estimated_full_share` is 1.015 to 1.026 x the full share |
+| verdicts | every sampled verdict below the full-corpus one is listed in `inconclusive_findings` (clustered and duplicates hubness and antihubs, zipf antihubs and connectivity) |
+| `sample_repeats` | `value_range` is the spread between samples; it often does not contain the full-corpus value, so it is not an interval estimate |
+| scope in the output | a sampled audit sets `evidence_scope: "sampled"` and lists in `needs_full_audit` the inconclusive and unstable findings; the MCP summary line starts with the scope, so a sampled estimate is never read as a full audit (`tests/test_mcp_security.py`) |
+
+Not covered: sampled audits use uniform random rows. Stratified (per-cluster) sampling was
+considered and not adopted: an island must be smaller than max(k + 1, 0.5% of the rows) and
+isolated, so a sample misses small islands whatever the strata, while stratifying would bias
+the distribution findings. Exact copies are counted over every row instead.
+
+## 4. ANN recall and index sweeps
+
+| claim | result |
+|---|---|
+| ANN recall scoring | tie slack is `1e-6 + 2e-6 x distance`, about three times the float32 error. On 24 index settings at 100k x 768 the score is within 1e-4 of a strict float64 scorer (at most one query in 1,000) and exact copies still count as interchangeable; on real queries within 3.1e-4 (one query in 323) |
+| `ann_recall` tracks ranked retrieval | HNSW M=16 at ef_search 4, 8, 16, 64: `ann_recall` median 0.883, 0.958, 0.984, 0.998 against ranked nDCG@10 at 0.83, 0.92, 0.96, 0.995 of exact; Spearman 0.94 over 84 runs ([interventions](#interventions)) |
+| sweep | recommendations identical across three seeds; IVF recall at a fixed nprobe can rise or fall with corpus size depending on how the data's clusters line up with nlist |
+
+Not covered: search latency on corpora under 5,000 rows is below the measurement noise; the
+latency side of the trade-off is measured by `vecscope sweep` on 100k rows (README "Index
+sweep"). Index types other than HNSW and IVF were not swept.
+
+## 5. MCP security and operations
+
+The server's guards are pinned by `tests/test_mcp_security.py` on small matrices:
+
+- a corpus, queries or comparison file outside the allowed directories is refused, and a
+  directory or a missing file is reported as a user error
+- `--max-read-mb` refuses a file before it is parsed, `0` lifts the limit, and a value that
+  is not a number is reported; `--max-rows` and `--max-dim` refuse a matrix (or a queries
+  file) over the limit whatever its byte size, and the command-line options set them
+- a network store is refused without `--allow-network`, and the error never carries the
+  password, the API key or the other URI secrets; the `timeout=` option must be a finite
+  positive number of seconds and at most 3,600
+- a `MemoryError` while reading or auditing reaches the agent as a tool error that names the
+  ways out (a sample, a smaller input, the limits) instead of ending the call silently
+- a sampled response states `evidence_scope`, `needs_full_audit` and the scope in its
+  summary line
+
+Vector store reads were tested against real local Qdrant, Chroma and Milvus Lite instances
+and a faiss index file (`tests/test_adapters.py`), including the byte limit stopping a read.
+
+### Agent integration
 
 - `tests/test_agent_workflow.py` drives the MCP server over stdio: a corpus with
   unnormalized vectors and a shared offset, audited with labeled queries.
@@ -251,6 +318,15 @@ What this supports:
   - Both had to re-measure by hand because the sweep chose its own nlist (132), which led to
     `sweep --nlist`.
 
+Not covered: the Weaviate adapter was tested only against an embedded server in opt-in tests
+(`VECSCOPE_TEST_WEAVIATE=1`); remote Qdrant, Milvus and Weaviate servers were not tested.
+The `timeout=` option and the scrubbing of client errors were tested against an unreachable
+Qdrant port and a stubbed client, not against a slow server. The row and column limits and
+the `MemoryError` path were tested on small matrices with the limits set low, not by
+exhausting a machine. The memory of a long-running server under many calls was not measured.
+The agent runs are one model on three tasks; they show the tools and the plan are usable,
+not that every agent follows them.
+
 ## Limitations
 
 - The thresholds and the query findings were fitted on the data above; there is no held-out
@@ -260,22 +336,22 @@ What this supports:
   `query_gap`) flag good models; calibrate on such data before gating. Exactness on corpora over
   20,000 rows was checked on synthetic data; the real-data exactness check covers the 76
   smaller pairs.
-- Sampled audits use uniform random rows. Stratified (per-cluster) sampling was considered and
-  not adopted: an island must be smaller than max(k + 1, 0.5% of the rows) and isolated, so a
-  sample misses small islands whatever the strata, while stratifying would bias the
-  distribution findings. Exact copies are counted over every row instead.
+- Sampled audits use uniform random rows (see [sampled audits](#3-sampled-audits) for why
+  stratified sampling was not adopted).
 - The Weaviate adapter was tested only against an embedded server in opt-in tests
   (`VECSCOPE_TEST_WEAVIATE=1`); remote Qdrant, Milvus and Weaviate servers were not tested.
   The `timeout=` option and the scrubbing of client errors were tested against an unreachable
   Qdrant port and a stubbed client, not against a slow server.
+- The MCP guards were tested with low limits on small inputs, not by exhausting a machine, and
+  a long-running server was not measured.
 - The agent runs are one model on three tasks; they show the tools and the plan are usable,
   not that every agent follows them.
 
 ## Reproducing
 
 - `pytest -q` runs the verification tests (`tests/test_new_features.py`,
-  `tests/test_scale_exactness.py`, `tests/test_agent_workflow.py`); `pytest -m slow` adds the
-  100k x 384 exactness checks.
+  `tests/test_scale_exactness.py`, `tests/test_agent_workflow.py`,
+  `tests/test_mcp_security.py`); `pytest -m slow` adds the 100k x 384 exactness checks.
 - `python examples/benchmark_scale.py --rows 10000 50000 100000 --dim 768 --json scale.json`
   and `python examples/benchmark_sweep.py --rows 100000 --dim 768 --corpus clustered zipf
   --json sweep.json` re-measure the tables and record the machine in the JSON.

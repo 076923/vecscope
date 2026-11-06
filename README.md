@@ -497,7 +497,8 @@ Options go in the query string:
 - `pk=` (Milvus primary key)
 - `api_key_env=NAME` (the key is read from that environment variable; keys in the URI itself
   are not used)
-- `timeout=` seconds per request to a network store (default 60)
+- `timeout=` seconds per request to a network store (default 60; a finite positive number,
+  at most 3600)
 
 Reading is read-only, except that a Milvus collection that is not loaded is loaded for the
 read and released again.
@@ -646,8 +647,14 @@ One request cannot exhaust the server's memory:
 - A file larger than `--max-read-mb` (default 4096; `VECSCOPE_MAX_READ_MB`; 0 for no limit)
   is refused before it is read.
 - A store stops being read once its vectors pass the same size.
+- `--max-rows` and `--max-dim` (`VECSCOPE_MAX_ROWS`, `VECSCOPE_MAX_DIM`; default 0 for no
+  limit) refuse a matrix with more rows or columns than that, whatever its byte size; the
+  queries file is checked the same way, and a store stops being read at `--max-rows`.
 - Files are parsed straight from the checked handle, never copied into memory first. On a
   500,000 x 384 `.npy` file (0.72 GiB) an MCP read peaks at 0.79 GiB, as the CLI does.
+- A `MemoryError` while reading or auditing is returned to the agent as a tool error that
+  names the ways out (a sample, a smaller input, the limits above) instead of ending the
+  call silently.
 
 Calls in parallel, or with expensive settings, are bounded too:
 
@@ -970,6 +977,10 @@ about the sample. Which findings need every row:
 
 A sampled audit therefore:
 
+- sets `evidence_scope` to `sampled` (`full` when every row was audited) and lists in
+  `needs_full_audit` the findings whose verdict cannot stand for the corpus: the inconclusive
+  ones and, with `--sample-repeats`, the unstable ones. Anything consuming the JSON can gate
+  on these two keys without reading the per-finding caveats
 - lists `inconclusive_findings` (the verdicts the table marks inconclusive)
 - flags them `INCONCLUSIVE (sampled)` in the text output and names them in the gate line
 - takes the collapse verdict from `details.estimated_full_share` (see below)

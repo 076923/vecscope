@@ -108,6 +108,11 @@ class Evidence:
     unstable_findings: list[str] = field(default_factory=list)
     near_dup_cos: float = 0.99
     inconclusive_findings: list[str] = field(default_factory=list)
+    # "full" when every row was audited, "sampled" when the findings describe a seeded
+    # subset of the rows; the verdicts in needs_full_audit cannot stand for the whole corpus
+    # (the inconclusive and the unstable ones) and need a run with sample=0
+    evidence_scope: str = "full"
+    needs_full_audit: list[str] = field(default_factory=list)
     # ordered steps for the non-ok findings (vecscope.plan): shared cause, first change
     plan: list[dict] = field(default_factory=list)
     # quality on labeled queries (vecscope.retrieval); empty without qrels
@@ -1256,6 +1261,10 @@ def audit(
         unstable_findings=unstable,
         near_dup_cos=near_dup_cos,
         inconclusive_findings=inconclusive,
+        evidence_scope="sampled" if sampled else "full",
+        needs_full_audit=sorted(
+            set(inconclusive) | set(unstable), key=inconclusive.__add__(unstable).index
+        ),
         plan=build_plan([asdict(f) for f in findings], retrieval or None),
         retrieval=retrieval,
         corpus_fingerprint=fingerprint(x_full),

@@ -110,6 +110,10 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
 - The response lists `inconclusive_findings` (hubness, antihubs and connectivity verdicts
   other than `fail`, outlier verdicts other than `ok`): never report those as healthy; say
   they need `--sample 0`.
+- Check `evidence_scope` first: `sampled` means every number is an estimate from a subset,
+  and `needs_full_audit` names the findings (inconclusive or unstable) whose verdict cannot
+  stand for the corpus. Report those as unsettled and re-run with `--sample 0` (MCP:
+  `sample=0`) before acting on them or passing the JSON on.
 - anisotropy, effective_rank, rogue_dimensions, norms, metric_mismatch and
   distance_concentration are stable estimates.
 - `value_range` is the spread between repeated samples, not an interval that contains the
