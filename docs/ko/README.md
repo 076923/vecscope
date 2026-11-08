@@ -12,6 +12,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/vecscope?style=flat-square&color=3775a9)](https://pypi.org/project/vecscope/)
 [![Python](https://img.shields.io/pypi/pyversions/vecscope?style=flat-square)](https://pypi.org/project/vecscope/)
+[![PyPI Downloads](https://img.shields.io/pepy/dt/vecscope?style=flat-square&label=downloads&color=2563eb)](https://pepy.tech/projects/vecscope)<br>
 [![CI](https://img.shields.io/github/actions/workflow/status/076923/vecscope/ci.yml?style=flat-square&label=CI)](https://github.com/076923/vecscope/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-076923.github.io-2563eb?style=flat-square)](https://076923.github.io/vecscope/)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](https://github.com/076923/vecscope/blob/main/LICENSE)
