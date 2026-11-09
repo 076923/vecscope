@@ -71,9 +71,11 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
-      - run: |
+      - name: Write the example matrices (make_examples() needs only NumPy)
+        run: |
           python -m pip install numpy
-          python examples/make_examples.py
+          cd examples
+          python -c "import numpy as np; from make_examples import make_examples; [np.save(f'{k}.npy', v) for k, v in make_examples().items()]"
         shell: bash
       - name: Healthy matrix passes and writes the baseline
         id: healthy
