@@ -1,0 +1,120 @@
+name: vecscope
+description: Audit an embedding matrix or vector index and fail the job on a verdict or a regression against a baseline.
+author: Daehee Yun
+branding:
+  icon: activity
+  color: blue
+
+# The action installs vecscope from this repository at the ref the workflow named
+# (uses: 076923/vecscope@v0.13.0 installs 0.13.0), so the action and the package
+# version never drift apart.
+
+inputs:
+  path:
+    description: Embedding file (.npy/.npz/.parquet/.jsonl/.csv), faiss index file or vector store URI.
+    required: true
+  baseline:
+    description: Earlier --json evidence to diff against; a verdict that got worse fails the job.
+    default: ""
+  tolerances:
+    description: JSON file of allowed worsening per finding against the baseline.
+    default: ""
+  thresholds:
+    description: JSON file of threshold overrides.
+    default: ""
+  queries:
+    description: Query embeddings (m x dim) for the query-side findings.
+    default: ""
+  fail-on:
+    description: Verdict level that fails the job against the absolute thresholds (warn, fail, none).
+    default: fail
+  k:
+    description: Neighbors per item.
+    default: "10"
+  sample:
+    description: Audit a seeded random subset when n exceeds this (0 = all rows; use 0 with a baseline).
+    default: "100000"
+  require-comparable:
+    description: With a baseline, exit 2 when n, dim, k, sampling, thresholds or near-dup cutoff differ.
+    default: "false"
+  args:
+    description: Further vecscope audit options, separated by spaces (e.g. "--clusters 20 --near-dup 0.98").
+    default: ""
+  output:
+    description: Where to write the evidence JSON.
+    default: vecscope-evidence.json
+  extras:
+    description: Optional vecscope extras to install, comma-separated (e.g. "index" or "qdrant").
+    default: ""
+  python-version:
+    description: Python version for actions/setup-python; empty uses the Python already on the runner.
+    default: "3.13"
+
+outputs:
+  verdict:
+    description: Overall verdict (ok, warn, fail), or error when the audit wrote no evidence.
+    value: ${{ steps.audit.outputs.verdict }}
+  exit-code:
+    description: Exit code of vecscope audit (0 pass, 1 gate failed, 2 usage or comparability error).
+    value: ${{ steps.audit.outputs.exit-code }}
+  regressions:
+    description: Comma-separated findings that regressed against the baseline.
+    value: ${{ steps.audit.outputs.regressions }}
+  evidence:
+    description: Path of the evidence JSON.
+    value: ${{ steps.audit.outputs.evidence }}
+
+runs:
+  using: composite
+  steps:
+    - if: inputs.python-version != ''
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install vecscope
+      shell: bash
+      env:
+        VS_EXTRAS: ${{ inputs.extras }}
+      run: |
+        spec="$GITHUB_ACTION_PATH"
+        if [ -n "$VS_EXTRAS" ]; then
+          if ! [[ "$VS_EXTRAS" =~ ^[a-z0-9-]+(,[a-z0-9-]+)*$ ]]; then
+            echo "::error::extras must be comma-separated names such as index,qdrant"
+            exit 2
+          fi
+          spec="$spec[$VS_EXTRAS]"
+        fi
+        python -m pip install --disable-pip-version-check "$spec"
+
+    - name: Audit
+      id: audit
+      shell: bash
+      env:
+        VS_PATH: ${{ inputs.path }}
+        VS_BASELINE: ${{ inputs.baseline }}
+        VS_TOLERANCES: ${{ inputs.tolerances }}
+        VS_THRESHOLDS: ${{ inputs.thresholds }}
+        VS_QUERIES: ${{ inputs.queries }}
+        VS_FAIL_ON: ${{ inputs.fail-on }}
+        VS_K: ${{ inputs.k }}
+        VS_SAMPLE: ${{ inputs.sample }}
+        VS_REQUIRE_COMPARABLE: ${{ inputs.require-comparable }}
+        VS_ARGS: ${{ inputs.args }}
+        VS_OUTPUT: ${{ inputs.output }}
+      run: |
+        args=(audit "$VS_PATH" --json -k "$VS_K" --sample "$VS_SAMPLE" --fail-on "$VS_FAIL_ON")
+        if [ -n "$VS_BASELINE" ]; then args+=(--baseline "$VS_BASELINE"); fi
+        if [ -n "$VS_TOLERANCES" ]; then args+=(--tolerances "$VS_TOLERANCES"); fi
+        if [ -n "$VS_THRESHOLDS" ]; then args+=(--thresholds "$VS_THRESHOLDS"); fi
+        if [ -n "$VS_QUERIES" ]; then args+=(--queries "$VS_QUERIES"); fi
+        if [ "$VS_REQUIRE_COMPARABLE" = "true" ]; then args+=(--require-comparable); fi
+        if [ -n "$VS_ARGS" ]; then
+          read -ra extra <<< "$VS_ARGS"
+          args+=("${extra[@]}")
+        fi
+        mkdir -p "$(dirname "$VS_OUTPUT")"
+        code=0
+        vecscope "${args[@]}" > "$VS_OUTPUT" || code=$?
+        python "$GITHUB_ACTION_PATH/action/report.py" "$VS_OUTPUT" "$code"
+        exit "$code"

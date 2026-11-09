@@ -1,13 +1,14 @@
-name: Release to PyPI
+name: Release
 
-# Publishes when a tag like v0.1.0 is pushed. Uses PyPI trusted publishing:
+# Publishes to PyPI, creates the GitHub Release and moves the major tag (v0) when a tag
+# like v0.1.0 is pushed. Uses PyPI trusted publishing:
 # register this repository/workflow at https://pypi.org/manage/account/publishing/
 # (environment name: pypi) so no API token is stored in the repository.
 # Digital attestations (PEP 740) are generated and uploaded automatically.
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*.*.*"]
 
 permissions: {}
 
@@ -49,3 +50,59 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  github-release:
+    # The GitHub Release that the Marketplace listing reads. Marketplace publication itself
+    # is a checkbox on the release page; tick it on the first release.
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Create the release with the changelog section as notes and the built files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && index($0, "## [") == 1 { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "$TAG" --notes-file notes.md
+          fi
+
+  major-tag:
+    # Moves v0 (the major of the pushed tag) to this release, so uses: 076923/vecscope@v0
+    # picks it up. Tags pushed with the workflow token do not trigger workflows.
+    needs: publish
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Point the major tag at this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          major="${TAG%%.*}"
+          if gh api "repos/$REPO/git/ref/tags/$major" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/tags/$major" -f sha="$SHA" -F force=true
+          else
+            gh api -X POST "repos/$REPO/git/refs" -f ref="refs/tags/$major" -f sha="$SHA"
+          fi

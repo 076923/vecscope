@@ -819,6 +819,41 @@ The [retrieval quality study](#do-the-findings-predict-retrieval-quality) shows 
 for public datasets, and [calibrating thresholds](#calibrating-thresholds-to-your-domain) says
 how to measure it on yours before blocking merges on it.
 
+### GitHub Action
+
+The repository is also a GitHub Action. It installs vecscope from the tag the workflow names,
+runs `vecscope audit --json`, writes the findings table to the job summary and fails the job
+with the CLI's exit code.
+
+```yaml
+- uses: 076923/vecscope@v0          # or pin a release: @v0.13.0
+  with:
+    path: embeddings.npy
+    baseline: baseline.json         # committed --json output, optional
+    tolerances: tolerances.json     # optional
+    sample: "0"                     # audit every row when diffing against a baseline
+    require-comparable: "true"
+```
+
+| Input | Default | CLI option |
+|---|---|---|
+| `path` | required | the audited file, index or store URI |
+| `baseline`, `tolerances`, `thresholds`, `queries` | empty | `--baseline`, `--tolerances`, `--thresholds`, `--queries` |
+| `fail-on` | `fail` | `--fail-on` |
+| `k`, `sample` | `10`, `100000` | `-k`, `--sample` |
+| `require-comparable` | `false` | `--require-comparable` |
+| `args` | empty | further options, separated by spaces |
+| `output` | `vecscope-evidence.json` | where the evidence JSON is written |
+| `extras` | empty | extras to install, e.g. `index` for faiss files or `qdrant` |
+| `python-version` | `3.13` | empty uses the Python already on the runner |
+
+Outputs: `verdict` (`ok`, `warn`, `fail`, or `error` when no evidence was written),
+`exit-code`, `regressions` (comma-separated finding names) and `evidence` (the JSON path).
+Upload `evidence` as an artifact to keep it, or commit it as the next baseline after review.
+
+`@v0` moves to every 0.x release, and a 0.x minor release may change findings or thresholds,
+so pin the full version (`@v0.13.0`) in a gate that must stay stable.
+
 ## CLI options
 
 ```bash

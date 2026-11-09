@@ -30,8 +30,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev,index]"
-      - run: ruff check src tests examples
-      - run: ruff format --check src tests examples
+      - run: ruff check src tests examples action
+      - run: ruff format --check src tests examples action
       - run: pytest -q
       - name: CLI smoke test
         run: |
@@ -54,6 +54,58 @@ jobs:
           python-version: "3.13"
       - run: python -m pip install -e ".[dev,stores]"
       - run: pytest -q tests/test_adapters.py tests/test_agent_workflow.py -rs
+
+  action:
+    # the composite action in action.yml, as a workflow would call it
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: |
+          python -m pip install numpy
+          python examples/make_examples.py
+        shell: bash
+      - name: Healthy matrix passes and writes the baseline
+        id: healthy
+        uses: ./ # zizmor: ignore[self-repository] the action under test is this checkout
+        with:
+          path: examples/healthy.npy
+          sample: "0"
+          output: out/baseline.json
+      - name: Collapsed matrix fails against the baseline
+        id: collapsed
+        continue-on-error: true
+        uses: ./ # zizmor: ignore[self-repository] the action under test is this checkout
+        with:
+          path: examples/collapsed.npy
+          baseline: out/baseline.json
+          sample: "0"
+          output: out/collapsed.json
+      - name: Check the outputs
+        shell: bash
+        env:
+          H_VERDICT: ${{ steps.healthy.outputs.verdict }}
+          H_CODE: ${{ steps.healthy.outputs.exit-code }}
+          C_OUTCOME: ${{ steps.collapsed.outcome }}
+          C_CODE: ${{ steps.collapsed.outputs.exit-code }}
+          C_REGRESSIONS: ${{ steps.collapsed.outputs.regressions }}
+        run: |
+          set -x
+          test "$H_VERDICT" = ok
+          test "$H_CODE" = 0
+          test "$C_OUTCOME" = failure
+          test "$C_CODE" = 1
+          [[ ",$C_REGRESSIONS," == *,collapse,* ]]
 
   build:
     # the wheel and sdist that release.yml would publish
@@ -84,6 +136,6 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install zizmor
-      - run: zizmor --format=github .github/workflows
+      - run: zizmor --format=github .github/workflows action.yml
         env:
           GH_TOKEN: ${{ github.token }}

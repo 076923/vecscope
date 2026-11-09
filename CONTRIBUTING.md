@@ -79,20 +79,18 @@ the version before tagging.
 2. Move the entries under `Unreleased` in `CHANGELOG.md` into a new `## [x.y.z] - YYYY-MM-DD`
    section.
 3. Commit and push to `main`, and wait for CI to pass.
-4. Tag and push the tag. The workflow builds, publishes to PyPI, and finishes in about a minute:
+4. Tag and push the tag. The workflow builds and publishes to PyPI, then creates the GitHub
+   release from the changelog section with the built files attached, and moves the major tag
+   (`v0`) that `uses: 076923/vecscope@v0` reads:
 
    ```bash
    git tag -a vx.y.z -m "vx.y.z"
    git push origin vx.y.z
    ```
 
-5. Create the GitHub release from the changelog section, attaching the built files:
-
-   ```bash
-   python -m build
-   gh release create vx.y.z dist/* --title "vx.y.z" --notes-file <notes.md>
-   ```
-
+5. On the first release with `action.yml`, edit the GitHub release and tick "Publish this
+   Action to the GitHub Marketplace" (needs two-factor authentication). Check on the next
+   release that the Marketplace listing shows the new version.
 6. Check `pip install vecscope==x.y.z` in a clean environment.
 7. Publish the new version to the MCP Registry once PyPI has it: `mcp-publisher login github`,
    then `mcp-publisher publish` from the repository root.

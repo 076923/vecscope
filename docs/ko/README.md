@@ -798,6 +798,41 @@ vecscope audit embeddings.npy --baseline baseline.json --tolerances tolerances.j
 [임곗값을 도메인에 맞추기](#임곗값을-도메인에-맞추기)는 병합을 차단하기 전에 자신의 데이터로
 그 관계를 재는 방법을 설명합니다.
 
+### GitHub Action
+
+이 저장소는 GitHub Action으로도 쓸 수 있습니다. 워크플로가 지정한 태그의 vecscope를 설치하고,
+`vecscope audit --json`을 실행해 진단 결과 표를 작업 요약(job summary)에 쓰며, CLI의 종료 코드로
+작업을 실패시킵니다.
+
+```yaml
+- uses: 076923/vecscope@v0          # 또는 릴리스 고정: @v0.13.0
+  with:
+    path: embeddings.npy
+    baseline: baseline.json         # 커밋해 둔 --json 출력, 선택
+    tolerances: tolerances.json     # 선택
+    sample: "0"                     # 기준선과 비교할 때는 전체 행을 감사
+    require-comparable: "true"
+```
+
+| 입력 | 기본값 | CLI 옵션 |
+|---|---|---|
+| `path` | 필수 | 감사할 파일, 인덱스, 저장소 URI |
+| `baseline`, `tolerances`, `thresholds`, `queries` | 비어 있음 | `--baseline`, `--tolerances`, `--thresholds`, `--queries` |
+| `fail-on` | `fail` | `--fail-on` |
+| `k`, `sample` | `10`, `100000` | `-k`, `--sample` |
+| `require-comparable` | `false` | `--require-comparable` |
+| `args` | 비어 있음 | 그 밖의 옵션, 공백으로 구분 |
+| `output` | `vecscope-evidence.json` | 진단 JSON을 쓸 경로 |
+| `extras` | 비어 있음 | 함께 설치할 extras, 예: faiss 파일은 `index`, Qdrant는 `qdrant` |
+| `python-version` | `3.13` | 비우면 러너에 이미 있는 Python을 씁니다 |
+
+출력은 `verdict`(`ok`, `warn`, `fail`, 진단 JSON이 없으면 `error`), `exit-code`,
+`regressions`(쉼표로 구분한 항목 이름), `evidence`(JSON 경로)입니다. `evidence`는 아티팩트로
+올려 보관하거나, 검토를 거쳐 다음 기준선으로 커밋하십시오.
+
+`@v0`은 0.x 릴리스마다 새 버전으로 옮겨지고, 0.x의 마이너 릴리스는 진단 항목이나 임곗값을 바꿀 수
+있습니다. 결과가 안정적이어야 하는 게이트에서는 전체 버전(`@v0.13.0`)으로 고정하십시오.
+
 ## CLI 옵션
 
 ```bash

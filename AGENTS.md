@@ -19,14 +19,16 @@ These rules apply to any agent or person changing this repository.
 - `src/vecscope/evidence.py`: thresholds, `Finding`/`Evidence` models, the `audit` entry point
 - `src/vecscope/sweep.py`: HNSW/IVF parameter sweep on top of faiss (optional extra)
 - `src/vecscope/cli.py`, `src/vecscope/mcp_server.py`: thin adapters over `audit` and `sweep`
+- `action.yml`, `action/report.py`: the GitHub Action, a composite over `vecscope audit` that
+  installs the package from the tag it runs at
 - `.agents/skills/vecscope/SKILL.md`: what an agent should do with each verdict
 
 ## Checks before a change is done
 
 ```bash
 pytest -q
-ruff check src tests examples
-ruff format --check src tests examples
+ruff check src tests examples action
+ruff format --check src tests examples action
 zensical build --strict   # when a document changed; pip install --group docs
 ```
 

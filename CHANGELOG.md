@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- GitHub Action (`action.yml`): `uses: 076923/vecscope@v0` installs vecscope from the tag it
+  runs at, runs `vecscope audit --json`, writes the findings table and the gate to the job
+  summary, sets the `verdict`, `exit-code`, `regressions` and `evidence` outputs and fails the
+  job with the CLI's exit code. CI runs it on Ubuntu and Windows against a healthy and a
+  collapsed example.
+- The release workflow creates the GitHub Release with the changelog section as notes and moves
+  the major tag (`v0`) to the release, after the PyPI upload; the built files are attached to the
+  release as before.
+
+### Changed
+
+- The release workflow runs only for version tags (`v*.*.*`), so moving `v0` never starts it.
+
 ## [0.12.0] - 2026-11-06
 
 ### Added

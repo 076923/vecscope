@@ -31,6 +31,9 @@ vecscope calibrate fit_*.json --min-quality 0.45 --holdout hold_*.json --out th.
 
 In CI:
 
+- On GitHub, `uses: 076923/vecscope@v0.13.0` with `path`, `baseline` and `tolerances` runs
+  the same gate; read its `verdict` and `regressions` outputs or the evidence JSON it
+  writes, not the job log.
 - Commit a `--json` run as the baseline and run `vecscope audit <embeddings> --baseline
   baseline.json` on every rebuild; it exits 1 when a verdict got worse or when `--fail-on`
   (default `fail`) trips on its own.
