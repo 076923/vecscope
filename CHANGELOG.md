@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The README keeps the overview, quick start, findings table, a short MCP and CI setup and the
+  FAQ (about 320 lines instead of 1,320). The rest moved unchanged to documentation pages, each
+  with its Korean translation: `docs/usage.md` (queries and clusters, index sweep, compare,
+  vector stores, incremental audits, library, CLI options, input formats), `docs/mcp.md`
+  (MCP setup per client including VS Code, tools, what the server may read, tested clients),
+  `docs/ci.md` (baselines, tolerances, the gate, the GitHub Action), `docs/quality.md` (the fix
+  order, real embeddings, whether the findings predict retrieval quality, calibration) and
+  `docs/performance.md` (performance, sampled audits, how vecscope works).
+- The tested clients now include GitHub Copilot in VS Code.
+
 ## [0.13.0] - 2026-11-10
 
 ### Added

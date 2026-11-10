@@ -24,7 +24,8 @@ does not cover; the [limitations](#limitations) collect them.
 - Corpora:
   - six synthetic shapes (`examples/bench_common.py`: clustered, isotropic, anisotropic,
     duplicates, lowrank, zipf)
-  - the eight public pre-computed embedding sets of the README table
+  - the eight public pre-computed embedding sets of the
+    [Real embeddings](quality.md#real-embeddings) table
   - nine labeled datasets encoded with 19 models: BEIR SciFact, NFCorpus, ArguAna, SCIDOCS
     and FiQA-2018, and four Korean sets (ko-strategyqa, and from MTEB XPQA kor-kor, AutoRAG
     and MultiLongDoc ko)
@@ -38,7 +39,7 @@ does not cover; the [limitations](#limitations) collect them.
 | claim | result |
 |---|---|
 | exact k-NN (`exact_knn`, `query_knn`, faiss flat CPU and GPU) | 0 rank errors against float64 on six shapes at 100k x 768 and on 76 (model, dataset) pairs of real embeddings; float32 distance error at most 5.9e-7 |
-| README "Real embeddings" table | all 88 values and verdicts reproduced on the first 40k rows of each set |
+| [Real embeddings](quality.md#real-embeddings) table | all 88 values and verdicts reproduced on the first 40k rows of each set |
 | incremental audit (`--knn-cache`) | on 100k x 768 with 5k or 20k appended rows, verdicts identical to a full audit and values within 7e-5 relative; 15 s and 47 s against 94 s and 123 s for the full audit. With 1,000 rows re-embedded in place, 10,625 rows recomputed, same verdicts, values within 4e-5, 19 s against 95 s; with 10,000 the update took 83 s against 89 s, which is why the cache rebuilds once more than half the rows would be recomputed; re-run with that rule, 10,000 changed rows rebuilt it in 87 s against 87 s |
 | determinism | two runs on the same input produce identical JSON (fixed seeds, exact neighbors); the golden files under `tests/golden/` pin the example matrices |
 
@@ -215,8 +216,8 @@ What this supports:
   queries.
 - Search latency: on these corpora (5,000 documents or fewer) one batch of queries takes
   0.002 to 0.04 ms per query at every ef_search, below the measurement noise, so the latency
-  side of the ef_search trade-off is measured by `vecscope sweep` on 100k rows (README
-  "Index sweep"), not here.
+  side of the ef_search trade-off is measured by `vecscope sweep` on 100k rows
+  ([Index sweep](usage.md#index-sweep)), not here.
 - Centering a healthy model does not help: it removed `anisotropy` and cost up to 0.034
   nDCG@10. The plan only proposes it when `anisotropy` is not `ok`, and its re-measure line
   says to check retrieval on labeled queries. A plan step is a hypothesis to test on the
@@ -256,8 +257,8 @@ the distribution findings. Exact copies are counted over every row instead.
 | sweep | recommendations identical across three seeds; IVF recall at a fixed nprobe can rise or fall with corpus size depending on how the data's clusters line up with nlist |
 
 Not covered: search latency on corpora under 5,000 rows is below the measurement noise; the
-latency side of the trade-off is measured by `vecscope sweep` on 100k rows (README "Index
-sweep"). Index types other than HNSW and IVF were not swept.
+latency side of the trade-off is measured by `vecscope sweep` on 100k rows
+([Index sweep](usage.md#index-sweep)). Index types other than HNSW and IVF were not swept.
 
 ## 5. MCP security and operations
 

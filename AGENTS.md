@@ -32,6 +32,9 @@ ruff format --check src tests examples action
 zensical build --strict   # when a document changed; pip install --group docs
 ```
 
-Update `README.md`, `docs/ko/README.md`, the skill file and `CHANGELOG.md` when the
-CLI, MCP tool, findings or verdicts change. Keep the English and Korean READMEs in sync,
-and every `docs/*.md` with its `docs/ko/*.md` translation.
+Update the README, the documentation page that covers the change (`docs/usage.md`,
+`docs/mcp.md`, `docs/ci.md`, `docs/quality.md`, `docs/performance.md`), the skill file and
+`CHANGELOG.md` when the CLI, MCP tool, findings or verdicts change. Keep the English and
+Korean READMEs in sync, and every `docs/*.md` with its `docs/ko/*.md` translation. Do not
+name a documentation page `agents.md`: on a case-insensitive file system agents load it as
+`AGENTS.md`.

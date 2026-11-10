@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         "path",
         help=".npy/.npz/.parquet/.jsonl/.csv with one vector per row, a faiss "
         "index file, or a vector store URI (qdrant://, chroma://, "
-        "milvus://, weaviate://; see the README)",
+        "milvus://, weaviate://; see https://076923.github.io/vecscope/usage/)",
     )
     a.add_argument("-k", type=int, default=10, help="neighbors per item (default 10)")
     a.add_argument(

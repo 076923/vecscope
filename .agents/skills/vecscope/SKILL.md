@@ -46,8 +46,8 @@ In CI:
 - Add `--require-comparable` to a gate: it exits 2 when the baseline was made with different
   n, dim, k, sampling, thresholds or near-dup cutoff, instead of printing a diff that measures
   the settings rather than the corpus.
-- Pick tolerances from measured retrieval quality (README, "Calibrating thresholds to your
-  domain"), not from what makes the pipeline green.
+- Pick tolerances from measured retrieval quality ("Calibrating thresholds to your domain" in
+  https://076923.github.io/vecscope/quality/), not from what makes the pipeline green.
 - Two rules can fail a run and the `gate` block (JSON) or line (text) names which one did:
   the absolute thresholds (`--fail-on`) or the baseline (`verdict_regressions`,
   `value_regressions`).

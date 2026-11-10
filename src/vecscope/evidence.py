@@ -27,7 +27,7 @@ from vecscope.diagnostics import (
 from vecscope.incremental import fingerprint
 
 # Default verdict thresholds: (warn, fail). Calibrated on seven public embedding models
-# (see README "Real embeddings") and re-checked against 19 models x 3 labeled datasets
+# (see docs/quality.md "Real embeddings") and re-checked against 19 models x 3 labeled datasets
 # (docs/verification.md); they are a starting point for diagnosis, not a universal quality
 # bar. Override per call with ``audit(..., thresholds={key: (warn, fail)})``.
 THRESHOLDS = {

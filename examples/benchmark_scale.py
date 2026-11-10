@@ -1,4 +1,4 @@
-"""Audit time and peak memory against the number of rows, so the README performance table
+"""Audit time and peak memory against the number of rows, so the performance table in docs/performance.md
 can be re-measured on any machine and extended to the sizes a corpus actually has.
 
 Each row is audited twice: every row (``--sample 0``) and the default sample, so the cost
