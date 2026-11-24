@@ -480,6 +480,7 @@
    "first_change": "read norms.details.zero_norm_ratio, collapse.details.largest_near_duplicate_groups and outliers.details.sample_ids; drop zero and constant rows and deduplicate before changing anything else",
    "re_measure": "zero_norm_ratio 0, near_duplicate_ratio and outlier_ratio below warn_at; retrieval duplicate_result_share falls; query_gap, if listed here, read again; pass --qrels to measure retrieval quality as well",
    "why_this_order": "broken rows distort every other statistic, so later steps would be measured on noise",
+   "adopt_when": "apply first_change to a copy of the vectors (and of the queries and the index), never to the original; re-audit the copy with the original as baseline and the same qrels; adopt only when baseline_diff.change_decision.decision is 'adopt'. 'reject' means keep the original; 'needs_review' (no labels on both runs) means a person decides. After 3 changes for one step that were not adopted, stop and report instead of trying another",
    "only_inconclusive": false
   }
  ],

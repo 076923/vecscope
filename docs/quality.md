@@ -114,6 +114,31 @@ Each finding in a step carries `placed_because`, one of:
   coordinate moves this finding too". This is a grouping by co-occurrence, so check it with
   the step's re-measure numbers.
 
+### Adopting a change
+
+A step's change is a hypothesis, and a fix the corpus did not need can cost retrieval. Every
+step carries the same `adopt_when` rule, and every baseline diff a `change_decision` that
+applies it without looking at what the change meant to fix:
+
+- Transform a copy of the vectors, the queries and the index; keep the original.
+- Re-audit the copy with the original as `--baseline` (MCP: `baseline`) and the same qrels.
+- `change_decision.decision` is then one of:
+    - `adopt`: labeled retrieval did not drop and a finding or retrieval improved. Findings
+      that got worse anyway are listed in `watch` for the next audit.
+    - `reject`: nDCG or recall dropped, exact or ranked (or a `--retrieval-tolerance` was
+      exceeded or could not be checked), or nothing measurable improved. Keep the original.
+    - `needs_review`: the two runs have no comparable labels (no qrels, other qrels or k).
+      A finding that improved does not show that search did, so nothing is adopted
+      automatically; a person decides.
+- The MCP server counts the changes per baseline and first plan step that were not adopted
+  (`baseline_diff.attempts`). At 3 the summary says `STOP`: the agent reports instead of
+  trying another transform.
+
+On a synthetic corpus where every finding is ok, centering (a fix no finding asks for) lowers
+nDCG@10 from 0.939 to 0.932 and is rejected; re-normalizing vectors that are already unit
+length changes nothing and is rejected for no gain. Both cases are in
+`tests/test_safe_remediation.py`.
+
 What the fixes did to retrieval on real embeddings is in the
 [verification](https://github.com/076923/vecscope/blob/main/docs/verification.md#interventions).
 

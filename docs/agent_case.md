@@ -10,6 +10,13 @@ summary.
 - [Case 1](#case-1-two-ingestion-faults): two ingestion faults in the corpus
 - [Case 2](#case-2-an-ivf-index-searched-with-too-few-probes): an IVF index searched with
   too few probes
+- [Case 3](#case-3-a-healthy-corpus-and-a-request-to-clean-it-up): a healthy corpus and a
+  request to center or whiten it
+- [Case 4](#case-4-the-wrong-cause-in-the-prompt): the prompt blames the corpus, the queries
+  come from another model
+
+Cases 3 and 4 test the opposite of cases 1 and 2: whether the agent leaves the vectors alone
+when a change would make search worse, including when the user asks for that change.
 
 Both cases are built by [`examples/agent_case.py`](https://github.com/076923/vecscope/blob/main/examples/agent_case.py) from SciFact
 (BEIR): 5,183 abstracts and 300 test queries with 339 relevance judgments, embedded with
@@ -179,6 +186,107 @@ Both runs spent a step re-measuring by hand because the sweep could not be told 
 production nlist. `vecscope sweep --nlist` and `sweep_index(nlist=...)` now sweep nprobe on
 the lists the production index has.
 
+## Case 3: a healthy corpus and a request to clean it up
+
+### The data
+
+The clean SciFact embeddings with no fault and no production ranking (`--case healthy`).
+Every finding is `ok` and exact search scores nDCG@10 0.713. The prompt asks for a fix that
+nothing calls for:
+
+```text
+Our SciFact search quality feels mediocre. I read that raw embeddings are often
+anisotropic and that centering or whitening them improves retrieval. The corpus embeddings are
+corpus.npy, query embeddings queries.npy, relevance labels qrels.tsv (query row, corpus row,
+grade; rows are positions in those files). Use the vecscope MCP tools to clean up the
+embeddings so search gets better: write the improved vectors to corpus_fixed.npy and
+queries_fixed.npy, and show with a re-audit that it worked.
+```
+
+It was run like case 1, twice, on fresh copies of the data.
+
+### What the agents did (two runs, 9 and 8 turns, 58 s and 42 s)
+
+1. **Audited** the original: `verdict=ok ...; all findings ok; retrieval nDCG@10=0.713
+   exact`.
+2. **Wrote the two transforms to trial files**, not to `corpus_fixed.npy`: centering (the
+   corpus mean subtracted from corpus and queries, re-normalized) and PCA whitening.
+3. **Re-audited each trial** with the first audit as `baseline` and the same qrels. Both
+   responses ended in a rejection, for example:
+
+   ```text
+   vs baseline: verdict ok -> ok, regressions: none, improved: none, exact nDCG 0.713 -> 0.690,
+   RETRIEVAL WORSE beyond tolerance: exact.ndcg_at_k; change decision: REJECT (retrieval
+   dropped: exact.ndcg_at_k 0.7127 -> 0.6902; keep the original)
+   ```
+
+4. **Wrote neither output file** and reported why, with the table below, in both runs.
+
+| | nDCG@10 | recall@10 | MRR@10 | `change_decision` |
+|---|---|---|---|---|
+| original | 0.713 | 0.836 | 0.682 | |
+| centered | 0.690 | 0.815 | 0.661 | reject |
+| whitened | 0.637 | 0.745 to 0.750 | 0.608 to 0.610 | reject; `distance_concentration` turns `warn` |
+
+Both transforms did what they are meant to do to the geometry (the random-pair cosine fell to
+about 0 and hubness from 1.60 to 1.27 and 0.58) and still cost retrieval. This is the result
+the [verification](verification.md#interventions) found for centering healthy models (up to
+−0.034 nDCG@10), here decided by the tool instead of by the agent's reading of two numbers.
+
+## Case 4: the wrong cause in the prompt
+
+### The data
+
+The corpus is the clean bge-small one; the queries were embedded by another 384-dim model,
+all-MiniLM-L6-v2, as a query service on the wrong model would do (`--case misdirected`). The
+prompt names a cause that is not the fault:
+
+```text
+Users say our SciFact search got much worse this week. We think the corpus
+embeddings are anisotropic and need to be centered. The corpus embeddings are corpus.npy, query
+embeddings queries.npy (from the query service), relevance labels qrels.tsv (query row, corpus
+row, grade; rows are positions in those files). Use the vecscope MCP tools to fix it: center
+the corpus into corpus_fixed.npy (and the queries into queries_fixed.npy if they need the same
+transform), and show with a re-audit that search is better.
+```
+
+### What the agents did (two runs, 6 turns each, 32 s and 31 s)
+
+1. **Audited**:
+
+   ```text
+   verdict=fail n=5183 dim=384 k=10 scope=full; ood_queries=1 fail; query_gap=5.51 fail;
+   retrieval nDCG@10=0.221 exact; plan step 1 of 1: query_pipeline (query_gap, ood_queries):
+   embed a few queries with the corpus model and compare query_gap; ...
+   ```
+
+   Both agents reported that `anisotropy` was `ok` (0.628) and that every failing finding was
+   on the query side.
+2. **Centered corpus and queries**, as the prompt asked, into the `_fixed` files, and
+   re-audited them against the first audit with `retrieval_tolerances={"ndcg_at_k": 0.01}`,
+   which neither prompt nor skill had asked for.
+3. **Got a rejection** (nDCG@10 0.221 to 0.133) and told the user not to deploy the files;
+   both named the query service's model, version or prefix as the next thing to check.
+
+| | before | centered |
+|---|---|---|
+| nDCG@10 / recall@10 / MRR@10 | 0.221 / 0.327 / 0.190 | 0.133 / 0.220 / 0.107 |
+| `query_gap` | 5.51 fail | 1.94 ok |
+| `query_hubness` | 3.80 ok | 8.49 warn |
+| `change_decision` | | reject |
+
+`query_gap` reads `ok` after centering, and the diff lists it under `improvements`, while
+retrieval fell. Both agents saw why: the median query distance barely moved (0.818 to 0.797)
+while centering spread the corpus apart (median neighbor distance 0.148 to 0.410), and
+`query_gap` divides one by the other. A finding computed against the corpus geometry is not
+comparable across a transform of that corpus; the decision rests on the labeled retrieval
+numbers for that reason.
+
+Computed outside the runs: centering the corpus alone, leaving the queries as they are, raises
+nDCG@10 to 0.232 and is adopted, with `query_gap` still listed in `still_not_ok`. That is why an
+`adopt` names what is still not ok: a change that misses the fault can still nudge retrieval
+up.
+
 ## What these show and what they do not
 
 - The tools, the plan and the `baseline` re-audit were enough for an agent to go from a
@@ -189,7 +297,11 @@ the lists the production index has.
   confirmed its rebuilt index reproduced production before tuning it.
 - In case 2 the clean audit and the retrieval block together placed the loss in the index:
   exact search on the same embeddings already scored 0.713.
-- This is one model on two tasks with two runs each, on problems vecscope's findings are
+- In cases 3 and 4 the change was asked for and would have made search worse. The agents tried
+  it on copies, the re-audit rejected it on the labels, and the originals stayed in place;
+  in case 4 they also put the fault where the findings did, on the queries, against the
+  prompt.
+- This is one model on four tasks with two runs each, on problems vecscope's findings are
   designed to catch. It does not show that every agent follows the plan, or how the
   findings do on faults they do not measure (a missing query prefix, for example; see
   [verification](verification.md)).

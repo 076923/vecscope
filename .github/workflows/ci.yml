@@ -76,6 +76,9 @@ jobs:
           python -m pip install numpy
           cd examples
           python -c "import numpy as np; from make_examples import make_examples; [np.save(f'{k}.npy', v) for k, v in make_examples().items()]"
+          # labeled queries next to known rows, and the same rows in another order (a lost id
+          # mapping: no finding changes, labeled retrieval collapses)
+          python -c "import json, numpy as np; x = np.load('healthy.npy'); r = np.random.default_rng(0); t = r.choice(len(x), 50, replace=False); np.save('queries.npy', x[t] + 0.05 * r.standard_normal((50, x.shape[1])).astype(x.dtype)); json.dump({str(i): {str(int(d)): 1} for i, d in enumerate(t)}, open('qrels.json', 'w')); np.save('moved.npy', x[r.permutation(len(x))])"
         shell: bash
       - name: Healthy matrix passes and writes the baseline
         id: healthy
@@ -93,6 +96,27 @@ jobs:
           baseline: out/baseline.json
           sample: "0"
           output: out/collapsed.json
+      - name: Labeled baseline
+        id: labeled
+        uses: ./ # zizmor: ignore[self-repository] the action under test is this checkout
+        with:
+          path: examples/healthy.npy
+          queries: examples/queries.npy
+          qrels: examples/qrels.json
+          sample: "0"
+          output: out/labeled.json
+      - name: Lost id mapping fails on retrieval only
+        id: moved
+        continue-on-error: true
+        uses: ./ # zizmor: ignore[self-repository] the action under test is this checkout
+        with:
+          path: examples/moved.npy
+          queries: examples/queries.npy
+          qrels: examples/qrels.json
+          baseline: out/labeled.json
+          retrieval-tolerance: ndcg_at_k=0.01, recall_at_k=0.02
+          sample: "0"
+          output: out/moved.json
       - name: Check the outputs
         shell: bash
         env:
@@ -101,6 +125,10 @@ jobs:
           C_OUTCOME: ${{ steps.collapsed.outcome }}
           C_CODE: ${{ steps.collapsed.outputs.exit-code }}
           C_REGRESSIONS: ${{ steps.collapsed.outputs.regressions }}
+          L_CODE: ${{ steps.labeled.outputs.exit-code }}
+          M_CODE: ${{ steps.moved.outputs.exit-code }}
+          M_REGRESSIONS: ${{ steps.moved.outputs.regressions }}
+          M_RETRIEVAL: ${{ steps.moved.outputs.retrieval-regressions }}
         run: |
           set -x
           test "$H_VERDICT" = ok
@@ -108,6 +136,10 @@ jobs:
           test "$C_OUTCOME" = failure
           test "$C_CODE" = 1
           [[ ",$C_REGRESSIONS," == *,collapse,* ]]
+          test "$L_CODE" = 0
+          test "$M_CODE" = 1
+          test -z "$M_REGRESSIONS"
+          test "$M_RETRIEVAL" = "exact.ndcg_at_k,exact.recall_at_k"
 
   build:
     # the wheel and sdist that release.yml would publish

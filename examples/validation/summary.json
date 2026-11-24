@@ -1,0 +1,1028 @@
+{
+ "pipelines": 266,
+ "datasets": 19,
+ "models": 14,
+ "good": 114,
+ "bad": 67,
+ "good_gate_fail": 26,
+ "good_ok": 26,
+ "bad_gate_fail": 54,
+ "bad_model_language": 54,
+ "qh_not_judged": 49,
+ "explained": 14,
+ "per_dataset": [
+  {
+   "name": "codesearchnet-go",
+   "language": "code",
+   "domain": "code",
+   "n_docs": 1000,
+   "n_queries": 1000,
+   "median_doc_chars": 326,
+   "text_duplicates": 0.0,
+   "models": 14,
+   "best_ndcg": 0.963,
+   "best_model": "gte-multilingual-base",
+   "good": 11,
+   "bad": 1,
+   "good_flagged": 3,
+   "bad_unflagged": 0,
+   "good_gate_fail": 0
+  },
+  {
+   "name": "codesearchnet-java",
+   "language": "code",
+   "domain": "code",
+   "n_docs": 1000,
+   "n_queries": 1000,
+   "median_doc_chars": 317,
+   "text_duplicates": 0.0,
+   "models": 14,
+   "best_ndcg": 0.92,
+   "best_model": "Qwen3-Embedding-0.6B",
+   "good": 4,
+   "bad": 2,
+   "good_flagged": 4,
+   "bad_unflagged": 0,
+   "good_gate_fail": 3
+  },
+  {
+   "name": "codesearchnet-python",
+   "language": "code",
+   "domain": "code",
+   "n_docs": 1000,
+   "n_queries": 1000,
+   "median_doc_chars": 546,
+   "text_duplicates": 0.0,
+   "models": 14,
+   "best_ndcg": 0.931,
+   "best_model": "gte-multilingual-base",
+   "good": 10,
+   "bad": 1,
+   "good_flagged": 9,
+   "bad_unflagged": 0,
+   "good_gate_fail": 0
+  },
+  {
+   "name": "cosqa",
+   "language": "code",
+   "domain": "code",
+   "n_docs": 20604,
+   "n_queries": 500,
+   "median_doc_chars": 236,
+   "text_duplicates": 0.695835760046593,
+   "models": 14,
+   "best_ndcg": 0.374,
+   "best_model": "Qwen3-Embedding-0.6B",
+   "good": 2,
+   "bad": 2,
+   "good_flagged": 2,
+   "bad_unflagged": 0,
+   "good_gate_fail": 0
+  },
+  {
+   "name": "esci-es",
+   "language": "es",
+   "domain": "product titles",
+   "n_docs": 13459,
+   "n_queries": 500,
+   "median_doc_chars": 122,
+   "text_duplicates": 0.008024370309829831,
+   "models": 14,
+   "best_ndcg": 0.59,
+   "best_model": "Qwen3-Embedding-0.6B",
+   "good": 7,
+   "bad": 2,
+   "good_flagged": 7,
+   "bad_unflagged": 0,
+   "good_gate_fail": 2
+  },
+  {
+   "name": "esci-jp",
+   "language": "ja",
+   "domain": "product titles",
+   "n_docs": 13728,
+   "n_queries": 500,
+   "median_doc_chars": 51,
+   "text_duplicates": 0.008231351981351942,
+   "models": 14,
+   "best_ndcg": 0.606,
+   "best_model": "Qwen3-Embedding-0.6B",
+   "good": 6,
+   "bad": 8,
+   "good_flagged": 6,
+   "bad_unflagged": 0,
+   "good_gate_fail": 3
+  },
+  {
+   "name": "esci-us",
+   "language": "en",
+   "domain": "product titles",
+   "n_docs": 10284,
+   "n_queries": 500,
+   "median_doc_chars": 102,
+   "text_duplicates": 0.004278490859587758,
+   "models": 14,
+   "best_ndcg": 0.628,
+   "best_model": "gte-base",
+   "good": 10,
+   "bad": 0,
+   "good_flagged": 7,
+   "bad_unflagged": 0,
+   "good_gate_fail": 2
+  },
+  {
+   "name": "legal-summarization",
+   "language": "en",
+   "domain": "legal",
+   "n_docs": 438,
+   "n_queries": 284,
+   "median_doc_chars": 340,
+   "text_duplicates": 0.0,
+   "models": 14,
+   "best_ndcg": 0.637,
+   "best_model": "Qwen3-Embedding-0.6B",
+   "good": 12,
+   "bad": 0,
+   "good_flagged": 2,
+   "bad_unflagged": 0,
+   "good_gate_fail": 0
+  },
+  {
+   "name": "miracl-de",
+   "language": "de",
+   "domain": "wikipedia",
+   "n_docs": 71277,
+   "n_queries": 305,
+   "median_doc_chars": 427,
+   "text_duplicates": 0.004784151970481321,
+   "models": 14,
+   "best_ndcg": 0.577,
+   "best_model": "bge-m3",
+   "good": 5,
+   "bad": 7,
+   "good_flagged": 4,
+   "bad_unflagged": 0,
+   "good_gate_fail": 0
+  },
+  {
+   "name": "miracl-fr",
+   "language": "fr",
+   "domain": "wikipedia",
+   "n_docs": 75357,
+   "n_queries": 343,
+   "median_doc_chars": 373,
+   "text_duplicates": 0.007338402537256039,
+   "models": 14,
+   "best_ndcg": 0.594,
+   "best_model": "bge-m3",
+   "good": 5,
+   "bad": 8,
+   "good_flagged": 5,
+   "bad_unflagged": 1,
+   "good_gate_fail": 0
+  },
+  {
+   "name": "miracl-hi",
+   "language": "hi",
+   "domain": "wikipedia",
+   "n_docs": 63066,
+   "n_queries": 350,
+   "median_doc_chars": 415,
+   "text_duplicates": 0.005010623790949187,
+   "models": 14,
+   "best_ndcg": 0.626,
+   "best_model": "multilingual-e5-large",
+   "good": 4,
+   "bad": 8,
+   "good_flagged": 1,
+   "bad_unflagged": 0,
+   "good_gate_fail": 0
+  },
+  {
+   "name": "trec-covid",
+   "language": "en",
+   "domain": "biomedical",
+   "n_docs": 171332,
+   "n_queries": 50,
+   "median_doc_chars": 1174,
+   "text_duplicates": 0.005579809959610604,
+   "models": 14,
+   "best_ndcg": 0.884,
+   "best_model": "Qwen3-Embedding-0.6B",
+   "good": 1,
+   "bad": 2,
+   "good_flagged": 1,
+   "bad_unflagged": 0,
+   "good_gate_fail": 1
+  },
+  {
+   "name": "xpqa-ar",
+   "language": "ar",
+   "domain": "product answers",
+   "n_docs": 1495,
+   "n_queries": 750,
+   "median_doc_chars": 51,
+   "text_duplicates": 0.0013377926421405117,
+   "models": 14,
+   "best_ndcg": 0.468,
+   "best_model": "KURE-v1",
+   "good": 4,
+   "bad": 8,
+   "good_flagged": 4,
+   "bad_unflagged": 0,
+   "good_gate_fail": 1
+  },
+  {
+   "name": "xpqa-de",
+   "language": "de",
+   "domain": "product answers",
+   "n_docs": 1248,
+   "n_queries": 766,
+   "median_doc_chars": 63,
+   "text_duplicates": 0.0,
+   "models": 14,
+   "best_ndcg": 0.78,
+   "best_model": "KURE-v1",
+   "good": 5,
+   "bad": 1,
+   "good_flagged": 5,
+   "bad_unflagged": 0,
+   "good_gate_fail": 2
+  },
+  {
+   "name": "xpqa-es",
+   "language": "es",
+   "domain": "product answers",
+   "n_docs": 1941,
+   "n_queries": 793,
+   "median_doc_chars": 67,
+   "text_duplicates": 0.0,
+   "models": 14,
+   "best_ndcg": 0.627,
+   "best_model": "KURE-v1",
+   "good": 6,
+   "bad": 1,
+   "good_flagged": 6,
+   "bad_unflagged": 0,
+   "good_gate_fail": 2
+  },
+  {
+   "name": "xpqa-fr",
+   "language": "fr",
+   "domain": "product answers",
+   "n_docs": 1548,
+   "n_queries": 749,
+   "median_doc_chars": 69,
+   "text_duplicates": 0.0006459948320413078,
+   "models": 14,
+   "best_ndcg": 0.729,
+   "best_model": "KURE-v1",
+   "good": 4,
+   "bad": 1,
+   "good_flagged": 4,
+   "bad_unflagged": 0,
+   "good_gate_fail": 1
+  },
+  {
+   "name": "xpqa-hi",
+   "language": "hi",
+   "domain": "product answers",
+   "n_docs": 1251,
+   "n_queries": 925,
+   "median_doc_chars": 39,
+   "text_duplicates": 0.008792965627497984,
+   "models": 14,
+   "best_ndcg": 0.77,
+   "best_model": "KURE-v1",
+   "good": 6,
+   "bad": 7,
+   "good_flagged": 6,
+   "bad_unflagged": 0,
+   "good_gate_fail": 2
+  },
+  {
+   "name": "xpqa-ja",
+   "language": "ja",
+   "domain": "product answers",
+   "n_docs": 1601,
+   "n_queries": 825,
+   "median_doc_chars": 37,
+   "text_duplicates": 0.0012492192379762734,
+   "models": 14,
+   "best_ndcg": 0.741,
+   "best_model": "multilingual-e5-large",
+   "good": 6,
+   "bad": 1,
+   "good_flagged": 6,
+   "bad_unflagged": 0,
+   "good_gate_fail": 2
+  },
+  {
+   "name": "xpqa-zh",
+   "language": "zh",
+   "domain": "product answers",
+   "n_docs": 1705,
+   "n_queries": 824,
+   "median_doc_chars": 19,
+   "text_duplicates": 0.0,
+   "models": 14,
+   "best_ndcg": 0.671,
+   "best_model": "multilingual-e5-base",
+   "good": 6,
+   "bad": 7,
+   "good_flagged": 6,
+   "bad_unflagged": 0,
+   "good_gate_fail": 5
+  }
+ ],
+ "false_positives": {
+  "all": {
+   "all": {
+    "good": 114,
+    "any": 88,
+    "gate_fail": 26,
+    "per_finding": {
+     "anisotropy": 2,
+     "antihubs": 14,
+     "collapse": 48,
+     "connectivity": 2,
+     "distance_concentration": 0,
+     "effective_rank": 54,
+     "hubness": 36,
+     "metric_mismatch": 1,
+     "norms": 0,
+     "outliers": 5,
+     "query_gap": 11,
+     "query_hubness": 9,
+     "rogue_dimensions": 0
+    }
+   }
+  },
+  "language": {
+   "English": {
+    "good": 23,
+    "any": 10,
+    "gate_fail": 3,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 1,
+     "collapse": 8,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 1,
+     "hubness": 4,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 0,
+     "query_gap": 1,
+     "query_hubness": 3,
+     "rogue_dimensions": 0
+    }
+   },
+   "code": {
+    "good": 27,
+    "any": 18,
+    "gate_fail": 3,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 0,
+     "collapse": 3,
+     "connectivity": 2,
+     "distance_concentration": 0,
+     "effective_rank": 16,
+     "hubness": 0,
+     "metric_mismatch": 1,
+     "norms": 0,
+     "outliers": 4,
+     "query_gap": 0,
+     "query_hubness": 0,
+     "rogue_dimensions": 0
+    }
+   },
+   "other languages": {
+    "good": 64,
+    "any": 60,
+    "gate_fail": 20,
+    "per_finding": {
+     "anisotropy": 2,
+     "antihubs": 13,
+     "collapse": 37,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 37,
+     "hubness": 32,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 1,
+     "query_gap": 10,
+     "query_hubness": 6,
+     "rogue_dimensions": 0
+    }
+   }
+  },
+  "document length": {
+   "medium": {
+    "good": 54,
+    "any": 31,
+    "gate_fail": 4,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 1,
+     "collapse": 4,
+     "connectivity": 2,
+     "distance_concentration": 0,
+     "effective_rank": 17,
+     "hubness": 13,
+     "metric_mismatch": 1,
+     "norms": 0,
+     "outliers": 4,
+     "query_gap": 0,
+     "query_hubness": 0,
+     "rogue_dimensions": 0
+    }
+   },
+   "short (< 200 chars)": {
+    "good": 60,
+    "any": 57,
+    "gate_fail": 22,
+    "per_finding": {
+     "anisotropy": 2,
+     "antihubs": 13,
+     "collapse": 44,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 37,
+     "hubness": 23,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 1,
+     "query_gap": 11,
+     "query_hubness": 9,
+     "rogue_dimensions": 0
+    }
+   }
+  },
+  "corpus size": {
+   "5k to 50k": {
+    "good": 25,
+    "any": 22,
+    "gate_fail": 7,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 3,
+     "collapse": 22,
+     "connectivity": 2,
+     "distance_concentration": 0,
+     "effective_rank": 1,
+     "hubness": 3,
+     "metric_mismatch": 1,
+     "norms": 0,
+     "outliers": 0,
+     "query_gap": 2,
+     "query_hubness": 8,
+     "rogue_dimensions": 0
+    }
+   },
+   "< 5k docs": {
+    "good": 74,
+    "any": 55,
+    "gate_fail": 18,
+    "per_finding": {
+     "anisotropy": 2,
+     "antihubs": 10,
+     "collapse": 25,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 52,
+     "hubness": 22,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 5,
+     "query_gap": 9,
+     "query_hubness": 1,
+     "rogue_dimensions": 0
+    }
+   },
+   ">= 50k": {
+    "good": 15,
+    "any": 11,
+    "gate_fail": 1,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 1,
+     "collapse": 1,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 1,
+     "hubness": 11,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 0,
+     "query_gap": 0,
+     "query_hubness": 0,
+     "rogue_dimensions": 0
+    }
+   }
+  },
+  "domain": {
+   "biomedical": {
+    "good": 1,
+    "any": 1,
+    "gate_fail": 1,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 0,
+     "collapse": 1,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 1,
+     "hubness": 1,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 0,
+     "query_gap": 0,
+     "query_hubness": 0,
+     "rogue_dimensions": 0
+    }
+   },
+   "code": {
+    "good": 27,
+    "any": 18,
+    "gate_fail": 3,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 0,
+     "collapse": 3,
+     "connectivity": 2,
+     "distance_concentration": 0,
+     "effective_rank": 16,
+     "hubness": 0,
+     "metric_mismatch": 1,
+     "norms": 0,
+     "outliers": 4,
+     "query_gap": 0,
+     "query_hubness": 0,
+     "rogue_dimensions": 0
+    }
+   },
+   "legal": {
+    "good": 12,
+    "any": 2,
+    "gate_fail": 0,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 0,
+     "collapse": 0,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 0,
+     "hubness": 2,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 0,
+     "query_gap": 0,
+     "query_hubness": 0,
+     "rogue_dimensions": 0
+    }
+   },
+   "product answers": {
+    "good": 37,
+    "any": 37,
+    "gate_fail": 15,
+    "per_finding": {
+     "anisotropy": 2,
+     "antihubs": 10,
+     "collapse": 24,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 37,
+     "hubness": 20,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 1,
+     "query_gap": 9,
+     "query_hubness": 1,
+     "rogue_dimensions": 0
+    }
+   },
+   "product titles": {
+    "good": 23,
+    "any": 20,
+    "gate_fail": 7,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 3,
+     "collapse": 20,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 0,
+     "hubness": 3,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 0,
+     "query_gap": 2,
+     "query_hubness": 8,
+     "rogue_dimensions": 0
+    }
+   },
+   "wikipedia": {
+    "good": 14,
+    "any": 10,
+    "gate_fail": 0,
+    "per_finding": {
+     "anisotropy": 0,
+     "antihubs": 1,
+     "collapse": 0,
+     "connectivity": 0,
+     "distance_concentration": 0,
+     "effective_rank": 0,
+     "hubness": 10,
+     "metric_mismatch": 0,
+     "norms": 0,
+     "outliers": 0,
+     "query_gap": 0,
+     "query_hubness": 0,
+     "rogue_dimensions": 0
+    }
+   }
+  }
+ },
+ "misses": {
+  "all": {
+   "all": {
+    "bad": 67,
+    "unflagged": 1,
+    "hub_flagged": 61,
+    "median_flags": 5.0
+   }
+  },
+  "language": {
+   "English": {
+    "bad": 2,
+    "unflagged": 0,
+    "hub_flagged": 2,
+    "median_flags": 5.5
+   },
+   "code": {
+    "bad": 6,
+    "unflagged": 0,
+    "hub_flagged": 6,
+    "median_flags": 6.5
+   },
+   "other languages": {
+    "bad": 59,
+    "unflagged": 1,
+    "hub_flagged": 53,
+    "median_flags": 4.0
+   }
+  },
+  "document length": {
+   "medium": {
+    "bad": 31,
+    "unflagged": 1,
+    "hub_flagged": 30,
+    "median_flags": 4.0
+   },
+   "short (< 200 chars)": {
+    "bad": 36,
+    "unflagged": 0,
+    "hub_flagged": 31,
+    "median_flags": 5.0
+   }
+  },
+  "corpus size": {
+   "5k to 50k": {
+    "bad": 12,
+    "unflagged": 0,
+    "hub_flagged": 12,
+    "median_flags": 5.0
+   },
+   "< 5k docs": {
+    "bad": 30,
+    "unflagged": 0,
+    "hub_flagged": 25,
+    "median_flags": 6.0
+   },
+   ">= 50k": {
+    "bad": 25,
+    "unflagged": 1,
+    "hub_flagged": 24,
+    "median_flags": 3.0
+   }
+  },
+  "domain": {
+   "biomedical": {
+    "bad": 2,
+    "unflagged": 0,
+    "hub_flagged": 2,
+    "median_flags": 5.5
+   },
+   "code": {
+    "bad": 6,
+    "unflagged": 0,
+    "hub_flagged": 6,
+    "median_flags": 6.5
+   },
+   "legal": {
+    "bad": 0,
+    "unflagged": 0,
+    "hub_flagged": 0,
+    "median_flags": 0
+   },
+   "product answers": {
+    "bad": 26,
+    "unflagged": 0,
+    "hub_flagged": 21,
+    "median_flags": 4.5
+   },
+   "product titles": {
+    "bad": 10,
+    "unflagged": 0,
+    "hub_flagged": 10,
+    "median_flags": 5.0
+   },
+   "wikipedia": {
+    "bad": 23,
+    "unflagged": 1,
+    "hub_flagged": 22,
+    "median_flags": 2.0
+   }
+  }
+ },
+ "spearman": {
+  "codesearchnet-go": {
+   "query_hubness": -0.6,
+   "hubness": -0.5736263736263736,
+   "antihubs": -0.48017737627830614,
+   "query_gap": -0.8417582417582418,
+   "effective_rank": 0.26593406593406593,
+   "anisotropy": 0.38461538461538464
+  },
+  "codesearchnet-java": {
+   "query_hubness": -0.8065934065934066,
+   "hubness": -0.6615384615384616,
+   "antihubs": -0.44106795726740305,
+   "query_gap": -0.5956043956043956,
+   "effective_rank": 0.3054945054945055,
+   "anisotropy": 0.1912087912087912
+  },
+  "codesearchnet-python": {
+   "query_hubness": -0.767032967032967,
+   "hubness": -0.4197802197802198,
+   "antihubs": -0.6814309385670128,
+   "query_gap": -0.6967032967032967,
+   "effective_rank": -0.23956043956043957,
+   "anisotropy": 0.2879120879120879
+  },
+  "cosqa": {
+   "query_hubness": -0.6879120879120879,
+   "hubness": -0.8197802197802198,
+   "antihubs": -0.6571428571428571,
+   "query_gap": -0.6043956043956044,
+   "effective_rank": -0.6747252747252748,
+   "anisotropy": -0.1824175824175824
+  },
+  "esci-es": {
+   "query_hubness": -0.46373626373626364,
+   "hubness": -0.4813186813186813,
+   "antihubs": -0.2703296703296703,
+   "query_gap": 0.16043956043956045,
+   "effective_rank": 0.2703296703296703,
+   "anisotropy": 0.4065934065934066
+  },
+  "esci-jp": {
+   "query_hubness": -0.7142857142857143,
+   "hubness": -0.4901098901098901,
+   "antihubs": -0.6263736263736264,
+   "query_gap": 0.35824175824175825,
+   "effective_rank": 0.221978021978022,
+   "anisotropy": 0.0857142857142857
+  },
+  "esci-us": {
+   "query_hubness": -0.4241758241758242,
+   "hubness": -0.5032967032967033,
+   "antihubs": -0.3758241758241759,
+   "query_gap": -0.002197802197802198,
+   "effective_rank": 0.01098901098901099,
+   "anisotropy": 0.767032967032967
+  },
+  "legal-summarization": {
+   "query_hubness": -0.0945054945054945,
+   "hubness": 0.1252747252747253,
+   "antihubs": -0.15708310596836983,
+   "query_gap": -0.09010989010989012,
+   "effective_rank": 0.48571428571428577,
+   "anisotropy": 0.06813186813186813
+  },
+  "miracl-de": {
+   "query_hubness": -0.8769230769230769,
+   "hubness": -0.7230769230769231,
+   "antihubs": -0.8021978021978022,
+   "query_gap": -0.2703296703296703,
+   "effective_rank": -0.221978021978022,
+   "anisotropy": -0.0857142857142857
+  },
+  "miracl-fr": {
+   "query_hubness": -0.9032967032967033,
+   "hubness": -0.2923076923076923,
+   "antihubs": -0.7362637362637363,
+   "query_gap": -0.3186813186813187,
+   "effective_rank": -0.002197802197802198,
+   "anisotropy": -0.11208791208791209
+  },
+  "miracl-hi": {
+   "query_hubness": -0.767032967032967,
+   "hubness": -0.832967032967033,
+   "antihubs": -0.8725274725274725,
+   "query_gap": -0.3406593406593406,
+   "effective_rank": 0.7802197802197802,
+   "anisotropy": -0.4241758241758242
+  },
+  "trec-covid": {
+   "query_hubness": -0.767032967032967,
+   "hubness": -0.221978021978022,
+   "antihubs": -0.0989010989010989,
+   "query_gap": 0.43736263736263736,
+   "effective_rank": -0.002197802197802198,
+   "anisotropy": 0.5120879120879122
+  },
+  "xpqa-ar": {
+   "query_hubness": -0.6791208791208792,
+   "hubness": 0.09010989010989012,
+   "antihubs": 0.21122124992666771,
+   "query_gap": 0.0857142857142857,
+   "effective_rank": 0.14725274725274726,
+   "anisotropy": -0.12967032967032965
+  },
+  "xpqa-de": {
+   "query_hubness": -0.5032967032967033,
+   "hubness": -0.48571428571428577,
+   "antihubs": -0.19801992180625097,
+   "query_gap": -0.18681318681318684,
+   "effective_rank": -0.5868131868131868,
+   "anisotropy": 0.16483516483516483
+  },
+  "xpqa-es": {
+   "query_hubness": -0.7230769230769231,
+   "hubness": -0.3186813186813187,
+   "antihubs": -0.2879120879120879,
+   "query_gap": -0.15604395604395604,
+   "effective_rank": -0.4681318681318682,
+   "anisotropy": 0.14725274725274726
+  },
+  "xpqa-fr": {
+   "query_hubness": -0.4197802197802198,
+   "hubness": 0.1164835164835165,
+   "antihubs": -0.10352448020679077,
+   "query_gap": -0.1164835164835165,
+   "effective_rank": -0.4769230769230769,
+   "anisotropy": 0.03736263736263736
+  },
+  "xpqa-hi": {
+   "query_hubness": -0.8065934065934066,
+   "hubness": -0.24395604395604395,
+   "antihubs": -0.6131868131868132,
+   "query_gap": -0.14725274725274726,
+   "effective_rank": 0.5428571428571429,
+   "anisotropy": -0.43736263736263736
+  },
+  "xpqa-ja": {
+   "query_hubness": -0.6923076923076923,
+   "hubness": -0.44175824175824174,
+   "antihubs": -0.4840486977486135,
+   "query_gap": -0.01978021978021978,
+   "effective_rank": 0.2351648351648352,
+   "anisotropy": 0.006593406593406593
+  },
+  "xpqa-zh": {
+   "query_hubness": -0.8505494505494505,
+   "hubness": 0.3362637362637363,
+   "antihubs": -0.09492366245267049,
+   "query_gap": 0.05054945054945055,
+   "effective_rank": 0.054945054945054944,
+   "anisotropy": 0.14725274725274726
+  }
+ },
+ "faults": {
+  "query_model": {
+   "runs": 99,
+   "median_drop": 0.5883532506292616,
+   "harmful": 87,
+   "caught": {
+    "absolute": 61,
+    "diff": 86,
+    "findings": 86,
+    "retrieval": 87,
+    "any": 87
+   },
+   "harmless": 12,
+   "alarms": {
+    "absolute": 1,
+    "diff": 1,
+    "findings": 1,
+    "retrieval": 0,
+    "any": 1
+   }
+  },
+  "truncate": {
+   "runs": 99,
+   "median_drop": 0.013198574998561252,
+   "harmful": 63,
+   "caught": {
+    "absolute": 7,
+    "diff": 62,
+    "findings": 62,
+    "retrieval": 63,
+    "any": 63
+   },
+   "harmless": 36,
+   "alarms": {
+    "absolute": 2,
+    "diff": 28,
+    "findings": 28,
+    "retrieval": 0,
+    "any": 28
+   }
+  },
+  "zero_rows": {
+   "runs": 99,
+   "median_drop": 0.026554756011160308,
+   "harmful": 84,
+   "caught": {
+    "absolute": 42,
+    "diff": 84,
+    "findings": 84,
+    "retrieval": 84,
+    "any": 84
+   },
+   "harmless": 15,
+   "alarms": {
+    "absolute": 10,
+    "diff": 15,
+    "findings": 15,
+    "retrieval": 0,
+    "any": 15
+   }
+  },
+  "duplicates": {
+   "runs": 99,
+   "median_drop": 0.03945398424537039,
+   "harmful": 99,
+   "caught": {
+    "absolute": 72,
+    "diff": 93,
+    "findings": 93,
+    "retrieval": 99,
+    "any": 99
+   },
+   "harmless": 0,
+   "alarms": {
+    "absolute": 0,
+    "diff": 0,
+    "findings": 0,
+    "retrieval": 0,
+    "any": 0
+   }
+  },
+  "id_shift": {
+   "runs": 99,
+   "median_drop": 0.0660506380224154,
+   "harmful": 99,
+   "caught": {
+    "absolute": 0,
+    "diff": 0,
+    "findings": 0,
+    "retrieval": 99,
+    "any": 99
+   },
+   "harmless": 0,
+   "alarms": {
+    "absolute": 0,
+    "diff": 0,
+    "findings": 0,
+    "retrieval": 0,
+    "any": 0
+   }
+  },
+  "quantize": {
+   "runs": 99,
+   "median_drop": 0.006861920597655002,
+   "harmful": 32,
+   "caught": {
+    "absolute": 0,
+    "diff": 27,
+    "findings": 27,
+    "retrieval": 32,
+    "any": 32
+   },
+   "harmless": 67,
+   "alarms": {
+    "absolute": 1,
+    "diff": 14,
+    "findings": 14,
+    "retrieval": 0,
+    "any": 14
+   }
+  }
+ }
+}

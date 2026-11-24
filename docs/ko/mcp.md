@@ -69,6 +69,18 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 에이전트가 이전 응답을 파일로 저장할 필요가 없습니다. 서버는 최근 감사 32개를 메모리에 두며,
 저장한 응답이나 `--json` 파일도 받습니다.
 
+두 감사 모두 `qrels_path`를 넘겼다면 `retrieval_tolerances`(예: `{"ndcg_at_k": 0.01}`)로 검색
+품질 변화를 검사로 바꿀 수 있습니다. 허용량보다 더 떨어진 지표는
+`baseline_diff.retrieval_regressions`에, 확인하지 못한 허용량(기준선에 라벨이 없거나 qrels나 k가
+다름)은 `retrieval_unchecked`에 오르고, 요약에는 `RETRIEVAL WORSE`나 `NOT CHECKED`가 붙습니다.
+둘 중 하나라도 있으면 그 변경은 채택하지 않습니다. [검색 품질 게이트](ci.md#검색-품질-게이트)를
+참고하십시오.
+
+모든 `baseline_diff`에는 `change_decision`(`adopt`, `reject`, `needs_review`와 그 이유, `watch`
+목록)이 붙고, 기준선에 plan이 있으면 `attempts`도 붙습니다. 이 서버 세션에서 그 첫 단계에 대해
+채택되지 않은 변경 수입니다. 3에 이르면 요약에 `STOP`이 붙습니다. [변경 채택](quality.md#변경-채택)을
+참고하십시오.
+
 `verbose=false`를 주면 `ok` 항목의 세부 내용, 설명, 조치를 생략합니다. MCP를 지원하지 않는
 에이전트라면 CLI를 `--json`으로 실행해 같은 결과를 읽으면 됩니다.
 

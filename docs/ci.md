@@ -68,14 +68,48 @@ near-duplicate cutoff differ from the baseline.
 policy for a gate, since a diff across different settings measures the settings, not the
 corpus. The library call is `diff_evidence(new, old, tolerances={...})`.
 
+## Retrieval quality as a gate
+
+Findings describe the geometry of the space, not whether search returns the right documents.
+A change can leave every finding where it was and still break retrieval: a reindex that loses
+the row-to-document mapping, a model update that ranks worse on your queries, a filter that
+drops relevant documents. When labeled queries exist, gate on them directly:
+
+```bash
+vecscope audit embeddings.npy --queries queries.npy --qrels qrels.json --sample 0 --json > baseline.json
+# after the change
+vecscope audit embeddings.npy --queries queries.npy --qrels qrels.json --sample 0 \
+  --baseline baseline.json --retrieval-tolerance ndcg_at_k=0.01 --retrieval-tolerance recall_at_k=0.02
+```
+
+- `--retrieval-tolerance METRIC=DELTA` (repeatable) is the drop a metric may take against the
+  baseline: `ndcg_at_k`, `recall_at_k`, `mrr_at_k`, `hit_rate_at_k`, `duplicate_result_share`
+  (a rise is the bad direction) or `overlap_with_exact`. A bare name covers exact search and,
+  when both runs passed `--ranked`, the supplied ranking; `exact.` or `ranked.` limits it to one.
+- A metric that drops by more is listed in `retrieval_regressions` (as `exact.ndcg_at_k`,
+  text: `WORSE by 0.0213 > 0.01`) and exits 1, whatever the findings say.
+- A tolerance that cannot be checked fails the run too and is listed in
+  `retrieval_unchecked`: the baseline has no retrieval block, the qrels or k differ
+  (`retrieval_comparable` false), or the tolerance names `ranked.` and a run has no ranking.
+  A requested check that did not run is not a pass. With `--require-comparable` it is an
+  error (exit 2) instead.
+- The flag needs `--baseline` and `--qrels` on the run.
+
+Row ids in the qrels must mean the same documents in both runs. A change that drops or
+reorders rows (dedup, a rebuild from another export) needs qrels rewritten for the new rows;
+a qrels file that silently points at other documents shows up as exactly the collapse this
+gate exists to catch. The library call is
+`diff_evidence(new, old, retrieval_tolerances={"ndcg_at_k": 0.01})`.
+
 ## Which rule failed the run
 
 Two different rules can fail a run, and the output keeps them apart:
 
 - The absolute rule is the verdict against the thresholds (`--fail-on fail` by default,
   `--fail-on warn` to be strict).
-- The baseline rules are `regressions` (a verdict got worse) and `value_regressions` (a value
-  worsened beyond its tolerance).
+- The baseline rules are `regressions` (a verdict got worse), `value_regressions` (a value
+  worsened beyond its tolerance), `retrieval_regressions` (a labeled retrieval metric dropped
+  beyond its tolerance) and `retrieval_unchecked` (a retrieval tolerance could not be checked).
 
 The defaults are calibrated on public models, so a domain whose healthy corpus sits at `warn`
 or `fail` on some finding should not be blocked by the absolute rule at all.
@@ -108,6 +142,9 @@ with the CLI's exit code.
     path: embeddings.npy
     baseline: baseline.json         # committed --json output, optional
     tolerances: tolerances.json     # optional
+    queries: queries.npy            # optional, with qrels: labeled retrieval quality
+    qrels: qrels.json
+    retrieval-tolerance: ndcg_at_k=0.01 recall_at_k=0.02
     sample: "0"                     # audit every row when diffing against a baseline
     require-comparable: "true"
 ```
@@ -115,7 +152,8 @@ with the CLI's exit code.
 | Input | Default | CLI option |
 |---|---|---|
 | `path` | required | the audited file, index or store URI |
-| `baseline`, `tolerances`, `thresholds`, `queries` | empty | `--baseline`, `--tolerances`, `--thresholds`, `--queries` |
+| `baseline`, `tolerances`, `thresholds`, `queries`, `qrels` | empty | `--baseline`, `--tolerances`, `--thresholds`, `--queries`, `--qrels` |
+| `retrieval-tolerance` | empty | one `--retrieval-tolerance` per `METRIC=DELTA`, separated by spaces or commas |
 | `fail-on` | `fail` | `--fail-on` |
 | `k`, `sample` | `10`, `100000` | `-k`, `--sample` |
 | `require-comparable` | `false` | `--require-comparable` |
@@ -125,7 +163,10 @@ with the CLI's exit code.
 | `python-version` | `3.13` | empty uses the Python already on the runner |
 
 Outputs: `verdict` (`ok`, `warn`, `fail`, or `error` when no evidence was written),
-`exit-code`, `regressions` (comma-separated finding names) and `evidence` (the JSON path).
+`exit-code`, `regressions` (comma-separated finding names), `retrieval-regressions`
+(comma-separated metrics such as `exact.ndcg_at_k`, then `unchecked:<metric>` for a tolerance
+that could not be checked) and `evidence` (the JSON path). The job summary adds a retrieval
+table when both runs had labels.
 Upload `evidence` as an artifact to keep it, or commit it as the next baseline after review.
 
 `@v0` moves to every 0.x release, and a 0.x minor release may change findings or thresholds,

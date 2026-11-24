@@ -142,7 +142,7 @@ vecscope x.y.z  n=3000 dim=128 k=10  verdict=FAIL
 | `query_gap` | median query-to-corpus nearest distance divided by the median corpus-to-corpus nearest distance | < 2.6 | 2.6 to 3.0 | ≥ 3.0 | queries and corpus do not share a space, typically queries embedded by a different model (5 to 10). Pipelines that reproduce published nDCG@10 sit at 0.94 to 2.52; a missing query prefix does not reliably move it |
 | `query_shift` | share of queries farther from the corpus than the median + 3 MAD of a reference query set (needs a baseline) | < 20% | 20 to 30% | ≥ 30% | the query pipeline moved since the reference: another model or version, or traffic on topics the corpus does not cover. Healthy query sets score 0 to 9% |
 | `ood_queries` | deprecated, read `query_gap`: share of queries farther from the corpus than 99% of corpus items are from each other | < 50% | 50 to 80% | ≥ 80% | same question as `query_gap`, but it counts the normal distance between short queries and long passages too (good models score 0 to 65% on BEIR) and false-alarmed on 4 of 18 reproduced pipelines |
-| `query_hubness` | skewness of corpus k-occurrence over query results | < 4.0 | 4.0 to 10.0 | ≥ 10.0 | the same few items answer most queries; the value tracks nDCG@10 across models (Spearman −0.5 to −0.9), wrong-language models score 11 to 30. It grows with corpus size: good English models score 1.5 to 3.4 up to 26k documents and 4.0 to 4.8 on 58k, so on large corpora compare against a baseline |
+| `query_hubness` | skewness of corpus k-occurrence over query results | < 4.0 | 4.0 to 10.0 | ≥ 10.0 | the same few items answer most queries; the value tracks nDCG@10 across models (Spearman −0.5 to −0.9), wrong-language models score 11 to 30. Few queries over a large corpus raise it with no hub at all: a hub-free index scores (1−2p)/√(queries·p(1−p)), p = k/documents (`details.null_skewness`), and a level chance alone reaches is not judged (`details.not_judged`, with the queries needed) |
 
 Every finding in the JSON carries its `healthy_range`, `warn_at` and `fail_at`, plus a `details`
 block with the raw numbers. For `anisotropy` that block includes the cosine the same vectors
@@ -158,9 +158,11 @@ Some findings appear only when you pass their inputs:
 Each finding also carries `likely_causes`, `suggested_action` and `verify_by`. They are
 hypotheses, not prescriptions:
 
-- apply the smallest change
-- re-audit
-- compare retrieval on real queries before adopting it
+- apply the smallest change, to a copy
+- re-audit the copy with the original as baseline
+- adopt it only when `baseline_diff.change_decision` says `adopt`: labeled retrieval did not
+  drop and something improved. Without labels the decision is `needs_review`, and a person
+  decides
 
 The [agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) spells out
 that loop.
@@ -172,6 +174,11 @@ The thresholds are defaults:
 - calibrated on [seven public models](https://076923.github.io/vecscope/quality/#real-embeddings)
 - re-checked against 19 models on nine labeled datasets in two languages
   ([verification](https://github.com/076923/vecscope/blob/main/docs/verification.md))
+- measured, unchanged, on 19 held-out public datasets with 14 models and on six injected
+  faults ([held-out validation](https://076923.github.io/vecscope/validation/)): 54 of 67 bad
+  pipelines end at `fail`, but so do 26 of 114 good ones, mostly on text under 200
+  characters, and the baseline diff catches faults the absolute verdict misses; gate on the
+  baseline and on [retrieval tolerances](https://076923.github.io/vecscope/ci/)
 
 They are a starting point for diagnosis, not a universal quality bar. Embedding spaces
 differ by model, language, domain and dimensionality, so a `warn` on a good model is normal
@@ -220,6 +227,14 @@ vecscope audit embeddings.npy --json > baseline.json          # once, reviewed a
 vecscope audit embeddings.npy --baseline baseline.json        # on every rebuild
 ```
 
+Findings cannot see every break: a reindex that loses the id mapping leaves them all unchanged.
+With labeled queries, gate on retrieval quality too, so a drop in nDCG fails the build:
+
+```bash
+vecscope audit embeddings.npy --queries q.npy --qrels qrels.json --baseline baseline.json \
+  --retrieval-tolerance ndcg_at_k=0.01
+```
+
 On GitHub the same gate is an Action:
 
 ```yaml
@@ -230,8 +245,8 @@ On GitHub the same gate is an Action:
     sample: "0"
 ```
 
-[Use in CI](https://076923.github.io/vecscope/ci/) covers tolerances for slow drift, which rule failed a run, and the
-Action's inputs and outputs.
+[Use in CI](https://076923.github.io/vecscope/ci/) covers tolerances for slow drift, the retrieval gate, which rule
+failed a run, and the Action's inputs and outputs.
 
 ## FAQ
 
@@ -309,6 +324,7 @@ JSON. The skill file describes both paths.
 - [Agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md): when to run the audit and what to do with each verdict
 - [Retrieval-quality tables](https://github.com/076923/vecscope/blob/main/docs/retrieval_quality.md): every finding against nDCG@10 on labeled data
 - [Verification](https://github.com/076923/vecscope/blob/main/docs/verification.md): exactness, recall scoring, the sampling claims, the query findings, interventions, agent integration, and 19 models on 9 labeled datasets
+- [Held-out validation](https://076923.github.io/vecscope/validation/): false positives and misses on 19 public datasets by language, document length, corpus size and domain, and what catches six injected faults
 - [Agent cases](https://github.com/076923/vecscope/blob/main/docs/agent_case.md): an agent finding and fixing two ingestion faults, and a mis-tuned IVF index, over MCP, with the tool calls and numbers
 - [Examples](https://github.com/076923/vecscope/tree/main/examples/): synthetic matrices, the calibration script and the retrieval-quality study
 - [Changelog](https://github.com/076923/vecscope/blob/main/CHANGELOG.md)

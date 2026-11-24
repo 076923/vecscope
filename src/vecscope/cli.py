@@ -10,7 +10,7 @@ from pathlib import Path
 from vecscope import __version__
 from vecscope.adapters import annotate, is_source, load_source
 from vecscope.compare import compare, render_compare
-from vecscope.evidence import WORSE, audit, diff_evidence
+from vecscope.evidence import WORSE, audit, diff_evidence, parse_retrieval_tolerance
 from vecscope.incremental import cached_knn_for_audit
 from vecscope.io import load_neighbors, load_vectors
 from vecscope.retrieval import load_qrels
@@ -34,6 +34,8 @@ def _render_text(ev) -> str:
                 line += "  verdict UNSTABLE"
         if f.inconclusive:
             line += "  INCONCLUSIVE (sampled)"
+        if f.details.get("not_judged"):
+            line += f"  NOT JUDGED at {'/'.join(f.details['not_judged'])} (too few queries)"
         lines.append(line)
         lines.append(f"{'':31}{f.explanation}")
         if f.verdict != "ok":
@@ -193,6 +195,16 @@ def main(argv: list[str] | None = None) -> int:
         'baseline, e.g. {"collapse": 0.01, "ann_recall": 0.02}; '
         "a finding that worsens by more exits 1 even when its "
         "verdict did not change (needs --baseline)",
+    )
+    a.add_argument(
+        "--retrieval-tolerance",
+        action="append",
+        metavar="METRIC=DELTA",
+        help="allowed drop of a labeled retrieval metric against the baseline, e.g. "
+        "ndcg_at_k=0.01 (repeatable; prefix exact. or ranked. for one ranking); a larger "
+        "drop exits 1 whatever the findings say, and a tolerance that cannot be checked "
+        "(no retrieval on either run, different qrels or k) exits 1 too "
+        "(needs --baseline and --qrels)",
     )
     a.add_argument(
         "--require-comparable",
@@ -421,8 +433,15 @@ def _run(args) -> int:
             raise ValueError("--knn-cache needs every row audited; pass --sample 0")
         knn, cache_info = cached_knn_for_audit(x, args.k, args.knn_cache)
     th = _load_json(args.thresholds, "--thresholds") if args.thresholds else None
-    if (args.tolerances or args.require_comparable) and not args.baseline:
-        raise ValueError("--tolerances and --require-comparable need --baseline")
+    if (args.tolerances or args.require_comparable or args.retrieval_tolerance) and not (
+        args.baseline
+    ):
+        raise ValueError(
+            "--tolerances, --retrieval-tolerance and --require-comparable need --baseline"
+        )
+    rtol = parse_retrieval_tolerance(args.retrieval_tolerance)
+    if rtol and qrels is None:
+        raise ValueError("--retrieval-tolerance needs --qrels (and --queries) on this run")
     base = _load_json(args.baseline, "--baseline") if args.baseline else None
     ev = audit(
         x,
@@ -446,12 +465,18 @@ def _run(args) -> int:
     d = None
     if base is not None:
         tol = _load_json(args.tolerances, "--tolerances") if args.tolerances else None
-        d = diff_evidence(ev.to_dict(), base, tolerances=tol)
+        d = diff_evidence(ev.to_dict(), base, tolerances=tol, retrieval_tolerances=rtol)
         if args.require_comparable and not d["comparable"]:
             raise ValueError(
                 f"--require-comparable: baseline {args.baseline} was made with different n, "
                 "dim, k, sampling, thresholds or near-dup cutoff; re-create it with the same "
                 "settings or drop the flag"
+            )
+        if args.require_comparable and d["retrieval_unchecked"]:
+            raise ValueError(
+                f"--require-comparable: baseline {args.baseline} cannot be compared on "
+                f"{', '.join(d['retrieval_unchecked'])} (it needs a retrieval block made with "
+                "the same qrels and k, and the ranking the tolerance names)"
             )
     gate = gate_decision(ev.verdict, args.fail_on, d, ev.inconclusive_findings)
     note = _query_ref_note(base, x, q)
@@ -478,7 +503,9 @@ def gate_decision(
 ) -> dict:
     """Why the run passes or fails, with the absolute-threshold rule and the baseline rules
     kept apart: ``absolute`` is the verdict against the thresholds (``fail_on`` = 'none'
-    disables it), ``verdict_regressions`` and ``value_regressions`` come from the baseline.
+    disables it), ``verdict_regressions``, ``value_regressions``, ``retrieval_regressions``
+    and ``retrieval_unchecked`` come from the baseline. A retrieval tolerance that could not
+    be checked fails the gate: a requested check that did not run is not a pass.
     A gate that blocks on the baseline alone (``--fail-on none --baseline``) judges the
     change, not whether the corpus meets the default thresholds. ``inconclusive`` names the
     sampled findings whose verdict cannot stand for the full corpus; they never fail the
@@ -486,6 +513,8 @@ def gate_decision(
     absolute = fail_on != "none" and WORSE[verdict] >= WORSE[fail_on]
     verdict_reg = list(diff["regressions"]) if diff else []
     value_reg = list(diff["value_regressions"]) if diff else []
+    retrieval_reg = list(diff.get("retrieval_regressions") or []) if diff else []
+    unchecked = list(diff.get("retrieval_unchecked") or []) if diff else []
     reasons = []
     if absolute:
         reasons.append(f"verdict {verdict} reaches --fail-on {fail_on}")
@@ -493,11 +522,28 @@ def gate_decision(
         reasons.append(f"verdict worse than baseline: {', '.join(verdict_reg)}")
     if value_reg:
         reasons.append(f"value worse than baseline beyond tolerance: {', '.join(value_reg)}")
+    if retrieval_reg:
+        rows = {f"{c['ranking']}.{c['metric']}": c for c in diff.get("retrieval_changes") or []}
+        shown = [
+            f"{k} {rows[k]['baseline_value']:.4f} -> {rows[k]['value']:.4f} "
+            f"(worse by {rows[k]['worsening']:.4f} > {rows[k]['tolerance']:g})"
+            if k in rows
+            else k
+            for k in retrieval_reg
+        ]
+        reasons.append(f"retrieval worse than baseline beyond tolerance: {', '.join(shown)}")
+    if unchecked:
+        reasons.append(
+            f"retrieval tolerance not checked: {', '.join(unchecked)} (both runs need a "
+            "retrieval block with the same qrels and k, and the ranking it names)"
+        )
     return {
         "fail_on": fail_on,
         "absolute": absolute,
         "verdict_regressions": verdict_reg,
         "value_regressions": value_reg,
+        "retrieval_regressions": retrieval_reg,
+        "retrieval_unchecked": unchecked,
         "baseline": diff is not None,
         "inconclusive": list(inconclusive or []),
         "exit_code": 1 if reasons else 0,
@@ -593,14 +639,31 @@ def _render_diff(d: dict, path: str) -> str:
         note = "" if d["retrieval_comparable"] else "  (different qrels or k: not comparable)"
         lines.append(f"  retrieval vs baseline{note}:")
         for r in d["retrieval_changes"]:
+            key = f"{r['ranking']}.{r['metric']}"
+            mark = (
+                f"  WORSE by {r['worsening']:.4f} > {r['tolerance']:g}"
+                if key in d.get("retrieval_regressions", [])
+                else f"  within {r['tolerance']:g}"
+                if r.get("tolerance") is not None and d["retrieval_comparable"]
+                else ""
+            )
             lines.append(
                 f"    {r['ranking']:<7} {r['metric']:<24} {r['baseline_value']:.4f} -> "
-                f"{r['value']:.4f}  ({r['delta']:+.4f})"
+                f"{r['value']:.4f}  ({r['delta']:+.4f}){mark}"
             )
     if d["regressions"]:
         lines.append(f"  regressions: {', '.join(d['regressions'])}")
     if d["value_regressions"]:
         lines.append(f"  value regressions (beyond tolerance): {', '.join(d['value_regressions'])}")
+    if d.get("retrieval_regressions"):
+        lines.append(
+            f"  retrieval regressions (beyond tolerance): {', '.join(d['retrieval_regressions'])}"
+        )
+    if d.get("retrieval_unchecked"):
+        lines.append(f"  retrieval tolerances not checked: {', '.join(d['retrieval_unchecked'])}")
+    cd = d.get("change_decision")
+    if cd:
+        lines.append(f"  change decision: {cd['decision']}; {'; '.join(cd['reasons'])}")
     return "\n".join(lines)
 
 

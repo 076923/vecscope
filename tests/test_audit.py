@@ -1119,6 +1119,42 @@ def test_mcp_baseline_by_audit_id_and_summary(tmp_path, monkeypatch):
         audit_embeddings(str(tmp_path / "b.npy"), baseline="0123456789abcdef")
     with pytest.raises(Exception, match="tolerances need baseline"):
         audit_embeddings(str(tmp_path / "b.npy"), tolerances={"collapse": 0.01})
+    # a lost id mapping: the same rows in another order; findings cannot see it, labels can
+    np.save(tmp_path / "moved.npy", x[np.random.default_rng(1).permutation(len(x))])
+    moved = audit_embeddings(
+        str(tmp_path / "moved.npy"),
+        k=5,
+        baseline=first["audit_id"],
+        retrieval_tolerances={"ndcg_at_k": 0.01},
+        **args,
+    )
+    assert moved["baseline_diff"]["regressions"] == []
+    assert moved["baseline_diff"]["retrieval_regressions"] == ["exact.ndcg_at_k"]
+    assert "RETRIEVAL WORSE beyond tolerance: exact.ndcg_at_k" in moved["summary"]
+    unlabeled = audit_embeddings(str(tmp_path / "a.npy"), k=5, queries_path=args["queries_path"])
+    unchecked = audit_embeddings(
+        str(tmp_path / "a.npy"),
+        k=5,
+        baseline=unlabeled["audit_id"],
+        retrieval_tolerances={"ndcg_at_k": 0.01},
+        **args,
+    )
+    assert unchecked["baseline_diff"]["retrieval_unchecked"] == ["exact.ndcg_at_k"]
+    assert "retrieval tolerance NOT CHECKED" in unchecked["summary"]
+    with pytest.raises(Exception, match="retrieval_tolerances need qrels_path"):
+        audit_embeddings(
+            str(tmp_path / "a.npy"),
+            baseline=first["audit_id"],
+            retrieval_tolerances={"ndcg_at_k": 0.01},
+        )
+    with pytest.raises(Exception, match="unknown retrieval metric"):
+        audit_embeddings(
+            str(tmp_path / "a.npy"),
+            k=5,
+            baseline=first["audit_id"],
+            retrieval_tolerances={"ndcg": 0.01},
+            **args,
+        )
     (tmp_path / "binary.tsv").write_bytes((tmp_path / "q.npy").read_bytes())
     with pytest.raises(Exception, match="not a text qrels file"):
         audit_embeddings(

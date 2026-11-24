@@ -177,7 +177,191 @@ def resolve_tolerances(tolerances: Mapping | None) -> dict:
     return out
 
 
-def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> dict:
+# retrieval metrics a baseline diff can gate on: True when a higher value is worse
+RETRIEVAL_METRICS = {
+    "ndcg_at_k": False,
+    "recall_at_k": False,
+    "mrr_at_k": False,
+    "hit_rate_at_k": False,
+    "duplicate_result_share": True,
+    "overlap_with_exact": False,
+}
+_RANKINGS = ("exact", "ranked")
+
+
+def resolve_retrieval_tolerances(tolerances: Mapping | None) -> dict:
+    """Validate ``{metric: allowed worsening}`` for the retrieval block of a baseline diff.
+
+    A key is a retrieval metric (``ndcg_at_k``, ``recall_at_k``, ``mrr_at_k``,
+    ``hit_rate_at_k``, ``duplicate_result_share``, ``overlap_with_exact``), which applies to
+    exact search and, when both runs scored one, to the supplied ranking; or
+    ``exact.<metric>`` / ``ranked.<metric>`` for one of them. Values are finite numbers >= 0
+    in the metric's units (0.01 = one nDCG point). Returns ``{"exact.ndcg_at_k": 0.01, ...}``
+    with bare keys kept bare, so the diff can tell a required ranking from an optional one."""
+    if tolerances is None:
+        return {}
+    if not isinstance(tolerances, Mapping):
+        raise TypeError("retrieval tolerances must be a mapping of metric -> allowed worsening")
+    out = {}
+    for key, tol in tolerances.items():
+        part, _, metric = str(key).rpartition(".")
+        if metric not in RETRIEVAL_METRICS or part not in ("", *_RANKINGS):
+            raise ValueError(
+                f"unknown retrieval metric {key!r}; known: {sorted(RETRIEVAL_METRICS)}, "
+                "optionally prefixed with exact. or ranked."
+            )
+        if part == "exact" and metric == "overlap_with_exact":
+            raise ValueError("overlap_with_exact exists for the ranked results only")
+        if (
+            isinstance(tol, bool)
+            or not isinstance(tol, (int, float))
+            or not np.isfinite(tol)
+            or tol < 0
+        ):
+            raise ValueError(f"tolerance for {key!r} must be a finite number >= 0, got {tol!r}")
+        out[str(key)] = float(tol)
+    return out
+
+
+def _retrieval_checks(tol: dict, ra: Mapping, rb: Mapping) -> dict[str, tuple[float, bool]]:
+    """``{"ranking.metric": (tolerance, required)}``: a bare key covers exact search always
+    and the ranked results when both runs have them; a prefixed key is always required. A
+    prefixed key wins over a bare one for its ranking."""
+    checks: dict[str, tuple[float, bool]] = {}
+    for key, t in tol.items():
+        if "." in key:
+            continue
+        for part in _RANKINGS:
+            if part == "exact" and key == "overlap_with_exact":
+                continue
+            required = part == "exact" or key == "overlap_with_exact"
+            if required or (ra.get(part) and rb.get(part)):
+                checks[f"{part}.{key}"] = (t, required)
+    for key, t in tol.items():
+        if "." in key:
+            checks[key] = (t, True)
+    return checks
+
+
+def parse_retrieval_tolerance(items: list[str] | None) -> dict:
+    """``["ndcg_at_k=0.01", "ranked.recall_at_k=0.02"]`` (the CLI's repeated
+    ``--retrieval-tolerance``) as a validated mapping."""
+    out = {}
+    for item in items or []:
+        key, sep, val = item.partition("=")
+        if not sep or not key.strip():
+            raise ValueError(f"--retrieval-tolerance {item!r}: expected METRIC=DELTA")
+        try:
+            out[key.strip()] = float(val)
+        except ValueError:
+            raise ValueError(f"--retrieval-tolerance {item!r}: {val!r} is not a number") from None
+    return resolve_retrieval_tolerances(out)
+
+
+# retrieval metrics a remediation must not lower when no tolerance was given
+_DECISION_METRICS = ("ndcg_at_k", "recall_at_k")
+_EPS = 1e-9  # float noise between two exact runs, not a change
+
+
+def change_decision(diff: Mapping) -> dict:
+    """Whether a remediation (a transform, a dedup, an index change) judged by this diff
+    should be adopted, from the labeled retrieval numbers first and the findings second.
+
+    - ``needs_review``: no retrieval on both runs with the same qrels and k. A finding that
+      improved does not show that search did; a person decides, nothing is adopted
+      automatically.
+    - ``reject``: a retrieval metric dropped (beyond ``retrieval_tolerances`` when given,
+      else any drop of nDCG or recall, exact or ranked), or nothing measurable improved, so
+      the change adds risk for no gain. Keep the original.
+    - ``adopt``: retrieval did not drop and a finding or retrieval improved. Findings that
+      got worse anyway are listed in ``watch``: the labels say search held, so they are the
+      next audit's business, not a reason to keep a worse space.
+
+    ``still_not_ok`` lists the findings that are not ok after the change. An adopted change
+    is not a fixed pipeline: a change that misses the fault can still nudge retrieval up (a
+    corpus centered while the queries come from another model), and the remaining findings
+    and the new plan say what is left.
+
+    The decision is the same for every caller and never looks at which finding the change
+    meant to fix, so an unnecessary fix on a healthy corpus is rejected for having no effect
+    or for costing retrieval, not judged by its intent.
+    """
+    worse = list(
+        dict.fromkeys(
+            list(diff.get("regressions") or []) + list(diff.get("value_regressions") or [])
+        )
+    )
+
+    still = [c["name"] for c in diff.get("changes") or [] if c.get("verdict") != "ok"]
+
+    def out(decision: str, *reasons: str) -> dict:
+        return {
+            "decision": decision,
+            "reasons": list(reasons),
+            "watch": worse,
+            "still_not_ok": still,
+        }
+
+    if not diff.get("retrieval_comparable"):
+        return out(
+            "needs_review",
+            "no labeled retrieval on both runs with the same qrels and k: a finding that "
+            "improved does not show that search did; keep the original and let a person "
+            "decide, or re-run both with --qrels",
+        )
+    changes = diff.get("retrieval_changes") or []
+    if diff.get("retrieval_tolerances"):
+        drops = list(diff.get("retrieval_regressions") or []) + [
+            f"{k} (not checked)" for k in diff.get("retrieval_unchecked") or []
+        ]
+    else:
+        drops = [
+            f"{c['ranking']}.{c['metric']}"
+            for c in changes
+            if c["metric"] in _DECISION_METRICS and (c.get("worsening") or 0) > _EPS
+        ]
+    if drops:
+        shown = {f"{c['ranking']}.{c['metric']}": c for c in changes}
+        return out(
+            "reject",
+            "retrieval dropped: "
+            + ", ".join(
+                f"{k} {shown[k]['baseline_value']:.4f} -> {shown[k]['value']:.4f}"
+                if k in shown
+                else k
+                for k in drops
+            )
+            + "; keep the original",
+        )
+    gains = [
+        f"{c['ranking']}.{c['metric']}"
+        for c in changes
+        if c["metric"] in _DECISION_METRICS and (c.get("worsening") or 0) < -_EPS
+    ]
+    improved = list(diff.get("improvements") or [])
+    if not gains and not improved:
+        return out(
+            "reject",
+            "no finding verdict and no retrieval metric improved: the change adds risk for no "
+            "measured gain; keep the original",
+        )
+    reasons = ["retrieval did not drop; improved: " + ", ".join(improved + gains)]
+    if worse:
+        reasons.append(f"got worse and needs the next audit: {', '.join(worse)}")
+    if still:
+        reasons.append(
+            f"still not ok: {', '.join(still)}; the change did not settle them, so follow the "
+            "new plan before calling the pipeline fixed"
+        )
+    return out("adopt", *reasons)
+
+
+def diff_evidence(
+    new: dict,
+    old: dict,
+    tolerances: Mapping | None = None,
+    retrieval_tolerances: Mapping | None = None,
+) -> dict:
     """Compare two evidence dicts (``Evidence.to_dict()`` or a parsed ``--json`` file).
 
     Returns per-finding value and verdict changes, the findings whose verdict got worse
@@ -193,8 +377,17 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
     the committed baseline, fail on ``regressions`` or ``value_regressions``; ``comparable``
     says whether n, dim, k, sampling, thresholds and the near-duplicate cutoff match, and a
     CI policy should refuse to read the diff when it is false.
+
+    ``retrieval_tolerances`` (see :func:`resolve_retrieval_tolerances`) does the same for the
+    labeled retrieval numbers, e.g. ``{"ndcg_at_k": 0.01}``: a metric that drops by more
+    than that against the baseline is listed in ``retrieval_regressions`` (as
+    ``"exact.ndcg_at_k"``), whatever the findings say. A tolerance that cannot be checked,
+    because either run has no retrieval block, the qrels or k differ
+    (``retrieval_comparable`` false), or the ranking it names is missing, is listed in
+    ``retrieval_unchecked``; a gate must not read that as a pass.
     """
     tol = resolve_tolerances(tolerances)
+    rtol = resolve_retrieval_tolerances(retrieval_tolerances)
     if not isinstance(new, Mapping) or not isinstance(old, Mapping):
         raise TypeError("evidence must be a mapping (Evidence.to_dict() or parsed --json output)")
     for name, ev in (("new", new), ("baseline", old)):
@@ -249,20 +442,40 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
     changes.sort(key=lambda r: order.index(r["name"]))
     retrieval_changes = []
     ra, rb = new.get("retrieval") or {}, old.get("retrieval") or {}
-    for part in ("exact", "ranked"):
+    retrieval_comparable = (
+        bool(ra and rb)
+        and ra.get("qrels_fingerprint") == rb.get("qrels_fingerprint")
+        and ra.get("k") == rb.get("k")
+    )
+    checks = _retrieval_checks(rtol, ra, rb)
+    retrieval_regressions, retrieval_unchecked = [], []
+    for part in _RANKINGS:
         pa, pb = ra.get(part) or {}, rb.get(part) or {}
         for metric in pa.keys() & pb.keys():
+            delta = pa[metric] - pb[metric]
+            higher_worse = RETRIEVAL_METRICS.get(metric)
+            worsening = None if higher_worse is None else (delta if higher_worse else -delta)
+            key = f"{part}.{metric}"
+            t = checks[key][0] if key in checks else None
             retrieval_changes.append(
                 {
                     "ranking": part,
                     "metric": metric,
                     "value": pa[metric],
                     "baseline_value": pb[metric],
-                    "delta": pa[metric] - pb[metric],
+                    "delta": delta,
+                    "worsening": worsening,
+                    "tolerance": t,
                 }
             )
+            if t is not None and retrieval_comparable and worsening > t:
+                retrieval_regressions.append(key)
     retrieval_changes.sort(key=lambda r: (r["ranking"], r["metric"]))
-    return {
+    measured = {f"{r['ranking']}.{r['metric']}" for r in retrieval_changes}
+    for key in sorted(checks):
+        if not retrieval_comparable or key not in measured:
+            retrieval_unchecked.append(key)
+    out = {
         "verdict": new.get("verdict"),
         "baseline_verdict": old.get("verdict"),
         "regressions": regressions,
@@ -279,10 +492,13 @@ def diff_evidence(new: dict, old: dict, tolerances: Mapping | None = None) -> di
         and new.get("near_dup_cos") == old.get("near_dup_cos"),
         "changes": changes,
         "retrieval_changes": retrieval_changes,
-        "retrieval_comparable": bool(ra and rb)
-        and ra.get("qrels_fingerprint") == rb.get("qrels_fingerprint")
-        and ra.get("k") == rb.get("k"),
+        "retrieval_comparable": retrieval_comparable,
+        "retrieval_tolerances": rtol,
+        "retrieval_regressions": sorted(retrieval_regressions),
+        "retrieval_unchecked": retrieval_unchecked,
     }
+    out["change_decision"] = change_decision(out)
+    return out
 
 
 def _apply_sampling(
@@ -423,6 +639,30 @@ def lower_is_worse(key: str) -> bool:
     """Direction of a threshold key, fixed by the defaults (an override may set warn == fail)."""
     warn, fail = THRESHOLDS[key]
     return warn > fail
+
+
+def _query_hubness_verdict(value: float, null: float, th: dict) -> tuple[str, list[str]]:
+    """The verdict of query_hubness, given only at the levels chance cannot reach.
+
+    ``null`` is the skewness a hub-free index would show with the same number of queries and
+    corpus size (``diagnostics.queries``). A level whose threshold the null already reaches is
+    not judged: the value says nothing there about hubs. Returns the verdict and the levels
+    left unjudged."""
+    warn, fail = th["queries.query_hubness_skewness"]
+    unjudged = [lvl for lvl, cut in (("warn", warn), ("fail", fail)) if null >= cut]
+    if value >= fail and "fail" not in unjudged:
+        return "fail", unjudged
+    if value >= warn and "warn" not in unjudged:
+        return "warn", unjudged
+    return "ok", unjudged
+
+
+def queries_needed(n_corpus: int, k: int, target: float) -> int:
+    """Queries at which the hub-free skewness of query k-occurrence falls to ``target``."""
+    p = min(k, n_corpus) / n_corpus if n_corpus else 0.0
+    if not 0 < p < 1 or target <= 0:
+        return 0
+    return int(np.ceil((1 - 2 * p) ** 2 / (p * (1 - p) * target**2)))
 
 
 def _verdict(key: str, value: float, th: dict) -> str:
@@ -1020,20 +1260,46 @@ def _core_findings(
                     },
                 )
             )
+        qh, null = qa["query_hubness_skewness"], qa["null_skewness"]
+        verdict, unjudged = _query_hubness_verdict(qh, null, th)
+        warn_at = th["queries.query_hubness_skewness"][0]
+        needed = queries_needed(qa["n_corpus"], qa["k"], warn_at / 2)
         findings.append(
             Finding(
                 "query_hubness",
                 "query_hubness_skewness",
-                qa["query_hubness_skewness"],
-                _verdict("queries.query_hubness_skewness", qa["query_hubness_skewness"], th),
-                f"k-occurrence skewness over query results {qa['query_hubness_skewness']:.2f} "
+                qh,
+                verdict,
+                f"k-occurrence skewness over query results {qh:.2f} "
                 f"(max {qa['max_query_k_occurrence']} appearances); queries reach "
-                f"{qa['coverage']:.1%} of the corpus in their top-{qa['k']}. Skewness grows "
-                "with corpus size: English models with published retrieval scores measured 1.5 "
-                "to 3.4 on corpora up to 26k documents and 4.0 to 4.8 on 58k, good multilingual "
-                "models on Korean up to 9.1, models that do not cover the language 11 to 30; "
-                "compare against a baseline of the same corpus.",
-                {key: qa[key] for key in ("k", "n_queries", "max_query_k_occurrence", "coverage")},
+                f"{qa['coverage']:.1%} of the corpus in their top-{qa['k']}. If every query "
+                f"drew its top-{qa['k']} at random, with no hub at all, the skewness would be "
+                f"{null:.2f} at {qa['n_queries']} queries over {qa['n_corpus']} items "
+                "(details.null_skewness); English models with published retrieval scores "
+                "measured 1.5 to 3.4 on corpora up to 26k documents, good multilingual models on "
+                "Korean up to 9.1, models that do not cover the language 11 to 30; compare "
+                "against a baseline with the same corpus and queries."
+                + (
+                    f" NOT JUDGED at {'/'.join(unjudged)}: chance alone reaches it with this few queries, "
+                    f"so this ok is not evidence that no hub exists; about {needed} queries "
+                    "bring chance to half of warn_at."
+                    if unjudged
+                    else ""
+                ),
+                {
+                    **{
+                        key: qa[key]
+                        for key in (
+                            "k",
+                            "n_queries",
+                            "max_query_k_occurrence",
+                            "coverage",
+                            "null_skewness",
+                        )
+                    },
+                    "not_judged": unjudged,
+                    "queries_needed": needed,
+                },
             )
         )
 

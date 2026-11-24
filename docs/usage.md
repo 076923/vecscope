@@ -294,6 +294,7 @@ vecscope audit vectors.npy --fail-on none --baseline old.json   # ignore the abs
 vecscope audit vectors.npy --baseline old.json         # diff against an earlier --json run; exit 1 on regression
 vecscope audit vectors.npy --baseline old.json --tolerances tol.json   # also exit 1 when a value worsens beyond its tolerance
 vecscope audit vectors.npy --baseline old.json --require-comparable    # exit 2 when the baseline used different settings
+vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --baseline old.json --retrieval-tolerance ndcg_at_k=0.01   # exit 1 when nDCG drops by more
 vecscope audit vectors.npy --near-dup 0.98             # cosine threshold for near-duplicates
 vecscope audit vectors.npy --sample 0                  # audit every row (default samples 100k)
 vecscope audit vectors.npy --sample-repeats 3          # re-audit 3 samples; report value ranges and verdict stability

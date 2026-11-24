@@ -70,6 +70,18 @@ Pass that id as `baseline` when re-auditing after a change. The response then ca
 changes), as `--baseline` does in the CLI, without the agent saving the earlier response.
 The server keeps its last 32 audits in memory; a saved response or `--json` file works too.
 
+With `qrels_path` on both audits, `retrieval_tolerances` (e.g. `{"ndcg_at_k": 0.01}`) turns
+the retrieval changes into a check: a metric that dropped by more is listed in
+`baseline_diff.retrieval_regressions`, a tolerance that could not be checked (no labels on
+the baseline, different qrels or k) in `retrieval_unchecked`, and the summary says
+`RETRIEVAL WORSE` or `NOT CHECKED`. Either one means the change is not adopted; see
+[Retrieval quality as a gate](ci.md#retrieval-quality-as-a-gate).
+
+Every `baseline_diff` also carries `change_decision` (`adopt`, `reject` or `needs_review`,
+with reasons and a `watch` list) and, for a baseline with a plan, `attempts`: how many changes
+for its first step were not adopted in this server session. At 3 the summary says `STOP`. See
+[Adopting a change](quality.md#adopting-a-change).
+
 `verbose=false` drops the details, explanations and actions of findings that are ok. Agents
 without MCP can run the CLI with `--json` and read the same evidence.
 

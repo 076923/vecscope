@@ -284,6 +284,7 @@ vecscope audit vectors.npy --fail-on none --baseline old.json   # 절대 임곗�
 vecscope audit vectors.npy --baseline old.json         # 이전 --json 결과와 비교, 퇴행이 있으면 종료 코드 1
 vecscope audit vectors.npy --baseline old.json --tolerances tol.json   # 값이 허용량보다 나빠져도 종료 코드 1
 vecscope audit vectors.npy --baseline old.json --require-comparable    # 기준선의 설정이 다르면 종료 코드 2
+vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --baseline old.json --retrieval-tolerance ndcg_at_k=0.01   # nDCG가 허용량보다 더 떨어지면 종료 코드 1
 vecscope audit vectors.npy --near-dup 0.98             # 근접 중복으로 간주할 코사인 임곗값
 vecscope audit vectors.npy --sample 0                  # 샘플링 없이 전체 행을 감사 (기본값은 10만 행)
 vecscope audit vectors.npy --sample-repeats 3          # 표본 3개를 감사해 값의 범위와 판정 안정성을 보고

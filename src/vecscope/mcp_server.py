@@ -91,6 +91,34 @@ _RECENT_MAX = 32
 _RECENT_LOCK = threading.Lock()
 
 
+# rejected or unreviewed changes per (baseline corpus, first plan step), counted by the
+# distinct corpus each re-audit saw, so an agent that keeps trying fixes for one step is told
+# to stop; held in memory only
+_ATTEMPTS: dict[tuple[str, str], set[str]] = {}
+
+
+def _count_attempt(base: dict, ev: dict, decision: str) -> dict | None:
+    """Record a re-audit against ``base`` that did not end in 'adopt' and report how many
+    such changes were tried for the baseline's first plan step."""
+    from vecscope.plan import ATTEMPT_LIMIT
+
+    plan = base.get("plan") or []
+    if not plan or not isinstance(plan[0], dict):
+        return None
+    key = (str(base.get("corpus_fingerprint") or _audit_id(base)), str(plan[0].get("group")))
+    with _RECENT_LOCK:
+        tried = _ATTEMPTS.setdefault(key, set())
+        if decision != "adopt":
+            tried.add(str(ev.get("corpus_fingerprint") or _audit_id(ev)))
+        n = len(tried)
+    return {
+        "step": key[1],
+        "not_adopted": n,
+        "limit": ATTEMPT_LIMIT,
+        "stop": n >= ATTEMPT_LIMIT,
+    }
+
+
 def _audit_id(ev: dict) -> str:
     """Content hash of the evidence: the same input and settings give the same id."""
     blob = json.dumps(ev, sort_keys=True, ensure_ascii=False, default=str).encode()
@@ -390,8 +418,10 @@ Workflow: (1) call audit_embeddings and report the failing findings with their v
 ranges verbatim; (2) follow the response's plan, which groups the non-ok findings by shared
 cause in fix order, one step at a time; (3) apply that step's first_change, applying any
 vector transform to queries too; (4) re-audit with baseline set to the earlier audit_id
-and qrels_path on both runs when labels exist; judge the change by baseline_diff, the step's
-re_measure numbers and retrieval.ndcg_at_k; (5) adopt only confirmed improvements. Thresholds are calibrated defaults, not a universal
+and, when labels exist, qrels_path on both runs and retrieval_tolerances such as
+{"ndcg_at_k": 0.01}; judge the change by baseline_diff (retrieval_regressions and
+retrieval_unchecked block it), the step's re_measure numbers and retrieval.ndcg_at_k;
+(5) adopt only confirmed improvements. Thresholds are calibrated defaults, not a universal
 bar: a warn on a good model is common, and neither a fail nor all-ok is a statement about
 relevance; say so. Use sweep_index before choosing HNSW/IVF parameters, and
 compare_embeddings when two models embedded the same items (or the same model before and
@@ -443,6 +473,16 @@ def _summary(ev: dict) -> str:
             f"; inconclusive on this sample (not evidence of health): "
             f"{', '.join(ev['inconclusive_findings'])}"
         )
+    unjudged = [
+        f"{f['name']} at {'/'.join(f['details']['not_judged'])}"
+        for f in ev["findings"]
+        if (f.get("details") or {}).get("not_judged")
+    ]
+    if unjudged:
+        head += (
+            "; not judged, too few queries for the corpus size (not evidence of health): "
+            + ", ".join(unjudged)
+        )
     if ev.get("needs_full_audit"):
         head += f"; needs a full audit (sample=0) to settle: {', '.join(ev['needs_full_audit'])}"
     if not bad:
@@ -468,6 +508,26 @@ def _summary(ev: dict) -> str:
         for c in d.get("retrieval_changes") or []:
             if c["metric"] == "ndcg_at_k":
                 head += f", {c['ranking']} nDCG {c['baseline_value']:.3f} -> {c['value']:.3f}"
+        if d.get("value_regressions"):
+            head += f", beyond tolerance: {', '.join(d['value_regressions'])}"
+        if d.get("retrieval_regressions"):
+            head += f", RETRIEVAL WORSE beyond tolerance: {', '.join(d['retrieval_regressions'])}"
+        if d.get("retrieval_unchecked"):
+            head += (
+                f", retrieval tolerance NOT CHECKED: {', '.join(d['retrieval_unchecked'])} "
+                "(needs the same qrels and k on both runs)"
+            )
+        elif d.get("retrieval_changes") and not d.get("retrieval_comparable"):
+            head += " (retrieval: different qrels or k, not comparable)"
+        cd = d.get("change_decision")
+        if cd:
+            head += f"; change decision: {cd['decision'].upper()} ({'; '.join(cd['reasons'])})"
+        a = d.get("attempts")
+        if a and a["stop"]:
+            head += (
+                f"; STOP: {a['not_adopted']} changes for step {a['step']} were not adopted "
+                f"(limit {a['limit']}); report to the person instead of trying another"
+            )
         if not d["comparable"]:
             head += " (settings differ from the baseline: not comparable)"
     if ev.get("query_reference_note"):
@@ -493,6 +553,7 @@ def audit_embeddings(
     ann_from_source: bool = False,
     baseline: str | None = None,
     tolerances: dict | None = None,
+    retrieval_tolerances: dict | None = None,
 ) -> dict:
     """Audit an embedding file: hubness, anisotropy, collapse, rogue dimensions, norms,
     metric mismatch, distance concentration, outliers, k-NN graph islands, and optionally
@@ -538,6 +599,11 @@ def audit_embeddings(
     supplies the reference for query_shift, but only when it was audited on the same corpus
     or an unchanged prefix of it (`query_reference_note` says when it was skipped). `tolerances` maps a finding to the worsening it
     may accumulate, e.g. {"collapse": 0.01}; beyond it the finding is a value regression.
+    `retrieval_tolerances` (needs `baseline` and `qrels_path`) maps a retrieval metric to the
+    drop it may take, e.g. {"ndcg_at_k": 0.01} (prefix exact. or ranked. for one ranking);
+    beyond it `baseline_diff.retrieval_regressions` names it whatever the findings say, and
+    `retrieval_unchecked` names tolerances that could not be checked (no retrieval on the
+    baseline, different qrels or k). Treat either as "do not adopt this change".
     `verbose=False` drops details, causes, actions and explanations of findings that are ok
     and the thresholds table; it saves most when most findings are ok.
 
@@ -582,8 +648,10 @@ def audit_embeddings(
             )
             ranked = _neighbors(ranked_path, "ranked_path")
             q = _vectors(queries_path, "queries_path") if queries_path else None
-            if tolerances is not None and baseline is None:
-                raise ValueError("tolerances need baseline")
+            if (tolerances is not None or retrieval_tolerances is not None) and baseline is None:
+                raise ValueError("tolerances and retrieval_tolerances need baseline")
+            if retrieval_tolerances and qrels is None:
+                raise ValueError("retrieval_tolerances need qrels_path (and queries_path)")
             base = _load_baseline(baseline) if baseline else None
             qbase, note = None, None
             if query_baseline_path:
@@ -621,7 +689,14 @@ def audit_embeddings(
             audit_id = _audit_id(ev)
             _remember(audit_id, ev)
             if base is not None:
-                ev["baseline_diff"] = diff_evidence(ev, base, tolerances=tolerances)
+                ev["baseline_diff"] = diff_evidence(
+                    ev, base, tolerances=tolerances, retrieval_tolerances=retrieval_tolerances
+                )
+                attempts = _count_attempt(
+                    base, ev, ev["baseline_diff"]["change_decision"]["decision"]
+                )
+                if attempts is not None:
+                    ev["baseline_diff"]["attempts"] = attempts
             if note:
                 ev["query_reference_note"] = note
         except _USER_ERRORS as e:

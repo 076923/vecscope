@@ -25,6 +25,15 @@ inputs:
   queries:
     description: Query embeddings (m x dim) for the query-side findings.
     default: ""
+  qrels:
+    description: Relevance judgments for the queries (.json/.jsonl/.tsv); adds labeled retrieval quality.
+    default: ""
+  retrieval-tolerance:
+    description: >-
+      Allowed drop of a retrieval metric against the baseline, as METRIC=DELTA pairs separated by
+      spaces or commas (e.g. "ndcg_at_k=0.01 recall_at_k=0.02"). A larger drop fails the job, and so
+      does a tolerance that cannot be checked. Needs baseline, queries and qrels.
+    default: ""
   fail-on:
     description: Verdict level that fails the job against the absolute thresholds (warn, fail, none).
     default: fail
@@ -60,6 +69,11 @@ outputs:
   regressions:
     description: Comma-separated findings that regressed against the baseline.
     value: ${{ steps.audit.outputs.regressions }}
+  retrieval-regressions:
+    description: >-
+      Comma-separated retrieval metrics (e.g. exact.ndcg_at_k) that dropped beyond their tolerance,
+      followed by any tolerance that could not be checked, marked "unchecked:".
+    value: ${{ steps.audit.outputs.retrieval-regressions }}
   evidence:
     description: Path of the evidence JSON.
     value: ${{ steps.audit.outputs.evidence }}
@@ -96,6 +110,8 @@ runs:
         VS_TOLERANCES: ${{ inputs.tolerances }}
         VS_THRESHOLDS: ${{ inputs.thresholds }}
         VS_QUERIES: ${{ inputs.queries }}
+        VS_QRELS: ${{ inputs.qrels }}
+        VS_RETRIEVAL_TOLERANCE: ${{ inputs.retrieval-tolerance }}
         VS_FAIL_ON: ${{ inputs.fail-on }}
         VS_K: ${{ inputs.k }}
         VS_SAMPLE: ${{ inputs.sample }}
@@ -108,6 +124,11 @@ runs:
         if [ -n "$VS_TOLERANCES" ]; then args+=(--tolerances "$VS_TOLERANCES"); fi
         if [ -n "$VS_THRESHOLDS" ]; then args+=(--thresholds "$VS_THRESHOLDS"); fi
         if [ -n "$VS_QUERIES" ]; then args+=(--queries "$VS_QUERIES"); fi
+        if [ -n "$VS_QRELS" ]; then args+=(--qrels "$VS_QRELS"); fi
+        if [ -n "$VS_RETRIEVAL_TOLERANCE" ]; then
+          read -ra rtol <<< "${VS_RETRIEVAL_TOLERANCE//,/ }"
+          for t in "${rtol[@]}"; do args+=(--retrieval-tolerance "$t"); done
+        fi
         if [ "$VS_REQUIRE_COMPARABLE" = "true" ]; then args+=(--require-comparable); fi
         if [ -n "$VS_ARGS" ]; then
           read -ra extra <<< "$VS_ARGS"

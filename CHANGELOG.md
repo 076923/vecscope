@@ -6,7 +6,64 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Retrieval quality as a gate: `vecscope audit --baseline ... --qrels ...
+  --retrieval-tolerance ndcg_at_k=0.01` (repeatable; `recall_at_k`, `mrr_at_k`,
+  `hit_rate_at_k`, `duplicate_result_share`, `overlap_with_exact`, optionally prefixed `exact.`
+  or `ranked.`) exits 1 when a labeled retrieval metric drops by more than its tolerance
+  against the baseline, whatever the findings say. A tolerance that cannot be checked
+  (baseline without labels, different qrels or k, missing ranking) fails the run too, or exits
+  2 with `--require-comparable`. The baseline diff carries `retrieval_regressions`,
+  `retrieval_unchecked`, `retrieval_tolerances`, and `worsening` and `tolerance` on each
+  retrieval change; the `gate` block names both lists. Before this, retrieval changes were
+  printed but never failed a run.
+- MCP: `audit_embeddings(retrieval_tolerances={...})` with the same rules; the summary says
+  `RETRIEVAL WORSE` or `NOT CHECKED`.
+- Safe remediation: every baseline diff carries `change_decision` (`adopt`, `reject`,
+  `needs_review`, with reasons and a `watch` list). A change is adopted only when labeled
+  retrieval did not drop (any nDCG or recall drop, exact or ranked, or the
+  `--retrieval-tolerance` budget) and something improved; a change with no measured gain is
+  rejected; without comparable labels a person decides. Every plan step carries `adopt_when`:
+  transform a copy, keep the original, adopt on `adopt` only, stop after 3 changes for one
+  step that were not adopted. The MCP server counts them per baseline and first plan step
+  (`baseline_diff.attempts`) and says `STOP` in the summary at the limit. The CLI prints the
+  decision under the baseline diff. `tests/test_safe_remediation.py` fixes the cases: centering
+  a healthy corpus lowers nDCG and is rejected, a no-op is rejected, no labels needs review.
+- Agent cases 3 and 4 (`examples/agent_case.py --case healthy|misdirected`,
+  `docs/agent_case.md`): a healthy corpus with a request to center or whiten it, and a prompt
+  that blames corpus anisotropy when the queries come from another model. In two runs each,
+  Claude Code tried the change on copies, the re-audit rejected it on the labels (nDCG@10 0.713
+  to 0.690 and 0.637; 0.221 to 0.133) and the originals stayed in place.
+- `change_decision.still_not_ok` names the findings that are still not ok after an adopted
+  change: centering only the corpus of case 4 nudges nDCG@10 up while the query fault remains.
+- GitHub Action: `qrels` and `retrieval-tolerance` inputs, a `retrieval-regressions` output and
+  a retrieval table in the job summary. CI checks that a lost id mapping (the same rows
+  reordered: no finding moves) fails the job on retrieval alone.
+- Held-out validation on public data (`examples/validation/`, `docs/validation.md`): 19 public
+  datasets none of the thresholds was fitted on (XPQA in seven languages, Amazon ESCI us, es
+  and jp, MIRACL de, fr and hi, CodeSearchNet python, go and java, CoSQA, LegalBench terms of
+  service, TREC-COVID), each encoded with 14 public models. 54 of 67 bad pipelines (50% or
+  less of the best nDCG@10) end at `fail` and one has no flag; 26 of 114 good pipelines end at
+  `fail`, mostly through `effective_rank` and `collapse` on text under 200 characters. The
+  thresholds were not changed. `examples/validation/faults.py` injects six faults into the
+  good pipelines: the baseline diff catches most of what the absolute verdict misses
+  (truncation 62 of 63 against 7), and a lost id mapping is caught only by
+  `--retrieval-tolerance`. `examples/validation/calibrate_case.py` shows `vecscope calibrate`
+  proposing no threshold on XPQA ja, where no finding separates good from bad models.
+  `run.py --reaudit` audits the cached embeddings again after a change to vecscope.
+
 ### Changed
+
+- `query_hubness` is judged against chance. With few queries over a large corpus the
+  k-occurrence skewness is high with no hub at all (a hub-free index gives
+  (1 - 2p) / sqrt(queries p (1 - p)), p = k/n: 4.8 for 300 queries over 70k documents, 18.4
+  for 50 over 171k), so it read `warn` or `fail` on every good held-out pipeline over 50k
+  documents. The finding now reports `details.null_skewness`, gives no verdict level that
+  chance reaches (`details.not_judged`, `NOT JUDGED` in the explanation and the CLI line,
+  "not judged" in the MCP summary) and says how many queries would judge it
+  (`details.queries_needed`). Thresholds are unchanged; on the data they were fitted on chance
+  stays near 1.1 to 1.3.
 
 - The README keeps the overview, quick start, findings table, a short MCP and CI setup and the
   FAQ (about 320 lines instead of 1,320). The rest moved unchanged to documentation pages, each

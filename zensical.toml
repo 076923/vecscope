@@ -20,6 +20,7 @@ nav = [
   { "Performance" = "performance.md" },
   { "Retrieval quality tables" = "retrieval_quality.md" },
   { "Verification" = "verification.md" },
+  { "Held-out validation" = "validation.md" },
   { "Agent cases" = "agent_case.md" },
   { "Changelog" = "changelog.md" },
   { "한국어" = [
@@ -31,6 +32,7 @@ nav = [
     { "성능과 동작 원리" = "ko/performance.md" },
     { "검색 품질 표" = "ko/retrieval_quality.md" },
     { "검증 결과" = "ko/verification.md" },
+    { "held-out 검증" = "ko/validation.md" },
     { "에이전트 사례" = "ko/agent_case.md" },
   ] },
 ]

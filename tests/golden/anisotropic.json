@@ -432,6 +432,7 @@
    "first_change": "subtract the corpus mean and re-normalize (anisotropy.details shows the expected cosine after centering); apply the same transform to queries and rebuild the index",
    "re_measure": "anisotropy below warn_at, hubness.skewness down; retrieval ndcg_at_k not lower than before (centering healthy models cost up to 0.034 nDCG@10 in the verification); pass --qrels to measure retrieval quality as well",
    "why_this_order": "a transform rebuilds the neighbor graph that hubness, connectivity and ann_recall are computed on",
+   "adopt_when": "apply first_change to a copy of the vectors (and of the queries and the index), never to the original; re-audit the copy with the original as baseline and the same qrels; adopt only when baseline_diff.change_decision.decision is 'adopt'. 'reject' means keep the original; 'needs_review' (no labels on both runs) means a person decides. After 3 changes for one step that were not adopted, stop and report instead of trying another",
    "only_inconclusive": false
   }
  ],

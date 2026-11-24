@@ -240,3 +240,182 @@ def test_cli_qrels_and_ranked(tmp_path, capsys, labeled):
         ]
     )
     assert "retrieval vs baseline:" in capsys.readouterr().out
+
+
+# -- the retrieval regression gate -----------------------------------------------------
+
+
+def _write_labeled(tmp_path, corpus, queries, qrels, name="c"):
+    np.save(tmp_path / f"{name}.npy", corpus)
+    np.save(tmp_path / "q.npy", queries)
+    (tmp_path / "qrels.json").write_text(
+        json.dumps({str(q): {str(d): g for d, g in v.items()} for q, v in qrels.items()})
+    )
+
+
+def _permuted(corpus, seed=0):
+    """The same vectors in another row order: what a reindex that loses the id mapping does.
+    Every finding is invariant to row order, so only labeled retrieval can see it."""
+    return corpus[np.random.default_rng(seed).permutation(len(corpus))]
+
+
+def test_findings_cannot_see_a_lost_id_mapping_but_the_retrieval_gate_can(labeled):
+    corpus, queries, qrels = labeled
+    base = audit(corpus, k=10, queries=queries, qrels=qrels, sample=0).to_dict()
+    new = audit(_permuted(corpus), k=10, queries=queries, qrels=qrels, sample=0).to_dict()
+    plain = diff_evidence(new, base)
+    assert plain["regressions"] == [] and plain["value_regressions"] == []
+    assert plain["retrieval_regressions"] == [] and plain["retrieval_unchecked"] == []
+    d = diff_evidence(new, base, retrieval_tolerances={"ndcg_at_k": 0.01})
+    assert d["retrieval_regressions"] == ["exact.ndcg_at_k"]
+    row = next(r for r in d["retrieval_changes"] if r["metric"] == "ndcg_at_k")
+    assert row["worsening"] > 0.5 and row["tolerance"] == 0.01
+    # unchanged vectors stay inside a zero tolerance
+    same = diff_evidence(base, base, retrieval_tolerances={"ndcg_at_k": 0, "recall_at_k": 0})
+    assert same["retrieval_regressions"] == [] and same["retrieval_unchecked"] == []
+
+
+def test_retrieval_tolerance_direction_and_rankings(labeled):
+    corpus, queries, qrels = labeled
+    from vecscope.diagnostics.queries import query_knn
+
+    top, _ = query_knn(corpus, queries, 10)
+    worse = top[:, ::-1].copy()  # same documents, the relevant one pushed to the bottom
+    base = audit(corpus, k=10, queries=queries, qrels=qrels, ranked=top).to_dict()
+    new = audit(corpus, k=10, queries=queries, qrels=qrels, ranked=worse).to_dict()
+    # a bare key covers both rankings; recall@10 is order-blind, nDCG and MRR are not
+    d = diff_evidence(new, base, retrieval_tolerances={"ndcg_at_k": 0.01, "recall_at_k": 0})
+    assert d["retrieval_regressions"] == ["ranked.ndcg_at_k"]
+    # a prefixed key checks only its ranking; overlap_with_exact is ranked-only
+    d = diff_evidence(new, base, retrieval_tolerances={"exact.mrr_at_k": 0})
+    assert d["retrieval_regressions"] == []
+    d = diff_evidence(new, base, retrieval_tolerances={"overlap_with_exact": 0})
+    assert d["retrieval_regressions"] == [] and d["retrieval_unchecked"] == []
+    # an improvement is never a regression, a higher duplicate share is
+    d = diff_evidence(base, new, retrieval_tolerances={"ndcg_at_k": 0})
+    assert d["retrieval_regressions"] == []
+    dup = json.loads(json.dumps(new))
+    dup["retrieval"]["exact"]["duplicate_result_share"] += 0.2
+    d = diff_evidence(dup, new, retrieval_tolerances={"duplicate_result_share": 0.1})
+    assert d["retrieval_regressions"] == ["exact.duplicate_result_share"]
+
+
+def test_retrieval_tolerance_that_cannot_be_checked_is_reported(labeled):
+    corpus, queries, qrels = labeled
+    base = audit(corpus, k=10, queries=queries, qrels=qrels).to_dict()
+    unlabeled = audit(corpus, k=10, queries=queries).to_dict()
+    other_qrels = audit(corpus, k=10, queries=queries, qrels={0: qrels[0]}).to_dict()
+    rtol = {"ndcg_at_k": 0.01}
+    for new, old in ((base, unlabeled), (unlabeled, base), (other_qrels, base)):
+        d = diff_evidence(new, old, retrieval_tolerances=rtol)
+        assert d["retrieval_regressions"] == [] and d["retrieval_unchecked"] == ["exact.ndcg_at_k"]
+    # a ranking the tolerance names explicitly must exist on both runs
+    d = diff_evidence(base, base, retrieval_tolerances={"ranked.ndcg_at_k": 0.01})
+    assert d["retrieval_unchecked"] == ["ranked.ndcg_at_k"]
+    # ... while a bare key skips a ranking neither run supplied
+    assert diff_evidence(base, base, retrieval_tolerances=rtol)["retrieval_unchecked"] == []
+
+
+@pytest.mark.parametrize(
+    "tol,err",
+    [
+        ({"ndcg": 0.01}, "unknown retrieval metric"),
+        ({"fast.ndcg_at_k": 0.01}, "unknown retrieval metric"),
+        ({"exact.overlap_with_exact": 0.01}, "ranked results only"),
+        ({"ndcg_at_k": -0.01}, ">= 0"),
+        ({"ndcg_at_k": float("nan")}, ">= 0"),
+        ({"ndcg_at_k": True}, ">= 0"),
+    ],
+)
+def test_retrieval_tolerances_are_validated(tol, err):
+    from vecscope.evidence import resolve_retrieval_tolerances
+
+    with pytest.raises(ValueError, match=err):
+        resolve_retrieval_tolerances(tol)
+
+
+def test_parse_retrieval_tolerance_flags():
+    from vecscope.evidence import parse_retrieval_tolerance
+
+    assert parse_retrieval_tolerance(["ndcg_at_k=0.01", "ranked.recall_at_k=0.02"]) == {
+        "ndcg_at_k": 0.01,
+        "ranked.recall_at_k": 0.02,
+    }
+    assert parse_retrieval_tolerance(None) == {}
+    for bad in ("ndcg_at_k", "=0.1", "ndcg_at_k=x"):
+        with pytest.raises(ValueError, match="--retrieval-tolerance"):
+            parse_retrieval_tolerance([bad])
+
+
+def test_cli_retrieval_tolerance_gates_the_run(tmp_path, capsys, labeled):
+    corpus, queries, qrels = labeled
+    _write_labeled(tmp_path, corpus, queries, qrels)
+    np.save(tmp_path / "moved.npy", _permuted(corpus))
+    common = ["--queries", str(tmp_path / "q.npy"), "--qrels", str(tmp_path / "qrels.json")]
+    common += ["--sample", "0", "--fail-on", "none"]
+    assert main(["audit", str(tmp_path / "c.npy"), "--json", *common]) == 0
+    (tmp_path / "base.json").write_text(capsys.readouterr().out)
+    gate = ["--baseline", str(tmp_path / "base.json")]
+    # without a retrieval tolerance the lost mapping passes: no finding moved
+    assert main(["audit", str(tmp_path / "moved.npy"), *common, *gate]) == 0
+    capsys.readouterr()
+    gate += ["--retrieval-tolerance", "ndcg_at_k=0.01"]
+    assert main(["audit", str(tmp_path / "moved.npy"), *common, *gate]) == 1
+    out = capsys.readouterr().out
+    assert "retrieval worse than baseline beyond tolerance: exact.ndcg_at_k" in out
+    assert "WORSE by" in out
+    assert "change decision: reject; retrieval dropped: exact.ndcg_at_k" in out
+    assert main(["audit", str(tmp_path / "c.npy"), *common, *gate]) == 0
+    assert "within 0.01" in capsys.readouterr().out
+    assert main(["audit", str(tmp_path / "moved.npy"), "--json", *common, *gate]) == 1
+    g = json.loads(capsys.readouterr().out)["gate"]
+    assert g["retrieval_regressions"] == ["exact.ndcg_at_k"] and g["exit_code"] == 1
+
+
+def test_cli_retrieval_tolerance_unchecked_fails_and_needs_its_inputs(tmp_path, capsys, labeled):
+    corpus, queries, qrels = labeled
+    _write_labeled(tmp_path, corpus, queries, qrels)
+    c, q = str(tmp_path / "c.npy"), ["--queries", str(tmp_path / "q.npy")]
+    assert main(["audit", c, *q, "--json", "--fail-on", "none"]) == 0
+    (tmp_path / "unlabeled.json").write_text(capsys.readouterr().out)
+    run = [*q, "--qrels", str(tmp_path / "qrels.json"), "--fail-on", "none"]
+    run += ["--baseline", str(tmp_path / "unlabeled.json")]
+    run += ["--retrieval-tolerance", "ndcg_at_k=0.01"]
+    assert main(["audit", c, *run]) == 1
+    assert "retrieval tolerance not checked: exact.ndcg_at_k" in capsys.readouterr().out
+    assert main(["audit", c, *run, "--require-comparable"]) == 2
+    assert "cannot be compared on exact.ndcg_at_k" in capsys.readouterr().err
+    # the flag needs a baseline and labels
+    assert main(["audit", c, *q, "--retrieval-tolerance", "ndcg_at_k=0.01"]) == 2
+    assert "need --baseline" in capsys.readouterr().err
+    no_qrels = [*q, "--baseline", str(tmp_path / "unlabeled.json")]
+    assert main(["audit", c, *no_qrels, "--retrieval-tolerance", "ndcg_at_k=0.01"]) == 2
+    assert "needs --qrels" in capsys.readouterr().err
+
+
+def test_gate_decision_reports_retrieval_regressions():
+    from vecscope.cli import gate_decision
+
+    d = {
+        "regressions": [],
+        "value_regressions": [],
+        "retrieval_regressions": ["exact.ndcg_at_k"],
+        "retrieval_unchecked": [],
+        "retrieval_changes": [
+            {
+                "ranking": "exact",
+                "metric": "ndcg_at_k",
+                "value": 0.5,
+                "baseline_value": 0.9,
+                "worsening": 0.4,
+                "tolerance": 0.01,
+            }
+        ],
+    }
+    g = gate_decision("ok", "none", d)
+    assert g["exit_code"] == 1 and g["retrieval_regressions"] == ["exact.ndcg_at_k"]
+    assert "0.9000 -> 0.5000 (worse by 0.4000 > 0.01)" in g["reasons"][0]
+    g = gate_decision(
+        "ok", "none", {**d, "retrieval_regressions": [], "retrieval_unchecked": ["x"]}
+    )
+    assert g["exit_code"] == 1 and "not checked: x" in g["reasons"][0]

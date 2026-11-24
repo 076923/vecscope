@@ -46,11 +46,17 @@ In CI:
 - Add `--require-comparable` to a gate: it exits 2 when the baseline was made with different
   n, dim, k, sampling, thresholds or near-dup cutoff, instead of printing a diff that measures
   the settings rather than the corpus.
+- When labeled queries exist, gate on them too: `--queries q.npy --qrels qrels.json
+  --retrieval-tolerance ndcg_at_k=0.01` (Action: `qrels`, `retrieval-tolerance`). A drop beyond
+  it is a `retrieval_regressions` entry and exit 1 even when every finding held; findings
+  cannot see a lost id mapping or a model that ranks worse. A tolerance listed in
+  `retrieval_unchecked` (baseline without labels, different qrels or k) also exits 1: report it
+  as "not checked", never as a pass.
 - Pick tolerances from measured retrieval quality ("Calibrating thresholds to your domain" in
   https://076923.github.io/vecscope/quality/), not from what makes the pipeline green.
 - Two rules can fail a run and the `gate` block (JSON) or line (text) names which one did:
   the absolute thresholds (`--fail-on`) or the baseline (`verdict_regressions`,
-  `value_regressions`).
+  `value_regressions`, `retrieval_regressions`, `retrieval_unchecked`).
 - When the user's healthy corpus sits at `warn`/`fail` on a finding by the public defaults,
   gate with `--fail-on none --baseline` so only the change is judged, and say that is the
   policy.
@@ -86,7 +92,8 @@ MCP only:
 - Every `audit_embeddings` response carries an `audit_id`; after a change, re-audit with
   `baseline=<that id>` and read `baseline_diff` (`improvements`, `regressions`,
   `retrieval_changes`) and the "vs baseline" part of `summary` instead of comparing two
-  responses by hand.
+  responses by hand. With `qrels_path` on both audits, pass `retrieval_tolerances`
+  (`{"ndcg_at_k": 0.01}`) so a quality drop shows up as `retrieval_regressions`.
 - A baseline audited on the same corpus with queries also gives `query_shift`; after a
   transform it does not (`query_reference_note`).
 - Pass `verbose=false` to keep the response short when most findings are ok.
@@ -130,6 +137,12 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
 - Thresholds are defaults calibrated on seven public models and re-checked on 19 models
   against labeled retrieval data; they are a starting point, not a universal bar.
   - `warn` on hubness is common for good models.
+  - On 19 held-out public datasets, 26 of 114 good pipelines ended at `fail`, mostly
+    through `collapse` and `effective_rank` on text under 200 characters. Report the absolute
+    verdict there as things to look at, and gate on the baseline diff and
+    `--retrieval-tolerance`: on injected faults the diff caught most of what the absolute
+    verdict missed, and a lost id mapping moved no finding, only labeled retrieval.
+    `query_hubness` was the one finding that fell with nDCG@10 on every dataset.
   - `query_gap` is a distance ratio that short queries against long passages keep at 1 to 2.5
     for good pipelines, so read it as "same space or not", never as a quality score.
   - `ood_queries` is deprecated: report `query_gap` instead.
@@ -166,14 +179,18 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
    - or the query pipeline (query_gap, query_shift, query_hubness).
 
    `--clusters` shows where in the corpus a problem lives.
-3. **Try the smallest change first**: `suggested_action` names it. Any transform applied to
-   the corpus (centering, standardizing, normalizing, truncating) must be applied to the
-   queries too, and the index rebuilt.
+3. **Try the smallest change first, on a copy**: `suggested_action` names it. Never transform
+   the original vectors, queries or index in place; write the changed copy elsewhere and keep
+   the original until the change is adopted. Any transform applied to the corpus (centering,
+   standardizing, normalizing, truncating) must be applied to the queries too, and the index
+   rebuilt.
 4. **Re-audit and compare**: `verify_by` says which number should move.
    - Then compare retrieval on real queries before and after: when labels exist pass
      `--qrels` (MCP `qrels_path`) on both runs and `--baseline` on the second.
    - Quote `retrieval_changes` next to the finding changes, and only when
-     `retrieval_comparable` is true.
+     `retrieval_comparable` is true. Pass a retrieval tolerance (`--retrieval-tolerance
+     ndcg_at_k=0.01`, MCP `retrieval_tolerances`) so the decision is the tool's, not a reading
+     of two numbers.
    - Pass the production top-k as `--ranked` to see the index's effect (`overlap_with_exact`).
      With filters, hybrid search or a reranker in the pipeline, overlap measures the whole
      pipeline's departure from vector search; pass each stage's output to locate a loss.
@@ -181,9 +198,22 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
      are not in the averages.
    - A finding turning `ok` is not proof that search got better, and a change that fixes a
      finding but lowers `ndcg_at_k` is not an improvement.
-5. **Adopt only confirmed improvements**; otherwise revert and try the next cause. Measure
-   latency and memory alongside quality: a transform that fixes a finding can cost more at
-   serving time than the finding did.
+5. **Adopt only what `baseline_diff.change_decision` adopts** (the step's `adopt_when` says
+   the same):
+   - `adopt`: labeled retrieval did not drop and something improved. Mention `watch`, the
+     findings that got worse anyway, and `still_not_ok`: an adopted change is not a fixed
+     pipeline. A change that misses the fault can still nudge retrieval up (a corpus
+     centered while the queries come from another model); follow the new plan.
+   - `reject`: keep the original and try the next cause. Never adopt a change that lowered
+     `ndcg_at_k` or `recall_at_k`, whatever the findings say.
+   - `needs_review`: no comparable labels. Do not adopt it yourself: show the user the
+     finding changes and ask, or get qrels and re-run.
+   - After 3 changes for one step that were not adopted (MCP: `attempts.stop`, `STOP` in the
+     summary), stop and report what was tried instead of trying a fourth.
+   - When every finding is ok there is nothing to fix: do not center, standardize or
+     truncate a healthy corpus "to be safe".
+   Measure latency and memory alongside quality: a transform that fixes a finding can cost
+   more at serving time than the finding did.
 
 Finding-specific notes:
 
@@ -236,10 +266,12 @@ Finding-specific notes:
   - Pass real query traffic as `--queries` whenever a log exists, because corpus-drawn
     queries can pick a different setting.
   - Confirm the pick in the serving environment before fixing it.
-- **query_hubness**: skewness grows with corpus size.
-  - Good English models measured 1.5 to 3.4 on corpora up to 26k documents and 4.0 to 4.8 on
-    58k (FiQA), so a `warn` just above 4 on a large corpus is not by itself a query fault.
-  - Compare against a baseline of the same corpus and read it with `hubness`.
+- **query_hubness**: few queries over a large corpus raise the skewness with no hub at all.
+  - `details.null_skewness` is what a hub-free index gives with the same number of queries
+    and documents; a level chance alone reaches is not judged (`details.not_judged`), and
+    the explanation says `NOT JUDGED`. Report that as "not measured with this few queries"
+    with `details.queries_needed`, never as healthy.
+  - Compare against a baseline with the same corpus and queries and read it with `hubness`.
   - Values of 11 or more meant a model that does not cover the language.
 - **query_gap**: a `fail` most often means the queries were embedded by a different model or
   model version than the corpus.

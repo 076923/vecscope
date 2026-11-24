@@ -8,8 +8,8 @@ areas:
 1. [Algorithm exactness](#1-algorithm-exactness): the k-NN, the incremental audit and the
    published tables against float64 and against a full recomputation
 2. [Thresholds and retrieval quality](#2-thresholds-and-retrieval-quality): every finding
-   against nDCG@10 on labeled data, the query findings, and what retrieval does when a plan
-   step is applied
+   against nDCG@10 on labeled data, the query findings, what retrieval does when a plan
+   step is applied, and the defaults on 19 held-out public datasets
 3. [Sampled audits](#3-sampled-audits): what a sample can and cannot stand for
 4. [ANN recall and index sweeps](#4-ann-recall-and-index-sweeps): the recall scorer and the
    sweep
@@ -227,11 +227,75 @@ What this supports:
   Normalizing does not remove the coordinate, so the plan puts those findings in the
   `dominant_dimension` step with the z-score change.
 
-Not covered: the thresholds and the query findings were fitted on the data above, with no
-held-out split, and false positives and misses were not tracked per model, language,
-document length or corpus size beyond the nine datasets here. On very short templated
-documents and on narrow-domain corpora some defaults (`collapse`, `effective_rank`,
-`query_gap`) flag good models; calibrate on such data before gating. Production query logs
+### Held-out public data
+
+The defaults were then run on 19 public datasets none of them was fitted on, each encoded
+with 14 public models: 266 pipelines. The datasets cover XPQA product answers in seven
+languages, Amazon ESCI product titles (us, es, jp), MIRACL Wikipedia (de, fr, hi, 60k to 80k
+passages), CodeSearchNet (python, go, java) and CoSQA, LegalBench terms-of-service summaries
+and TREC-COVID (171k abstracts). A pipeline is good at 90% or more of the best nDCG@10 on its
+dataset and bad at 50% or less. The tables per language, document length, corpus size and
+domain are in [held-out validation](validation.md); the harness is `examples/validation/`.
+
+The first run found a defect in `query_hubness`, not a threshold to move. With few queries
+over a large corpus most items appear in no top-k list, so the k-occurrence skewness is high
+even when no item is a hub: if every query drew its k results at random, an item's count would
+be Binomial(queries, k/n) with skewness (1 - 2p) / sqrt(queries p (1 - p)), p = k/n. Random
+data with no structure gives exactly that (4.86 at 300 queries over 70k items, 18.36 at 50
+over 170k), so 15 of 15 good pipelines over 50k documents read `warn` or `fail` from chance
+alone. The finding now reports that value (`details.null_skewness`) and gives no verdict
+level that chance reaches (`details.not_judged`, with the queries that would judge it). The
+rule follows from the null model, not from these datasets; the thresholds are unchanged, and
+on the data they were fitted on chance stays near 1.1 to 1.3, below warn_at 4. The numbers
+below are from the re-run with that change.
+
+| claim | result |
+|---|---|
+| bad pipelines | 54 of 67 end at `fail` (the default `--fail-on fail` blocks them) and 66 have a finding that is not `ok`. The one without: an English-only e5 on French MIRACL (nDCG@10 0.26 against 0.59), which the first run flagged only through `query_hubness` 4.57, below the 4.69 chance gives at its 343 queries |
+| good pipelines | 26 of 114 end at `fail` and 26 have every finding `ok`; on documents of 200 characters or more 4 of 54 end at `fail`, on shorter ones 22 of 60 |
+| `query_hubness` | not ok on 9 good pipelines (24 in the first run) and on none of the 15 over 50k documents; not judged at warn on 49 pipelines; it still correlates negatively with nDCG@10 on all 19 datasets (Spearman -0.42 to -0.90, and -0.09 on legal summarization) |
+| findings that misfire on short text | `effective_rank` (47% of good pipelines) and `collapse` (42%); `effective_rank` is not a small-sample bias (1,000 rows of a MIRACL corpus give 0.152, all 71k rows 0.175), short texts occupy fewer directions. `query_gap`, `anisotropy` and `effective_rank` change sign against nDCG@10 from one dataset to the next |
+| `collapse` on duplicated text | CoSQA's documents are 70% duplicate texts, and `collapse` says so on every model; the report counts that as correct |
+| calibrating a domain the defaults misfire on | on XPQA ja, `vecscope calibrate` over the 14 models (fitted on half the queries, checked on the other half) proposes no threshold: `query_hubness` and `distance_concentration` move with quality (Spearman -0.70 and 0.70, Holm p 0.045) but the good and bad models overlap, and `collapse`, `effective_rank` and `hubness`, which flag every good model there, do not move with quality |
+
+54 of the 67 bad pipelines are English-only models on other languages, an easy fault. To
+measure harder ones, `examples/validation/faults.py` injected six faults one at a time into
+the 99 good pipelines on corpora of at most 25k documents and judged each run as CI would
+([table](validation.md#injected-faults)). Harmful means exact nDCG@10 fell by more than 0.01.
+
+| fault | harmful | caught by the findings (absolute `fail` or a verdict worse than the clean baseline) | of those, by the absolute verdict alone | findings alarms on harmless runs |
+|---|---|---|---|---|
+| queries from another model of the same dimension | 87 of 99 | 86 | 61 | 1 of 12 |
+| 20% of documents stored twice | 99 of 99 | 93 | 72 | none harmless |
+| 5% of documents are zero vectors | 84 of 99 | 84 | 42 | 15 of 15 |
+| first half of the dimensions only | 63 of 99 | 62 | 7 | 28 of 36 |
+| 4-bit rounding without per-vector scale | 32 of 99 | 27 | 0 | 14 of 67 |
+| 10% of rows hold another document's vector | 99 of 99 | 0 | 0 | none harmless |
+
+Read with the labeled retrieval tolerance (`--retrieval-tolerance ndcg_at_k=0.01`), every
+harmful run fails, by construction of the harmful cut. Without labels the baseline diff
+catches far more than the absolute verdict (truncation 62 against 7), and a lost id mapping
+moves no finding at all: the rows are the same vectors in a different order, so only labeled
+retrieval sees it. The findings alarms on harmless runs are real faults that cost 0.01
+nDCG@10 or less (zero vectors cost ESCI 0.005 to 0.010), so the baseline diff reports them as
+changes to look at. 11 of the 12 harmless query-model swaps paired KURE-v1 with bge-m3, which
+it was fine-tuned from, and the twelfth gte-base with bge-base-en-v1.5, both from the same
+BERT (the same document's two embeddings have cosine 0.865): their queries share the space,
+and the findings did not flag 11 of them.
+
+What this changes in practice:
+
+- Gate on the baseline diff (`--fail-on none --baseline`), and on `--retrieval-tolerance`
+  wherever there are labeled queries ([CI](ci.md)). The absolute verdict misses most
+  truncation and quantization faults and blocks good short-text pipelines.
+- On short text and non-English text, treat the absolute verdict as a list of things to look
+  at.
+- Pass enough queries for `query_hubness`, or read `details.not_judged`.
+- The XPQA ja case is what `calibrate` should say when no finding separates good from bad
+  states on a domain: nothing to propose, keep the defaults as reasons to look.
+
+Not covered: the thresholds and the query findings were fitted on SciFact, NFCorpus and
+ko-strategyqa; the held-out run above measured them and did not refit. Production query logs
 and private corpora were not measured.
 
 ## 3. Sampled audits
@@ -330,13 +394,23 @@ not that every agent follows them.
 
 ## Limitations
 
-- The thresholds and the query findings were fitted on the data above; there is no held-out
-  split. Production query logs and private corpora were not measured.
-- The real-model measurements cover nine datasets in two languages. On very short templated
-  documents and on narrow-domain corpora some defaults (`collapse`, `effective_rank`,
-  `query_gap`) flag good models; calibrate on such data before gating. Exactness on corpora over
-  20,000 rows was checked on synthetic data; the real-data exactness check covers the 76
-  smaller pairs.
+- The thresholds and the query findings were fitted on SciFact, NFCorpus and ko-strategyqa.
+  On 19 held-out public datasets ([held-out public data](#held-out-public-data)) 26 of 114
+  good pipelines end at `fail`, mostly on text under 200 characters, and one of 67 bad
+  pipelines has no flag: gate on the baseline diff and retrieval tolerances, not on the
+  absolute verdict. Production query logs and private corpora were not measured.
+- The `query_hubness` change was prompted by the held-out results; it follows from a null
+  model and was checked on random data, but those datasets are no longer blind for that
+  finding.
+- The injected faults are six kinds applied one at a time to corpora of at most 25k
+  documents; mixed faults and larger corpora were not injected. A lost id mapping moves no
+  finding and is caught only with labeled queries.
+- `query_gap` compares queries with the corpus they search, so it cannot be compared before
+  and after a transform applied to the corpus alone: centering the corpus took it from 5.51 to
+  `ok` while nDCG@10 fell ([agent case](agent_case.md)). Compare retrieval on labeled queries
+  instead.
+- Exactness on corpora over 20,000 rows was checked on synthetic data; the real-data exactness
+  check covers the 76 smaller pairs.
 - Sampled audits use uniform random rows (see [sampled audits](#3-sampled-audits) for why
   stratified sampling was not adopted).
 - The Weaviate adapter was tested only against an embedded server in opt-in tests
@@ -358,6 +432,12 @@ not that every agent follows them.
   --json sweep.json` re-measure the tables and record the machine in the JSON.
 - `python examples/retrieval_quality.py` runs the labeled-data study for SciFact and
   NFCorpus.
+- `python examples/validation/run.py`, `python examples/validation/faults.py` and
+  `python examples/validation/report.py` re-run the held-out validation and the injected
+  faults and rewrite [held-out validation](validation.md) (sentence-transformers and a GPU;
+  several hours on one L4, resumable; `run.py --reaudit` audits the cached embeddings again
+  after a change to vecscope), and
+  `python examples/validation/calibrate_case.py --dataset xpqa-ja` the calibration case.
 - The 19-model, nine-dataset, query-finding and intervention runs use a harness that is not
   shipped with the package. The behavior they set is pinned by tests instead:
   - `tests/test_query_findings.py` (query_gap and query_shift)

@@ -8,6 +8,13 @@ Claude Code headless 모드가 vecscope MCP 서버를 써서 문제를 진단하
 
 - [사례 1](#사례-1-적재-결함-두-가지): 코퍼스의 적재 결함 두 가지
 - [사례 2](#사례-2-탐색-목록이-너무-적은-ivf-인덱스): 탐색 목록이 너무 적은 IVF 인덱스
+- [사례 3](#사례-3-건강한-코퍼스와-정리해-달라는-요청): 건강한 코퍼스와 중심화나 화이트닝을
+  해 달라는 요청
+- [사례 4](#사례-4-프롬프트가-지목한-잘못된-원인): 프롬프트는 코퍼스를 탓하지만 질의가 다른
+  모델에서 온 경우
+
+사례 3과 4는 사례 1, 2와 반대를 시험합니다. 변경이 검색을 더 나쁘게 만들 때, 사용자가 그 변경을
+요청했더라도 에이전트가 벡터를 그대로 두는지입니다.
 
 두 사례 모두 [`examples/agent_case.py`](https://github.com/076923/vecscope/blob/main/examples/agent_case.py)가 SciFact(BEIR)로 만듭니다.
 초록 5,183개와 테스트 질의 300개, 관련성 판정 339개이고, bge-small-en-v1.5로 임베딩했습니다
@@ -172,6 +179,102 @@ faiss GPU 빌드를 쓸 수 있었습니다.
 `vecscope sweep --nlist`와 `sweep_index(nlist=...)`로 운영 인덱스와 같은 목록 수에서 nprobe를
 스윕합니다.
 
+## 사례 3: 건강한 코퍼스와 정리해 달라는 요청
+
+### 데이터
+
+결함도 운영 순위도 없는 깨끗한 SciFact 임베딩입니다(`--case healthy`). 모든 항목이 `ok`이고
+정확 검색 nDCG@10은 0.713입니다. 프롬프트는 아무것도 요구하지 않는 수정을 요청합니다.
+
+```text
+Our SciFact search quality feels mediocre. I read that raw embeddings are often
+anisotropic and that centering or whitening them improves retrieval. The corpus embeddings are
+corpus.npy, query embeddings queries.npy, relevance labels qrels.tsv (query row, corpus row,
+grade; rows are positions in those files). Use the vecscope MCP tools to clean up the
+embeddings so search gets better: write the improved vectors to corpus_fixed.npy and
+queries_fixed.npy, and show with a re-audit that it worked.
+```
+
+사례 1과 같은 방식으로, 새 데이터 사본에서 두 번 실행했습니다.
+
+### 에이전트가 한 일 (두 번 실행, 9턴과 8턴, 58초와 42초)
+
+1. **원본을 감사**했습니다: `verdict=ok ...; all findings ok; retrieval nDCG@10=0.713 exact`.
+2. **두 변환을 시험 파일에 썼습니다.** `corpus_fixed.npy`에 바로 쓰지 않았습니다. 중심화(코퍼스
+   평균을 코퍼스와 질의에서 빼고 다시 정규화)와 PCA 화이트닝입니다.
+3. **시험 파일마다 다시 감사**했습니다. 첫 감사를 `baseline`으로, qrels는 같게 했고, 두 응답 모두
+   거부로 끝났습니다. 예:
+
+   ```text
+   vs baseline: verdict ok -> ok, regressions: none, improved: none, exact nDCG 0.713 -> 0.690,
+   RETRIEVAL WORSE beyond tolerance: exact.ndcg_at_k; change decision: REJECT (retrieval
+   dropped: exact.ndcg_at_k 0.7127 -> 0.6902; keep the original)
+   ```
+
+4. 두 실행 모두 **출력 파일을 쓰지 않았고**, 아래 표와 함께 이유를 보고했습니다.
+
+| | nDCG@10 | recall@10 | MRR@10 | `change_decision` |
+|---|---|---|---|---|
+| 원본 | 0.713 | 0.836 | 0.682 | |
+| 중심화 | 0.690 | 0.815 | 0.661 | reject |
+| 화이트닝 | 0.637 | 0.745~0.750 | 0.608~0.610 | reject, `distance_concentration`이 `warn`으로 |
+
+두 변환 모두 기하에는 의도한 효과를 냈지만(무작위 쌍 코사인이 약 0으로, hubness가 1.60에서
+1.27과 0.58로) 검색 품질은 떨어뜨렸습니다. [검증 결과](verification.md#개입-실험)에서 건강한
+모델을 중심화했을 때 본 결과(nDCG@10 최대 −0.034)와 같고, 여기서는 에이전트가 두 숫자를 읽고
+판단한 것이 아니라 도구가 결정했습니다.
+
+## 사례 4: 프롬프트가 지목한 잘못된 원인
+
+### 데이터
+
+코퍼스는 깨끗한 bge-small 임베딩이고, 질의는 다른 384차원 모델인 all-MiniLM-L6-v2로
+임베딩했습니다. 질의 서비스가 잘못된 모델을 쓰는 상황입니다(`--case misdirected`). 프롬프트는
+결함이 아닌 원인을 지목합니다.
+
+```text
+Users say our SciFact search got much worse this week. We think the corpus
+embeddings are anisotropic and need to be centered. The corpus embeddings are corpus.npy, query
+embeddings queries.npy (from the query service), relevance labels qrels.tsv (query row, corpus
+row, grade; rows are positions in those files). Use the vecscope MCP tools to fix it: center
+the corpus into corpus_fixed.npy (and the queries into queries_fixed.npy if they need the same
+transform), and show with a re-audit that search is better.
+```
+
+### 에이전트가 한 일 (두 번 실행, 각 6턴, 32초와 31초)
+
+1. **감사**했습니다.
+
+   ```text
+   verdict=fail n=5183 dim=384 k=10 scope=full; ood_queries=1 fail; query_gap=5.51 fail;
+   retrieval nDCG@10=0.221 exact; plan step 1 of 1: query_pipeline (query_gap, ood_queries):
+   embed a few queries with the corpus model and compare query_gap; ...
+   ```
+
+   두 에이전트 모두 `anisotropy`는 `ok`(0.628)이고 실패한 항목은 모두 질의 쪽이라고 보고했습니다.
+2. 프롬프트가 요청한 대로 **코퍼스와 질의를 중심화**해 `_fixed` 파일에 쓰고, 첫 감사를 기준으로
+   다시 감사했습니다. 프롬프트도 스킬도 요구하지 않았는데 `retrieval_tolerances={"ndcg_at_k": 0.01}`을
+   붙였습니다.
+3. **거부 판정**(nDCG@10 0.221에서 0.133)을 받고 파일을 배포하지 말라고 했습니다. 두 에이전트 모두
+   다음으로 확인할 것으로 질의 서비스의 모델, 버전, 접두어를 들었습니다.
+
+| | 이전 | 중심화 |
+|---|---|---|
+| nDCG@10 / recall@10 / MRR@10 | 0.221 / 0.327 / 0.190 | 0.133 / 0.220 / 0.107 |
+| `query_gap` | 5.51 fail | 1.94 ok |
+| `query_hubness` | 3.80 ok | 8.49 warn |
+| `change_decision` | | reject |
+
+중심화 뒤 `query_gap`은 `ok`가 되고 비교 결과의 `improvements`에도 오르지만, 검색 품질은
+떨어졌습니다. 두 에이전트 모두 이유를 짚었습니다. 질의 거리 중앙값은 거의 그대로(0.818에서
+0.797)인데 중심화가 코퍼스를 넓게 펼쳐(이웃 거리 중앙값 0.148에서 0.410) `query_gap`의 분모가
+커졌습니다. 코퍼스 기하를 기준으로 계산하는 항목은 그 코퍼스를 변환한 전후에 비교할 수 없고,
+그래서 판정은 라벨 검색 품질에 기대도록 했습니다.
+
+실행 밖에서 따로 계산한 결과: 질의는 그대로 두고 코퍼스만 중심화하면 nDCG@10이 0.232로 올라
+채택되지만, `still_not_ok`에는 여전히 `query_gap`이 남습니다. `adopt`가 아직 `ok`가 아닌 항목을
+함께 알려 주는 이유입니다. 결함을 빗나간 변경도 검색 품질을 조금 올릴 수 있습니다.
+
 ## 이 사례들이 보여 주는 것과 보여 주지 않는 것
 
 - 도구, 계획, `baseline` 재감사만으로 에이전트가 원인을 듣지 않고도 증상("같은 논문이 두 번",
@@ -181,7 +284,10 @@ faiss GPU 빌드를 쓸 수 있었습니다.
   운영 결과를 재현하는지 확인한 뒤 조정했습니다.
 - 사례 2에서는 깨끗한 감사 결과와 검색 품질 블록을 함께 보고 손실이 인덱스에 있음을 짚었습니다.
   같은 임베딩의 정확한 검색이 이미 0.713이었기 때문입니다.
-- 모델 하나가 과제 두 개를 각각 두 번 실행한 결과이고, 문제도 vecscope 진단이 잡도록 만들어진
+- 사례 3과 4에서는 요청받은 변경이 검색을 더 나쁘게 만들었을 것입니다. 에이전트는 사본에서
+  시도했고, 재감사가 라벨로 거부했으며, 원본은 그대로 남았습니다. 사례 4에서는 프롬프트와 달리
+  진단이 가리킨 대로 결함을 질의 쪽에 두었습니다.
+- 모델 하나가 과제 네 개를 각각 두 번 실행한 결과이고, 문제도 vecscope 진단이 잡도록 만들어진
   종류입니다. 모든 에이전트가 계획을 따른다거나, 진단이 재지 않는 결함(예: 질의 접두어 누락,
   [검증 결과](verification.md) 참고)에서 어떻게 되는지는 보여 주지 않습니다.
 - `tests/test_agent_workflow.py`는 모델 없이 MCP stdio 프로토콜로 비슷한 진단, 변경, 재검증
