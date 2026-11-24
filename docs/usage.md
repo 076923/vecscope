@@ -261,6 +261,37 @@ cache and 5 s to audit from it, against 95 s for a full audit, with the same ver
 audit's 89 s, so the cache is rebuilt there instead. Re-run with that rule, 10,000 changed
 rows rebuilt the cache in 87 s against a full audit's 87 s.
 
+## Short texts and narrow domains: a reference model
+
+A finding measures the space, and the rows shape it as much as the model does. Short
+templated texts (product titles, FAQ answers) give every good model a low effective rank,
+many near neighbors and strong hubs, so on such a corpus a finding can fire for a pipeline
+that retrieves well. Embed the same rows (and queries) with a second, independently good
+public model and pass it as the reference:
+
+```bash
+vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy
+```
+
+The reference is audited with the same settings. A finding it reaches at the same level or
+worse is attributed to the rows: it reads `ok`, the text output says `EXPLAINED BY THE ROWS`,
+and `details.reference` keeps the reference value, its verdict and the verdict without it
+(`reference.explained` lists them). The property is still there; a collapse the reference
+shares still means duplicated rows that crowd results. Findings that describe the model's
+output or the index (norms, rogue dimensions, metric mismatch, ANN recall, query shift) are
+never explained this way.
+
+Pick a reference with published scores on your language and domain. A reference that shares
+the fault (another model that does not cover the language) explains away a real problem.
+On the first held-out set, with bge-m3 as reference, good pipelines at `fail` went from 28 to
+21 of 114 and bad pipelines at `fail` stayed at 54 of 67; that rule was designed on that set.
+On a second set preregistered before it was embedded
+([Verification](verification.md#a-second-held-out-set-preregistered)), it took flags off
+most good pipelines (flagged went from 34 to 14 of 36) and kept every bad one at `fail`, but
+none of the 6 good pipelines at `fail` came down: they were hubs the model made, well past
+the reference on the same rows. A finding that stays at `fail` with a reference belongs to
+the model; labeled queries say whether it costs retrieval.
+
 ## Use as a library
 
 ```python
@@ -295,6 +326,9 @@ vecscope audit vectors.npy --baseline old.json         # diff against an earlier
 vecscope audit vectors.npy --baseline old.json --tolerances tol.json   # also exit 1 when a value worsens beyond its tolerance
 vecscope audit vectors.npy --baseline old.json --require-comparable    # exit 2 when the baseline used different settings
 vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --baseline old.json --retrieval-tolerance ndcg_at_k=0.01   # exit 1 when nDCG drops by more
+vecscope audit vectors.npy --reference ref.npy        # same rows from another good model; findings it shares read ok
+vecscope audit vectors.npy --result-sample 500 --json   # keep the top-k of 500 queries/rows for a label-free diff
+vecscope audit vectors.npy --result-sample 500 --baseline old.json --result-tolerance 0   # exit 1 when results changed
 vecscope audit vectors.npy --near-dup 0.98             # cosine threshold for near-duplicates
 vecscope audit vectors.npy --sample 0                  # audit every row (default samples 100k)
 vecscope audit vectors.npy --sample-repeats 3          # re-audit 3 samples; report value ranges and verdict stability

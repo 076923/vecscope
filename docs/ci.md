@@ -101,6 +101,59 @@ a qrels file that silently points at other documents shows up as exactly the col
 gate exists to catch. The library call is
 `diff_evidence(new, old, retrieval_tolerances={"ndcg_at_k": 0.01})`.
 
+### How many labeled queries
+
+The gate reads the mean over the labeled queries, so a small set is noisy. On 594 injected
+faults over 99 public pipelines (`examples/validation/label_budget.py`), a 0.01 nDCG
+tolerance on a random subset of the labeled queries did this against the answer of the full
+set:
+
+| labeled queries | harmful faults caught | drop 0.02 to 0.05 caught | drop above 0.05 caught | harmless changes failed |
+|---|---|---|---|---|
+| 25 | 83% | 80% | 97% | 33% |
+| 50 | 89% | 89% | 100% | 29% |
+| 100 | 92% | 95% | 100% | 24% |
+| 200 | 95% | 99% | 100% | 17% |
+| 400 | 97% | 100% | 100% | 10% |
+
+The 400 row covers the pipelines with at least 400 labeled queries. On a second set of public
+data preregistered before it was embedded, 100 labeled queries caught 87% of 95 harmful faults
+(97% of drops above 0.02) and failed 26% of 25 harmless changes
+([Verification](verification.md#a-second-held-out-set-preregistered)). About 100 labeled
+queries catch nearly every fault that costs more than two nDCG points.
+Drops between 0.01 and 0.02 need several hundred. The false alarms are changes whose
+full-set drop stayed just under 0.01; a small set cannot tell them from a real 0.01 drop, so
+a failed gate on a small set means "re-check on more queries", not "broken".
+
+## Results that must not change
+
+Without labels, no statistic of the space tells a harmful change from a harmless one. On the
+same injected faults, the share of top-k results a change moved separated harmful from
+harmless changes no better than chance (AUC 0.58). It does show that results moved, also
+when no finding does: a lost id mapping changes no finding and moves the results of every
+query that hit a moved row. So for a pipeline that is meant to return the same results (a
+re-index, a refactor, a library or hardware upgrade), gate on the results themselves:
+
+```bash
+vecscope audit embeddings.npy --queries queries.npy --result-sample 500 --json > baseline.json
+# after the change
+vecscope audit embeddings.npy --queries queries.npy --result-sample 500 \
+  --baseline baseline.json --fail-on none --result-tolerance 0
+```
+
+- `--result-sample M` stores the exact top-k of M queries and M corpus rows in the JSON. The
+  rows are chosen by a hash of the row number, so appended rows only take part of the sample
+  and a grown corpus still shares most of it with the baseline.
+- The diff carries `result_agreement` per side (`queries`, `rows`): `changed_share` is the
+  share of top-k slots that hold another row, `unchanged_items` the share of items whose
+  top-k is identical.
+- `--result-tolerance SHARE` fails the run when a side changed more (`result_regressions`),
+  and when either run has no sample (`result_unchecked`). It needs `--baseline` and
+  `--result-sample`.
+- A change that is meant to move results (a new model, a transform) is not judged by this
+  number. Without labels its `change_decision` is `needs_review` and cites the changed
+  share; the labeled gate above decides whether it is better.
+
 ## Which rule failed the run
 
 Two different rules can fail a run, and the output keeps them apart:
@@ -109,7 +162,9 @@ Two different rules can fail a run, and the output keeps them apart:
   `--fail-on warn` to be strict).
 - The baseline rules are `regressions` (a verdict got worse), `value_regressions` (a value
   worsened beyond its tolerance), `retrieval_regressions` (a labeled retrieval metric dropped
-  beyond its tolerance) and `retrieval_unchecked` (a retrieval tolerance could not be checked).
+  beyond its tolerance), `retrieval_unchecked` (a retrieval tolerance could not be checked),
+  `result_regressions` (sampled results changed beyond `--result-tolerance`) and
+  `result_unchecked` (a run had no `--result-sample`).
 
 The defaults are calibrated on public models, so a domain whose healthy corpus sits at `warn`
 or `fail` on some finding should not be blocked by the absolute rule at all.

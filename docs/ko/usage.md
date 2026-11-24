@@ -251,6 +251,35 @@ vecscope audit day3.npy --sample 0 --knn-cache knn.npz    # updated: 바뀐 행�
 새로 만듭니다. 이 기준으로 다시 돌리자 1만 행 변경에서 캐시를 새로 만들었고, 87초로 전체 감사(87초)와
 같았습니다.
 
+## 짧은 텍스트와 좁은 도메인: 기준 모델
+
+진단 항목은 공간을 재고, 공간은 모델만큼 행(데이터)의 영향도 받습니다. 짧고 틀에 박힌
+텍스트(상품명, FAQ 답변)에서는 좋은 모델도 유효 랭크가 낮고, 가까운 이웃이 많고, 허브가
+강하게 나옵니다. 그래서 이런 코퍼스에서는 검색이 잘 되는 파이프라인에도 항목이 걸릴 수
+있습니다. 같은 행(과 질의)을 독립적으로 좋은 다른 공개 모델로도 임베딩해 기준으로 넘기십시오.
+
+```bash
+vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy
+```
+
+기준 모델도 같은 설정으로 감사합니다. 기준 모델이 같은 수준 이상으로 나쁘게 나온 항목은 행 탓으로
+돌립니다. 그 항목은 `ok`로 읽히고, 텍스트 출력에 `EXPLAINED BY THE ROWS`가 붙으며,
+`details.reference`에 기준 모델의 값과 판정, 기준 없이 받았을 판정이 남습니다
+(`reference.explained`에 목록이 있습니다). 성질 자체는 그대로입니다. 기준 모델도 같이 보이는
+collapse는 여전히 결과를 채우는 중복 행이라는 뜻입니다. 모델 출력이나 인덱스를 설명하는
+항목(norms, rogue dimensions, metric mismatch, ANN recall, query shift)은 이 방식으로 설명하지
+않습니다.
+
+기준 모델은 해당 언어와 도메인에 공개 점수가 있는 모델로 고르십시오. 같은 결함을 가진 기준
+모델(그 언어를 지원하지 않는 다른 모델)은 실제 문제를 덮어 버립니다. 첫 held-out 세트에서
+bge-m3를 기준으로 쓰면 `fail`을 받은 좋은 파이프라인이 114개 중 28개에서 21개로 줄었고, `fail`을
+받은 나쁜 파이프라인은 67개 중 54개 그대로였습니다. 이 규칙은 그 세트를 보고 만들었습니다. 임베딩
+전에 사전 등록한 두 번째 세트([검증](verification.md#사전-등록한-두-번째-held-out-세트))에서는 좋은
+파이프라인 대부분의 플래그를 걷어 냈고(36개 중 34개에서 14개로) 나쁜 파이프라인은 모두 `fail`로
+남겼습니다. 그러나 `fail`인 좋은 파이프라인 6개는 하나도 내려오지 않았습니다. 같은 행에서 기준 모델보다
+훨씬 높은, 그 모델이 만든 허브였습니다. 기준 모델을 줘도 `fail`로 남는 항목은 그 모델의 것이고, 검색에
+손해인지는 라벨 질의가 말해 줍니다.
+
 ## 라이브러리로 사용
 
 ```python
@@ -285,6 +314,9 @@ vecscope audit vectors.npy --baseline old.json         # 이전 --json 결과와
 vecscope audit vectors.npy --baseline old.json --tolerances tol.json   # 값이 허용량보다 나빠져도 종료 코드 1
 vecscope audit vectors.npy --baseline old.json --require-comparable    # 기준선의 설정이 다르면 종료 코드 2
 vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --baseline old.json --retrieval-tolerance ndcg_at_k=0.01   # nDCG가 허용량보다 더 떨어지면 종료 코드 1
+vecscope audit vectors.npy --reference ref.npy        # 같은 행을 다른 좋은 모델로 임베딩한 것; 함께 걸린 항목은 ok
+vecscope audit vectors.npy --result-sample 500 --json   # 라벨 없는 비교용으로 질의/행 500개의 top-k 저장
+vecscope audit vectors.npy --result-sample 500 --baseline old.json --result-tolerance 0   # 결과가 바뀌면 종료 코드 1
 vecscope audit vectors.npy --near-dup 0.98             # 근접 중복으로 간주할 코사인 임곗값
 vecscope audit vectors.npy --sample 0                  # 샘플링 없이 전체 행을 감사 (기본값은 10만 행)
 vecscope audit vectors.npy --sample-repeats 3          # 표본 3개를 감사해 값의 범위와 판정 안정성을 보고

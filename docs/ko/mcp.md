@@ -76,6 +76,15 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 둘 중 하나라도 있으면 그 변경은 채택하지 않습니다. [검색 품질 게이트](ci.md#검색-품질-게이트)를
 참고하십시오.
 
+`reference_path`(와 `reference_queries_path`)는 같은 행을 독립적으로 좋은 다른 모델로 임베딩한
+것입니다. 기준 모델도 걸린 항목은 `details.reference`와 함께 ok로 읽히고, 요약에 행 탓으로 설명된
+항목으로 나옵니다. [짧은 텍스트와 좁은 도메인](usage.md#짧은-텍스트와-좁은-도메인-기준-모델)을
+참고하십시오. `result_sample`은 그만큼의 질의와 행의 정확 top-k를 서버 메모리에 감사 결과와 함께
+보관합니다(응답에는 개수만 나옵니다). 나중에 그 `audit_id`를 `baseline`으로 넘기면
+`baseline_diff.result_agreement`가 붙고, `result_tolerance`를 주면 검사가 됩니다(요약에
+`RESULTS CHANGED`). 해로움이 아니라 변화를 잽니다.
+[결과가 바뀌면 안 되는 변경](ci.md#결과가-바뀌면-안-되는-변경)을 참고하십시오.
+
 모든 `baseline_diff`에는 `change_decision`(`adopt`, `reject`, `needs_review`와 그 이유, `watch`
 목록)이 붙고, 기준선에 plan이 있으면 `attempts`도 붙습니다. 이 서버 세션에서 그 첫 단계에 대해
 채택되지 않은 변경 수입니다. 3에 이르면 요약에 `STOP`이 붙습니다. [변경 채택](quality.md#변경-채택)을

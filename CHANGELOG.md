@@ -8,6 +8,36 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Judging findings against a reference model: `vecscope audit --reference ref.npy
+  [--reference-queries ref_q.npy]` (MCP `reference_path`, `reference_queries_path`; Python
+  `audit(reference_embeddings=..., reference_queries=...)`) audits the same rows embedded by a
+  second model with the same settings. A finding the reference reaches at the same level or
+  worse is attributed to the rows and reads ok; `details.reference` keeps the reference value,
+  its verdict and `verdict_without_reference`, the evidence carries a `reference` block with
+  the `explained` list, and the text output says `EXPLAINED BY THE ROWS`. Norms, rogue
+  dimensions, metric mismatch, ANN recall and query shift are never explained this way. Meant
+  for short or templated texts and narrow domains, where good models trip findings.
+- Label-free result change: `--result-sample M` (MCP `result_sample`, Python
+  `audit(result_sample=M)`) stores the exact top-k of M hash-chosen queries and corpus rows in
+  the evidence (`result_sample`); a baseline diff of two such runs carries `result_agreement`
+  (`changed_share`, `unchanged_items` per side). `--result-tolerance SHARE` (MCP
+  `result_tolerance`) fails the run when more changed (`result_regressions`) or a run has no
+  sample (`result_unchecked`). It measures change, not harm: on 594 injected faults it did not
+  separate harmful from harmless changes (AUC 0.58), so it gates pipelines meant to return the
+  same results. Without labels, `change_decision` cites the changed share.
+- `examples/validation/label_budget.py`: how many labeled queries a 0.01 nDCG tolerance needs
+  (100 caught 92% of harmful injected faults, 95 to 100% of drops above 0.02); documented in
+  "How many labeled queries" in docs/ci.md.
+- A second held-out set (seven public datasets, `role="confirm"` in registry.py) with its
+  predictions and pass criteria frozen in `examples/validation/preregistration.md` before it
+  was embedded, scored by `examples/validation/confirm.py`. Results
+  (`examples/validation/confirm_summary.json`, docs/verification.md): the query_hubness chance
+  rule changed no verdict (every dataset had 1,000+ queries) and passed without being tested;
+  the reference model cut flagged good pipelines from 34 to 14 of 36 and kept 34 of 34 bad at
+  fail, but left 6 of 6 good pipelines at fail, so prediction P2a (at most 75%) failed; 100
+  labeled queries caught 87% of harmful faults and 97% of drops above 0.02 (passed); every
+  injected fault changed the sampled top-k and identical re-runs changed none (passed).
+
 - Retrieval quality as a gate: `vecscope audit --baseline ... --qrels ...
   --retrieval-tolerance ndcg_at_k=0.01` (repeatable; `recall_at_k`, `mrr_at_k`,
   `hit_rate_at_k`, `duplicate_result_share`, `overlap_with_exact`, optionally prefixed `exact.`

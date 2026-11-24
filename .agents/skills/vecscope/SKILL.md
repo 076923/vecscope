@@ -52,11 +52,22 @@ In CI:
   cannot see a lost id mapping or a model that ranks worse. A tolerance listed in
   `retrieval_unchecked` (baseline without labels, different qrels or k) also exits 1: report it
   as "not checked", never as a pass.
+- A labeled gate needs enough queries: on injected public faults, 100 labeled queries caught
+  92% of harmful faults (95 to 100% of drops above 0.02; 87% and 97% on a preregistered
+  second set) and failed 24% of harmless changes
+  that stayed just under 0.01. On a small set, read a failed gate as "re-check on more
+  queries", and ask for about 100 labeled queries before gating merges on nDCG.
+- Without labels, `--result-sample 500` on the baseline and the new run adds
+  `result_agreement` (share of the sampled top-k that changed). It shows change, not harm
+  (it did not separate harmful from harmless faults), so use `--result-tolerance 0` only for a
+  pipeline that must return the same results (re-index, refactor, upgrade). It catches a lost
+  id mapping that no finding sees. Never report a small changed share as "safe".
 - Pick tolerances from measured retrieval quality ("Calibrating thresholds to your domain" in
   https://076923.github.io/vecscope/quality/), not from what makes the pipeline green.
 - Two rules can fail a run and the `gate` block (JSON) or line (text) names which one did:
   the absolute thresholds (`--fail-on`) or the baseline (`verdict_regressions`,
-  `value_regressions`, `retrieval_regressions`, `retrieval_unchecked`).
+  `value_regressions`, `retrieval_regressions`, `retrieval_unchecked`, `result_regressions`,
+  `result_unchecked`).
 - When the user's healthy corpus sits at `warn`/`fail` on a finding by the public defaults,
   gate with `--fail-on none --baseline` so only the change is judged, and say that is the
   policy.
@@ -143,6 +154,16 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
     `--retrieval-tolerance`: on injected faults the diff caught most of what the absolute
     verdict missed, and a lost id mapping moved no finding, only labeled retrieval.
     `query_hubness` was the one finding that fell with nDCG@10 on every dataset.
+  - On short or templated texts and narrow domains, re-run with `--reference ref.npy`
+    (`--reference-queries`; MCP `reference_path`): the same rows embedded by a second public
+    model with published scores on that language. A finding it reaches too reads ok with
+    `details.reference.verdict_without_reference` and `EXPLAINED BY THE ROWS`; report it as a
+    property of the data (a shared collapse still means duplicated rows to remove), not as a
+    model fault. Never pick a reference that may share the fault (an English-only model on
+    another language), and never pick one to make the audit pass.
+    A finding still at `fail` with the reference is the model's own (on a preregistered
+    second set the reference cleared most `warn` flags of good pipelines but none of their
+    `fail`s): report it as such and let labeled retrieval decide whether it costs anything.
   - `query_gap` is a distance ratio that short queries against long passages keep at 1 to 2.5
     for good pipelines, so read it as "same space or not", never as a quality score.
   - `ood_queries` is deprecated: report `query_gap` instead.

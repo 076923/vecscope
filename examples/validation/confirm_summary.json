@@ -1,0 +1,250 @@
+{
+ "pipelines": 98,
+ "good": 36,
+ "bad": 41,
+ "P1_query_hubness_null": {
+  "good_flagged_rule": 9,
+  "good_flagged_threshold_only": 9,
+  "bad_fail_threshold_only": 20,
+  "bad_fail_kept_by_rule": 20,
+  "pass": true
+ },
+ "P2_reference_model": {
+  "good_fail_without": 6,
+  "good_fail_with": 6,
+  "good_flagged_without": 34,
+  "good_flagged_with": 14,
+  "good_all_ok_without": 2,
+  "good_all_ok_with": 22,
+  "bad_fail_without": 34,
+  "bad_fail_with": 34,
+  "bad_flagged_without": 41,
+  "bad_flagged_with": 41,
+  "pass_good": false,
+  "pass_bad": true,
+  "explained": {
+   "good": {
+    "hubness": 23,
+    "antihubs": 4,
+    "query_hubness": 3,
+    "effective_rank": 2,
+    "collapse": 10
+   },
+   "middle": {
+    "hubness": 16,
+    "antihubs": 6,
+    "query_hubness": 1,
+    "effective_rank": 1,
+    "collapse": 4
+   },
+   "bad": {
+    "antihubs": 9,
+    "query_hubness": 7,
+    "hubness": 24,
+    "effective_rank": 7,
+    "collapse": 6
+   }
+  },
+  "good_fail_left": [
+   "webfaq-kor multilingual-e5-base: hubness, query_hubness",
+   "webfaq-kor multilingual-e5-large: hubness, query_hubness",
+   "webfaq-tha bge-m3: hubness",
+   "webfaq-tha multilingual-e5-base: query_hubness",
+   "webfaq-tha multilingual-e5-large: query_hubness",
+   "webfaq-vie Qwen3-Embedding-0.6B: hubness"
+  ],
+  "bad_not_flagged_with": []
+ },
+ "P3_label_budget": {
+  "table": [
+   {
+    "labeled_queries": 25,
+    "harmful_cases": 95,
+    "caught": 0.750684210526316,
+    "harmless_cases": 25,
+    "false_alarm": 0.3378,
+    "caught_by_drop": {
+     "0.01-0.02": [
+      0.5210714285714285,
+      28
+     ],
+     "0.02-0.05": [
+      0.7736046511627904,
+      43
+     ],
+     ">0.05": [
+      0.9775,
+      24
+     ]
+    }
+   },
+   {
+    "labeled_queries": 50,
+    "harmful_cases": 95,
+    "caught": 0.8189473684210524,
+    "harmless_cases": 25,
+    "false_alarm": 0.3036,
+    "caught_by_drop": {
+     "0.01-0.02": [
+      0.5871428571428572,
+      28
+     ],
+     "0.02-0.05": [
+      0.8717441860465118,
+      43
+     ],
+     ">0.05": [
+      0.9947916666666666,
+      24
+     ]
+    }
+   },
+   {
+    "labeled_queries": 100,
+    "harmful_cases": 95,
+    "caught": 0.8734736842105265,
+    "harmless_cases": 25,
+    "false_alarm": 0.26039999999999996,
+    "caught_by_drop": {
+     "0.01-0.02": [
+      0.6485714285714285,
+      28
+     ],
+     "0.02-0.05": [
+      0.9496511627906972,
+      43
+     ],
+     ">0.05": [
+      0.9993750000000001,
+      24
+     ]
+    }
+   },
+   {
+    "labeled_queries": 200,
+    "harmful_cases": 95,
+    "caught": 0.9137894736842104,
+    "harmless_cases": 25,
+    "false_alarm": 0.17959999999999998,
+    "caught_by_drop": {
+     "0.01-0.02": [
+      0.725892857142857,
+      28
+     ],
+     "0.02-0.05": [
+      0.9880232558139533,
+      43
+     ],
+     ">0.05": [
+      1.0,
+      24
+     ]
+    }
+   },
+   {
+    "labeled_queries": 400,
+    "harmful_cases": 95,
+    "caught": 0.9463157894736841,
+    "harmless_cases": 25,
+    "false_alarm": 0.11019999999999998,
+    "caught_by_drop": {
+     "0.01-0.02": [
+      0.8210714285714286,
+      28
+     ],
+     "0.02-0.05": [
+      0.9979069767441859,
+      43
+     ],
+     ">0.05": [
+      1.0,
+      24
+     ]
+    }
+   },
+   {
+    "labeled_queries": 800,
+    "harmful_cases": 57,
+    "caught": 0.9735087719298245,
+    "harmless_cases": 15,
+    "false_alarm": 0.060000000000000005,
+    "caught_by_drop": {
+     "0.01-0.02": [
+      0.9207894736842104,
+      19
+     ],
+     "0.02-0.05": [
+      0.9997727272727271,
+      22
+     ],
+     ">0.05": [
+      1.0,
+      16
+     ]
+    }
+   }
+  ],
+  "caught_at_100": 0.8734736842105265,
+  "caught_over_002_at_100": 0.9674626865671638,
+  "false_alarm_at_100": 0.26039999999999996,
+  "harmful_cases": 95,
+  "pass": true
+ },
+ "P4_result_change": {
+  "faults": 120,
+  "changed": 120,
+  "by_fault": {
+   "duplicates": {
+    "changed": 20,
+    "of": 20
+   },
+   "id_shift": {
+    "changed": 20,
+    "of": 20
+   },
+   "quantize": {
+    "changed": 20,
+    "of": 20
+   },
+   "query_model": {
+    "changed": 20,
+    "of": 20
+   },
+   "truncate": {
+    "changed": 20,
+    "of": 20
+   },
+   "zero_rows": {
+    "changed": 20,
+    "of": 20
+   }
+  },
+  "reruns": [
+   {
+    "dataset": "cqadupstack-webmasters",
+    "model": "KURE-v1",
+    "rows": 0.0,
+    "queries": 0.0
+   },
+   {
+    "dataset": "gerdalir-small",
+    "model": "KURE-v1",
+    "rows": 0.0,
+    "queries": 0.0
+   },
+   {
+    "dataset": "jagovfaqs",
+    "model": "KURE-v1",
+    "rows": 0.0,
+    "queries": 0.0
+   },
+   {
+    "dataset": "turhistquad",
+    "model": "KURE-v1",
+    "rows": 0.0,
+    "queries": 0.0
+   }
+  ],
+  "pass": true
+ }
+}

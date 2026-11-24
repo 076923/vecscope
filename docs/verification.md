@@ -298,6 +298,83 @@ Not covered: the thresholds and the query findings were fitted on SciFact, NFCor
 ko-strategyqa; the held-out run above measured them and did not refit. Production query logs
 and private corpora were not measured.
 
+### A second held-out set, preregistered
+
+Four changes were designed after reading the first held-out set: the chance rule for
+`query_hubness`, the reference model (`--reference`), the label-free result change
+(`--result-sample`) and the labeled-query budget. That set cannot confirm them. So the code,
+the thresholds and four pass criteria were committed
+([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration.md))
+before seven more public datasets were downloaded. The datasets are:
+
+- WebFAQ Korean, Thai and Vietnamese (102k to 124k FAQ answers in two of them)
+- JaGovFaqs
+- GerDaLIR (German legal)
+- CQADupStack webmasters
+- TurHistQuad (Turkish)
+
+They were run once with the same 14 models: 98 pipelines, 36 good and 41 bad. Nothing was
+tuned on them, and `examples/validation/confirm.py` scores the criteria
+(`confirm_summary.json`). One criterion failed.
+
+| prediction | criterion | result |
+|---|---|---|
+| P1 `query_hubness` against chance | good pipelines flagged with the rule no more than with the thresholds alone, and at least 90% of the bad ones at `fail` kept | **passed, with nothing to test**: 9 and 9 good flagged, 20 of 20 bad kept. Every dataset here has 1,000 or more queries, so chance stayed at 0.3 to 3.2, below warn 4, and the rule changed no verdict |
+| P2a reference model, good | good pipelines at `fail` with the reference at most 75% of those without | **failed**: 6 and 6 |
+| P2b reference model, bad | bad pipelines at `fail` with the reference at least 95% of those without | passed: 34 and 34 of 41; all 41 still flagged |
+| P3 labeled-query budget | with 100 labeled queries, at least 85% of harmful faults caught and 90% of those dropping more than 0.02 | passed: 87% and 97% |
+| P4 result change | every injected fault changes the sampled top-k, an identical re-run changes none | passed: 120 of 120 faults, 4 of 4 re-runs at 0 |
+
+Why P2a failed. The reference did take most flags off good pipelines: flagged went from 34 to
+14 of 36, and all-ok from 2 to 22. It explained hubness on 23 good pipelines and collapse on
+10. It did not take any good pipeline off `fail`. The six that stay are each well past their
+reference on the same rows, so by the rule the rows do not explain them:
+
+| dataset | model | finding | value | reference value (bge-m3, or multilingual-e5-base for bge-m3) |
+|---|---|---|---|---|
+| WebFAQ ko | multilingual-e5-large | query_hubness / hubness | 70.0 / 12.2 | 3.7 / 2.8 |
+| WebFAQ ko | multilingual-e5-base | query_hubness / hubness | 26.4 / 4.7 | 3.7 / 2.8 |
+| WebFAQ th | multilingual-e5-large | query_hubness | 48.5 | 3.8 |
+| WebFAQ th | multilingual-e5-base | query_hubness | 11.1 | 3.8 |
+| WebFAQ th | bge-m3 | hubness | 4.1 | 2.8 |
+| WebFAQ vi | Qwen3-Embedding-0.6B | hubness | 6.2 | 2.9 |
+
+These are real hubs that a good nDCG@10 tolerates: an e5 model on Korean FAQs puts a few
+answers in a large share of the top-10 lists and still ranks the right answer first often
+enough. The reference rule is meant to clear what the rows cause, not what one model does
+on them. So it fixes most of the short-text noise (`warn` flags), and it does not fix the
+`fail` level on the multilingual-e5 family. On the first set too, the good pipelines left at
+`fail` were mostly that family.
+
+P3, read with its limits. The table, on 120 faults of 20 good pipelines over the four corpora
+with at most 25k documents:
+
+| labeled queries | harmful caught (95) | drop 0.02 to 0.05 (43) | drop above 0.05 (24) | harmless failed (25) |
+|---|---|---|---|---|
+| 25 | 75% | 77% | 98% | 34% |
+| 50 | 82% | 87% | 99% | 30% |
+| 100 | 87% | 95% | 100% | 26% |
+| 200 | 91% | 99% | 100% | 18% |
+| 400 | 95% | 100% | 100% | 11% |
+
+It is a few points below the first set at 25 to 100 queries: 28 of the 95 harmful faults here
+cost between 0.01 and 0.02, and 100 queries catch 65% of those. Only 25 harmless runs were
+there, so the false-alarm share is rough.
+
+P4 confirms that every one of the six faults moves the sampled results, the lost id mapping
+included, and that the comparison is exact. It does not say whether a change is harmful: on
+the first set's 594 faults the changed share separated harmful from harmless at AUC 0.58.
+
+What this changes:
+
+- The reference model clears short-text `warn` flags. It is not a reason to trust `fail` on a
+  good-scoring pipeline: a finding that stays at `fail` with the reference is the model's
+  own, and only labeled retrieval says whether it costs anything.
+- 100 labeled queries are enough to gate drops above two nDCG points on corpora like these.
+  Smaller drops need several hundred.
+- The chance rule for `query_hubness` was not tested here, because every dataset had enough
+  queries. The first set and the random-data checks are still its only evidence.
+
 ## 3. Sampled audits
 
 | claim | result |
@@ -401,7 +478,14 @@ not that every agent follows them.
   absolute verdict. Production query logs and private corpora were not measured.
 - The `query_hubness` change was prompted by the held-out results; it follows from a null
   model and was checked on random data, but those datasets are no longer blind for that
-  finding.
+  finding, and the preregistered second set had enough queries everywhere to leave it
+  untested.
+- On the second set ([preregistered](#a-second-held-out-set-preregistered)) the reference model
+  cut flagged good pipelines from 34 to 14 of 36 but left all 6 good pipelines at `fail`
+  (prediction P2a failed): hubs one model makes on rows a reference handles are not
+  explained away. That set is no longer blind for the reference rule either.
+- The label-free result change detects change, not harm (AUC 0.58 between harmful and
+  harmless faults); gate on it only where results must not change.
 - The injected faults are six kinds applied one at a time to corpora of at most 25k
   documents; mixed faults and larger corpora were not injected. A lost id mapping moves no
   finding and is caught only with labeled queries.
@@ -438,6 +522,11 @@ not that every agent follows them.
   several hours on one L4, resumable; `run.py --reaudit` audits the cached embeddings again
   after a change to vecscope), and
   `python examples/validation/calibrate_case.py --dataset xpqa-ja` the calibration case.
+- The second held-out set: `run.py` on the seven datasets of
+  `examples/validation/preregistration.md`, then `faults.py --role confirm`,
+  `label_budget.py --role confirm` and `confirm.py`, which writes
+  `examples/validation/confirm_summary.json`. `label_budget.py` without `--role` gives the
+  budget on the first set.
 - The 19-model, nine-dataset, query-finding and intervention runs use a harness that is not
   shipped with the package. The behavior they set is pinned by tests instead:
   - `tests/test_query_findings.py` (query_gap and query_shift)

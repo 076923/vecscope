@@ -184,6 +184,12 @@ They are a starting point for diagnosis, not a universal quality bar. Embedding 
 differ by model, language, domain and dimensionality, so a `warn` on a good model is normal
 and a clean audit does not guarantee good search.
 
+On short or templated texts and narrow domains, pass the same rows embedded by a second good
+public model as `--reference`: findings that model reaches too are attributed to the rows and
+read ok ([reference model](https://076923.github.io/vecscope/usage/#short-texts-and-narrow-domains-a-reference-model)).
+On a preregistered public set it cleared most flags on good pipelines but no `fail`: a
+finding still at `fail` is the model's own, and labeled queries decide what it costs.
+
 Override any pair per run, or derive them from your own data with
 [`vecscope calibrate`](https://076923.github.io/vecscope/quality/#calibrating-thresholds-to-your-domain):
 
@@ -235,6 +241,11 @@ vecscope audit embeddings.npy --queries q.npy --qrels qrels.json --baseline base
   --retrieval-tolerance ndcg_at_k=0.01
 ```
 
+About 100 labeled queries catch nearly every injected fault that costs more than two nDCG
+points. Without labels, a pipeline that must return the same results (a re-index, a
+refactor) can gate on the results themselves with `--result-sample 500 --result-tolerance 0`;
+that number shows change, not harm.
+
 On GitHub the same gate is an Action:
 
 ```yaml
@@ -245,7 +256,8 @@ On GitHub the same gate is an Action:
     sample: "0"
 ```
 
-[Use in CI](https://076923.github.io/vecscope/ci/) covers tolerances for slow drift, the retrieval gate, which rule
+[Use in CI](https://076923.github.io/vecscope/ci/) covers tolerances for slow drift, the retrieval gate, how many labeled
+queries it needs, the label-free result gate, which rule
 failed a run, and the Action's inputs and outputs.
 
 ## FAQ
