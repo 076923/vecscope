@@ -36,6 +36,12 @@ def _render_text(ev) -> str:
             line += "  INCONCLUSIVE (sampled)"
         if f.details.get("not_judged"):
             line += f"  NOT JUDGED at {'/'.join(f.details['not_judged'])} (too few queries)"
+        ref = f.details.get("reference")
+        if ref and ref["verdict_without_reference"] != f.verdict:
+            line += (
+                f"  EXPLAINED BY THE ROWS ({ref['verdict_without_reference']} without the "
+                f"reference, which reads {ref['value']:.4f})"
+            )
         lines.append(line)
         lines.append(f"{'':31}{f.explanation}")
         if f.verdict != "ok":
@@ -137,6 +143,26 @@ def main(argv: list[str] | None = None) -> int:
         "scored with --qrels next to exact search",
     )
     a.add_argument(
+        "--reference",
+        help="the same rows embedded by another, independently good model (n x any dim); a "
+        "finding it reaches too is attributed to the rows and reads ok, with the verdict "
+        "without it kept in the details",
+    )
+    a.add_argument(
+        "--reference-queries",
+        help="the same queries embedded by the --reference model, so query-side findings "
+        "are judged against it too",
+    )
+    a.add_argument(
+        "--result-sample",
+        type=int,
+        default=0,
+        metavar="M",
+        help="store the exact top-k of M sampled queries and rows in the JSON, so a later "
+        "run with --baseline reports how much of the results changed without labels "
+        "(0 = off)",
+    )
+    a.add_argument(
         "--ann-from-source",
         action="store_true",
         help="when the path is a faiss index or vector store, query its index for "
@@ -205,6 +231,15 @@ def main(argv: list[str] | None = None) -> int:
         "drop exits 1 whatever the findings say, and a tolerance that cannot be checked "
         "(no retrieval on either run, different qrels or k) exits 1 too "
         "(needs --baseline and --qrels)",
+    )
+    a.add_argument(
+        "--result-tolerance",
+        type=float,
+        metavar="SHARE",
+        help="share of sampled top-k results allowed to change against the baseline, e.g. 0 "
+        "for a re-index or refactor that must return the same results; a larger change, or "
+        "a baseline or run without --result-sample, exits 1 (needs --baseline and "
+        "--result-sample)",
     )
     a.add_argument(
         "--require-comparable",
@@ -433,12 +468,22 @@ def _run(args) -> int:
             raise ValueError("--knn-cache needs every row audited; pass --sample 0")
         knn, cache_info = cached_knn_for_audit(x, args.k, args.knn_cache)
     th = _load_json(args.thresholds, "--thresholds") if args.thresholds else None
-    if (args.tolerances or args.require_comparable or args.retrieval_tolerance) and not (
-        args.baseline
-    ):
+    if (
+        args.tolerances
+        or args.require_comparable
+        or args.retrieval_tolerance
+        or args.result_tolerance is not None
+    ) and not args.baseline:
         raise ValueError(
-            "--tolerances, --retrieval-tolerance and --require-comparable need --baseline"
+            "--tolerances, --retrieval-tolerance, --result-tolerance and --require-comparable "
+            "need --baseline"
         )
+    if args.result_tolerance is not None and not args.result_sample:
+        raise ValueError("--result-tolerance needs --result-sample on this run")
+    if args.result_tolerance is not None and not 0 <= args.result_tolerance <= 1:
+        raise ValueError("--result-tolerance is a share between 0 and 1")
+    if args.reference_queries and not args.reference:
+        raise ValueError("--reference-queries needs --reference")
     rtol = parse_retrieval_tolerance(args.retrieval_tolerance)
     if rtol and qrels is None:
         raise ValueError("--retrieval-tolerance needs --qrels (and --queries) on this run")
@@ -457,6 +502,9 @@ def _run(args) -> int:
         qrels=qrels,
         ranked=ranked,
         knn=knn,
+        reference_embeddings=load_vectors(args.reference) if args.reference else None,
+        reference_queries=load_vectors(args.reference_queries) if args.reference_queries else None,
+        result_sample=args.result_sample,
     )
     if src is not None:
         annotate(ev, src)
@@ -465,7 +513,13 @@ def _run(args) -> int:
     d = None
     if base is not None:
         tol = _load_json(args.tolerances, "--tolerances") if args.tolerances else None
-        d = diff_evidence(ev.to_dict(), base, tolerances=tol, retrieval_tolerances=rtol)
+        d = diff_evidence(
+            ev.to_dict(),
+            base,
+            tolerances=tol,
+            retrieval_tolerances=rtol,
+            result_tolerance=args.result_tolerance,
+        )
         if args.require_comparable and not d["comparable"]:
             raise ValueError(
                 f"--require-comparable: baseline {args.baseline} was made with different n, "
@@ -515,6 +569,8 @@ def gate_decision(
     value_reg = list(diff["value_regressions"]) if diff else []
     retrieval_reg = list(diff.get("retrieval_regressions") or []) if diff else []
     unchecked = list(diff.get("retrieval_unchecked") or []) if diff else []
+    result_reg = list(diff.get("result_regressions") or []) if diff else []
+    result_unchecked = list(diff.get("result_unchecked") or []) if diff else []
     reasons = []
     if absolute:
         reasons.append(f"verdict {verdict} reaches --fail-on {fail_on}")
@@ -537,6 +593,17 @@ def gate_decision(
             f"retrieval tolerance not checked: {', '.join(unchecked)} (both runs need a "
             "retrieval block with the same qrels and k, and the ranking it names)"
         )
+    if result_reg:
+        agree = diff.get("result_agreement") or {}
+        reasons.append(
+            "results changed beyond --result-tolerance "
+            f"{diff.get('result_tolerance'):g}: "
+            + ", ".join(f"{s} {agree[s]['changed_share']:.1%}" for s in result_reg)
+        )
+    if result_unchecked:
+        reasons.append(
+            "result tolerance not checked: both runs need --result-sample with the same k"
+        )
     return {
         "fail_on": fail_on,
         "absolute": absolute,
@@ -544,6 +611,8 @@ def gate_decision(
         "value_regressions": value_reg,
         "retrieval_regressions": retrieval_reg,
         "retrieval_unchecked": unchecked,
+        "result_regressions": result_reg,
+        "result_unchecked": result_unchecked,
         "baseline": diff is not None,
         "inconclusive": list(inconclusive or []),
         "exit_code": 1 if reasons else 0,
@@ -661,6 +730,19 @@ def _render_diff(d: dict, path: str) -> str:
         )
     if d.get("retrieval_unchecked"):
         lines.append(f"  retrieval tolerances not checked: {', '.join(d['retrieval_unchecked'])}")
+    for side, r in (d.get("result_agreement") or {}).items():
+        lines.append(
+            f"  results vs baseline ({side}, {r['compared']} sampled): "
+            f"{r['changed_share']:.1%} of top-k slots changed, "
+            f"{r['unchanged_items']:.1%} of items unchanged"
+            + (
+                f"  CHANGED beyond {d['result_tolerance']:g}"
+                if side in d.get("result_regressions", [])
+                else ""
+            )
+        )
+    if d.get("result_unchecked"):
+        lines.append("  result tolerance not checked: a run has no --result-sample")
     cd = d.get("change_decision")
     if cd:
         lines.append(f"  change decision: {cd['decision']}; {'; '.join(cd['reasons'])}")

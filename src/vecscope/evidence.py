@@ -124,6 +124,12 @@ class Evidence:
     # SHA-256 of every input row as float32, so a later run can tell whether a baseline was
     # made on the same corpus (or on an unchanged prefix of it)
     corpus_fingerprint: str = ""
+    # the same rows embedded by a reference model (vecscope.reference): its verdicts and the
+    # findings it explains; empty without a reference
+    reference: dict = field(default_factory=dict)
+    # exact top-k of a fixed sample of queries and rows (vecscope.results), for a later
+    # label-free diff of what search returns; empty unless result_sample > 0
+    result_sample: dict = field(default_factory=dict)
     schema_version: int = SCHEMA_VERSION
 
     @property
@@ -303,11 +309,24 @@ def change_decision(diff: Mapping) -> dict:
         }
 
     if not diff.get("retrieval_comparable"):
+        moved = [
+            f"{side} {r['changed_share']:.1%}"
+            for side, r in (diff.get("result_agreement") or {}).items()
+        ]
         return out(
             "needs_review",
             "no labeled retrieval on both runs with the same qrels and k: a finding that "
             "improved does not show that search did; keep the original and let a person "
             "decide, or re-run both with --qrels",
+            *(
+                [
+                    "share of sampled top-k results that changed: "
+                    + ", ".join(moved)
+                    + " (change, not harm: labels decide whether it is better)"
+                ]
+                if moved
+                else []
+            ),
         )
     changes = diff.get("retrieval_changes") or []
     if diff.get("retrieval_tolerances"):
@@ -361,6 +380,7 @@ def diff_evidence(
     old: dict,
     tolerances: Mapping | None = None,
     retrieval_tolerances: Mapping | None = None,
+    result_tolerance: float | None = None,
 ) -> dict:
     """Compare two evidence dicts (``Evidence.to_dict()`` or a parsed ``--json`` file).
 
@@ -385,6 +405,13 @@ def diff_evidence(
     because either run has no retrieval block, the qrels or k differ
     (``retrieval_comparable`` false), or the ranking it names is missing, is listed in
     ``retrieval_unchecked``; a gate must not read that as a pass.
+
+    When both runs stored a ``result_sample``, ``result_agreement`` says how much of the
+    sampled top-k results the two share, for the queries and for the corpus rows
+    (``vecscope.results``). It measures change, not harm. ``result_tolerance`` is the share
+    of top-k slots allowed to change (0 for a pipeline meant to return the same results);
+    a side beyond it is listed in ``result_regressions``, and a tolerance that cannot be
+    checked because either run has no sample is listed in ``result_unchecked``.
     """
     tol = resolve_tolerances(tolerances)
     rtol = resolve_retrieval_tolerances(retrieval_tolerances)
@@ -497,6 +524,17 @@ def diff_evidence(
         "retrieval_regressions": sorted(retrieval_regressions),
         "retrieval_unchecked": retrieval_unchecked,
     }
+    from vecscope.results import result_agreement
+
+    agreement = result_agreement(new.get("result_sample") or {}, old.get("result_sample") or {})
+    out["result_agreement"] = agreement
+    out["result_tolerance"] = result_tolerance
+    out["result_regressions"] = (
+        []
+        if result_tolerance is None
+        else [s for s, r in agreement.items() if r["changed_share"] > result_tolerance]
+    )
+    out["result_unchecked"] = ["results"] if result_tolerance is not None and not agreement else []
     out["change_decision"] = change_decision(out)
     return out
 
@@ -1321,6 +1359,9 @@ def audit(
     qrels: Mapping | None = None,
     ranked: np.ndarray | None = None,
     knn: Mapping | None = None,
+    reference_embeddings: np.ndarray | None = None,
+    reference_queries: np.ndarray | None = None,
+    result_sample: int = 0,
 ) -> Evidence:
     """Audit an embedding matrix and return deterministic Evidence.
 
@@ -1340,6 +1381,13 @@ def audit(
     lists of every row, e.g. from ``vecscope.incremental.cached_knn``; it needs an unsampled
     audit. ``plan`` orders the non-ok findings into steps (``vecscope.plan``).
     ``clusters`` > 0 attaches a per-cluster report with sample ids (no verdicts).
+    ``reference_embeddings`` are the same rows embedded by another, independently good
+    model (and ``reference_queries`` the same queries): it is audited with the same settings
+    and a finding it reaches too is attributed to the rows and set to ok, with the
+    reference value and the verdict without it in ``details.reference``
+    (``vecscope.reference``). ``result_sample`` > 0 stores the exact top-k of that many
+    sampled queries and rows (``vecscope.results``), so a later ``diff_evidence`` can report
+    how much of what search returns changed without labels.
     ``thresholds`` overrides default (warn, fail) pairs by key, e.g.
     ``{"anisotropy.mean_random_cosine": (0.4, 0.7)}``.
     ``sample_repeats`` > 1 re-audits that many independent samples (seeds ``seed+1`` ...)
@@ -1431,6 +1479,30 @@ def audit(
             )
     if queries is not None:
         queries = _checked_queries(queries, x.shape[1])
+    if reference_queries is not None and reference_embeddings is None:
+        raise ValueError("reference_queries need reference_embeddings")
+    if reference_embeddings is not None:
+        reference_embeddings = np.asarray(reference_embeddings)
+        if reference_embeddings.ndim != 2 or reference_embeddings.shape[0] != n_total:
+            raise ValueError(
+                f"reference_embeddings must hold the same {n_total} rows in the same order, "
+                f"got shape {reference_embeddings.shape}"
+            )
+    if reference_queries is not None:
+        if queries is None:
+            raise ValueError("reference_queries need queries")
+        reference_queries = np.asarray(reference_queries)
+        if reference_queries.ndim != 2 or reference_queries.shape[0] != queries.shape[0]:
+            raise ValueError(
+                f"reference_queries must hold the same {queries.shape[0]} queries in the same "
+                f"order, got shape {reference_queries.shape}"
+            )
+    if (
+        isinstance(result_sample, bool)
+        or not isinstance(result_sample, (int, np.integer))
+        or result_sample < 0
+    ):
+        raise ValueError(f"result_sample must be a non-negative integer, got {result_sample!r}")
     if (qrels is not None or ranked is not None) and queries is None:
         raise ValueError("qrels and ranked need queries")
     if ranked is not None and qrels is None:
@@ -1508,6 +1580,32 @@ def audit(
         inconclusive = _apply_sampling(
             findings, sample / n_total, th, full_counts=exact_copy_counts(x_full)
         )
+    ref_block: dict = {}
+    if reference_embeddings is not None:
+        from vecscope.reference import apply_reference
+
+        ref_ev = audit(
+            reference_embeddings,
+            k=k,
+            near_dup_cos=near_dup_cos,
+            sample=sample or 0,
+            seed=seed,
+            queries=reference_queries,
+            thresholds=thresholds,
+        )
+        explained = apply_reference(findings, ref_ev.findings)
+        ref_block = {
+            "dim": ref_ev.dim,
+            "n_queries": ref_ev.n_queries,
+            "verdict": ref_ev.verdict,
+            "findings": {f.name: {"value": f.value, "verdict": f.verdict} for f in ref_ev.findings},
+            "explained": explained,
+        }
+    samples: dict = {}
+    if result_sample:
+        from vecscope.results import result_sample as _result_sample
+
+        samples = _result_sample(x_full, queries, int(result_sample), k)
     from vecscope.plan import build_plan
 
     findings = _attach_thresholds(findings, th)
@@ -1534,4 +1632,6 @@ def audit(
         plan=build_plan([asdict(f) for f in findings], retrieval or None),
         retrieval=retrieval,
         corpus_fingerprint=fingerprint(x_full),
+        reference=ref_block,
+        result_sample=samples,
     )

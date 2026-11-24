@@ -488,6 +488,8 @@
  "source": {},
  "knn_cache": {},
  "corpus_fingerprint": "fe7e8eb4f4cfb9f61f7d0ebd3c7881ad636c2315d798d0b5941d3846d7758fc3",
+ "reference": {},
+ "result_sample": {},
  "schema_version": 1,
  "verdict": "fail"
 }

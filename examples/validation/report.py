@@ -83,6 +83,8 @@ AXES = {
 
 def load(results: Path, cache: Path) -> list[dict]:
     recs = [json.loads(f.read_text(encoding="utf-8")) for f in sorted(results.glob("*.json"))]
+    # the second held-out set (role "confirm") is analysed by confirm.py
+    recs = [r for r in recs if r["dataset"].get("role", "heldout") == "heldout"]
     dup = {n: text_duplicate_share(cache, n) for n in {r["dataset"]["name"] for r in recs}}
     best: dict[str, float] = defaultdict(float)
     count: dict[str, int] = defaultdict(int)
@@ -209,9 +211,12 @@ def summarize(recs: list[dict]) -> dict:
 
 def summarize_faults(folder: Path) -> dict:
     """Per fault: how often it hurt retrieval and what caught it (faults.py records)."""
-    recs = [json.loads(f.read_text(encoding="utf-8")) for f in sorted(folder.glob("*.json"))]
-    out: dict = {}
     from faults import FAULTS
+    from registry import role
+
+    recs = [json.loads(f.read_text(encoding="utf-8")) for f in sorted(folder.glob("*.json"))]
+    recs = [r for r in recs if role(r["dataset"]) == "heldout"]
+    out: dict = {}
 
     for fault in [f for f in FAULTS if any(r["fault"] == f for r in recs)]:
         rs = [r for r in recs if r["fault"] == fault]

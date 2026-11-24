@@ -483,6 +483,12 @@ def _summary(ev: dict) -> str:
             "; not judged, too few queries for the corpus size (not evidence of health): "
             + ", ".join(unjudged)
         )
+    explained = (ev.get("reference") or {}).get("explained")
+    if explained:
+        head += (
+            "; explained by the rows (the reference model reaches them too, so they read "
+            f"ok): {', '.join(explained)}"
+        )
     if ev.get("needs_full_audit"):
         head += f"; needs a full audit (sample=0) to settle: {', '.join(ev['needs_full_audit'])}"
     if not bad:
@@ -519,6 +525,12 @@ def _summary(ev: dict) -> str:
             )
         elif d.get("retrieval_changes") and not d.get("retrieval_comparable"):
             head += " (retrieval: different qrels or k, not comparable)"
+        for side, r in (d.get("result_agreement") or {}).items():
+            head += f", {side} results changed {r['changed_share']:.1%}"
+        if d.get("result_regressions"):
+            head += f", RESULTS CHANGED beyond tolerance: {', '.join(d['result_regressions'])}"
+        if d.get("result_unchecked"):
+            head += ", result tolerance NOT CHECKED (the baseline has no result_sample)"
         cd = d.get("change_decision")
         if cd:
             head += f"; change decision: {cd['decision'].upper()} ({'; '.join(cd['reasons'])})"
@@ -554,6 +566,10 @@ def audit_embeddings(
     baseline: str | None = None,
     tolerances: dict | None = None,
     retrieval_tolerances: dict | None = None,
+    reference_path: str | None = None,
+    reference_queries_path: str | None = None,
+    result_sample: int = 0,
+    result_tolerance: float | None = None,
 ) -> dict:
     """Audit an embedding file: hubness, anisotropy, collapse, rogue dimensions, norms,
     metric mismatch, distance concentration, outliers, k-NN graph islands, and optionally
@@ -604,6 +620,19 @@ def audit_embeddings(
     beyond it `baseline_diff.retrieval_regressions` names it whatever the findings say, and
     `retrieval_unchecked` names tolerances that could not be checked (no retrieval on the
     baseline, different qrels or k). Treat either as "do not adopt this change".
+    `reference_path`: the same rows embedded by another, independently good public model
+    (any dim; `reference_queries_path` the same queries). A finding the reference reaches
+    too is attributed to the rows and reads ok, with `details.reference` holding the
+    reference value and the verdict without it; `reference.explained` lists them. Use it on
+    short or templated texts and narrow domains, where good models trip findings; never
+    with a reference that may share the fault (another model that does not cover the
+    language).
+    `result_sample` > 0 keeps the exact top-k of that many sampled queries and rows with the
+    audit (in this session's memory; the response only counts them), so a later call with
+    this `audit_id` as `baseline` reports `baseline_diff.result_agreement`: the share of
+    those results that changed. It measures change, not harm. `result_tolerance` (needs
+    `baseline`) is the share allowed to change, 0 for a re-index or refactor that must
+    return the same results; beyond it `result_regressions` names the side.
     `verbose=False` drops details, causes, actions and explanations of findings that are ok
     and the thresholds table; it saves most when most findings are ok.
 
@@ -648,8 +677,22 @@ def audit_embeddings(
             )
             ranked = _neighbors(ranked_path, "ranked_path")
             q = _vectors(queries_path, "queries_path") if queries_path else None
-            if (tolerances is not None or retrieval_tolerances is not None) and baseline is None:
-                raise ValueError("tolerances and retrieval_tolerances need baseline")
+            ref = _vectors(reference_path, "reference_path") if reference_path else None
+            ref_q = (
+                _vectors(reference_queries_path, "reference_queries_path")
+                if reference_queries_path
+                else None
+            )
+            if (
+                tolerances is not None
+                or retrieval_tolerances is not None
+                or result_tolerance is not None
+            ) and baseline is None:
+                raise ValueError(
+                    "tolerances, retrieval_tolerances and result_tolerance need baseline"
+                )
+            if result_tolerance is not None and not result_sample:
+                raise ValueError("result_tolerance needs result_sample on this call")
             if retrieval_tolerances and qrels is None:
                 raise ValueError("retrieval_tolerances need qrels_path (and queries_path)")
             base = _load_baseline(baseline) if baseline else None
@@ -682,6 +725,9 @@ def audit_embeddings(
                 query_baseline=qbase,
                 qrels=qrels,
                 ranked=ranked,
+                reference_embeddings=ref,
+                reference_queries=ref_q,
+                result_sample=result_sample,
             )
             if src is not None:
                 annotate(ev, src)
@@ -690,7 +736,11 @@ def audit_embeddings(
             _remember(audit_id, ev)
             if base is not None:
                 ev["baseline_diff"] = diff_evidence(
-                    ev, base, tolerances=tolerances, retrieval_tolerances=retrieval_tolerances
+                    ev,
+                    base,
+                    tolerances=tolerances,
+                    retrieval_tolerances=retrieval_tolerances,
+                    result_tolerance=result_tolerance,
                 )
                 attempts = _count_attempt(
                     base, ev, ev["baseline_diff"]["change_decision"]["decision"]
@@ -703,6 +753,17 @@ def audit_embeddings(
             raise _user_error(e) from e
         summary = _summary(ev)
         call["outcome"] = ev["verdict"]
+        if ev.get("result_sample"):
+            rs = ev["result_sample"]
+            ev = {
+                **ev,
+                "result_sample": {
+                    "kept_for_baseline": True,
+                    "k": rs["k"],
+                    "rows": len(rs["rows"]),
+                    "queries": len(rs.get("queries") or []),
+                },
+            }
         if not verbose:
             ev = {**ev, "findings": [dict(f) for f in ev["findings"]]}
             ev.pop("thresholds", None)

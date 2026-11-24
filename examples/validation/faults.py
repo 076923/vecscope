@@ -12,6 +12,10 @@ three ways, as a CI job would see it:
 - retrieval gate: against the same baseline, exact nDCG@10 fell by more than 0.01
   (``--retrieval-tolerance ndcg_at_k=0.01``)
 
+Records written since the label-free result change was added also hold
+``result_agreement``: the share of the sampled top-k results (200 queries, 200 rows) that
+the fault changed (``--result-sample 200``).
+
 Faults (seeded):
 
 - query_model: the queries come from another model with the same dimension
@@ -22,7 +26,7 @@ Faults (seeded):
 - id_shift: 10% of the rows point at another document's vector (a lost id mapping)
 - quantize: every value rounded to 4 bits per dimension (int4 without per-vector scaling)
 
-Run:   python examples/validation/faults.py [--max-docs 25000]
+Run:   python examples/validation/faults.py [--max-docs 25000] [--role heldout|confirm]
 Needs: the run.py cache (embeddings and results)
 Writes <cache>/faults/<dataset>__<model>__<fault>.json
 """
@@ -48,6 +52,7 @@ from vecscope.evidence import WORSE, diff_evidence
 
 GOOD = 0.9
 TOLERANCE = {"ndcg_at_k": 0.01}
+RESULT_SAMPLE = 200
 
 
 def _unit(x: np.ndarray) -> np.ndarray:
@@ -129,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-docs", type=int, default=25_000)
     p.add_argument("--faults", nargs="*", default=list(FAULTS), choices=list(FAULTS))
     p.add_argument("--out", help="run.py cache directory")
+    p.add_argument("--role", default="heldout", help="dataset role in registry.py")
     args = p.parse_args(argv)
     cache = out_dir(args.out)
     results = {}
@@ -141,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     work = cache / "faults"
     work.mkdir(parents=True, exist_ok=True)
     for name, ds in DATASETS.items():
+        if ds.role != args.role:
+            continue
         good = [
             m
             for (d, m), r in sorted(results.items())
@@ -150,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         ]
         if not good:
             continue
+        print(f"{name}: {len(good)} good pipelines", flush=True)
         doc_ids, _, q_ids, _, rel = load(ds, cache)
         qrels = qrels_rows(doc_ids, q_ids, rel)
         for model in good:
@@ -161,7 +170,9 @@ def main(argv: list[str] | None = None) -> int:
                 if out.exists():
                     continue
                 if clean is None:
-                    clean = audit(docs, k=10, queries=queries, qrels=qrels).to_dict()
+                    clean = audit(
+                        docs, k=10, queries=queries, qrels=qrels, result_sample=RESULT_SAMPLE
+                    ).to_dict()
                 rng = np.random.default_rng(SEED)
                 other = (
                     _other_model(name, model, docs.shape[1], cache, results)
@@ -172,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 t = time.time()
                 fd, fq = FAULTS[fault](docs, queries, other, rng)
-                ev = audit(fd, k=10, queries=fq, qrels=qrels).to_dict()
+                ev = audit(fd, k=10, queries=fq, qrels=qrels, result_sample=RESULT_SAMPLE).to_dict()
                 diff = diff_evidence(ev, clean, retrieval_tolerances=TOLERANCE)
                 rec = {
                     "dataset": name,
@@ -190,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
                     "retrieval_unchecked": diff["retrieval_unchecked"],
                     "comparable": diff["comparable"],
                     "change_decision": diff["change_decision"]["decision"],
+                    "result_agreement": diff["result_agreement"],
                     "seconds": time.time() - t,
                 }
                 out.write_text(json.dumps(rec, indent=1), encoding="utf-8")

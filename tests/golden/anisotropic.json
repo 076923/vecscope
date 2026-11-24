@@ -440,6 +440,8 @@
  "source": {},
  "knn_cache": {},
  "corpus_fingerprint": "14b6c27102bad68a22449387293980adbd5b19116153462a512a6f03a886dc3e",
+ "reference": {},
+ "result_sample": {},
  "schema_version": 1,
  "verdict": "warn"
 }

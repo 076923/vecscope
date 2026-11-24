@@ -5,6 +5,11 @@ Every dataset here is public on the Hugging Face Hub and none was used to set a 
 SciFact, NFCorpus and ko-strategyqa (see docs/verification.md); refitting them on anything
 listed here would turn the held-out set into a training set, so the report only measures.
 
+``role="confirm"`` marks a second held-out set, chosen and frozen in preregistration.md
+before any of it was embedded, to check the changes made after the first set was read: the
+query_hubness null, judging findings against a reference model, the label-free result change
+and the labeled-query budget. confirm.py analyses it; report.py leaves it out.
+
 No private or company data belongs in this file, in the cache it writes, or in the report.
 """
 
@@ -73,6 +78,23 @@ def _csn(lang: str) -> Dataset:
         queries=(f"{lang}-queries", "test"),
         qrels=(f"{lang}-qrels", "test"),
         note=f"docstring -> {lang} function",
+    )
+
+
+def _webfaq(code: str, lang: str) -> Dataset:
+    return Dataset(
+        name=f"webfaq-{code}",
+        kind="mteb",
+        repo="mteb/WebFAQRetrieval",
+        language=lang,
+        domain="web FAQ",
+        license="CC-BY-4.0",
+        role="confirm",
+        corpus=(f"{code}-corpus", "test"),
+        queries=(f"{code}-queries", "test"),
+        qrels=(f"{code}-qrels", "test"),
+        max_queries=1000,
+        note="FAQ answers from the web (WebFAQ); 1000 seeded queries",
     )
 
 
@@ -147,8 +169,69 @@ DATASETS: dict[str, Dataset] = {
             license="CORD-19 dataset license (research use)",
             note="171k CORD-19 abstracts, 50 queries with deep graded judgments",
         ),
+        # second held-out set (role="confirm"), frozen in preregistration.md
+        _webfaq("kor", "ko"),
+        _webfaq("tha", "th"),
+        _webfaq("vie", "vi"),
+        Dataset(
+            name="jagovfaqs",
+            kind="mteb",
+            repo="mteb/JaGovFaqsRetrieval",
+            language="ja",
+            domain="government FAQ",
+            license="CC-BY-4.0",
+            role="confirm",
+            corpus=("corpus", "test"),
+            queries=("queries", "test"),
+            qrels=("qrels", "test"),
+            note="Japanese government FAQ answers",
+        ),
+        Dataset(
+            name="gerdalir-small",
+            kind="mteb",
+            repo="mteb/GerDaLIRSmall",
+            language="de",
+            domain="legal",
+            license="MIT",
+            role="confirm",
+            corpus=("corpus", "corpus"),
+            queries=("queries", "queries"),
+            qrels=("default", "test"),
+            max_queries=1000,
+            note="German court decisions citing each other; 1000 seeded queries",
+        ),
+        Dataset(
+            name="cqadupstack-webmasters",
+            kind="mteb",
+            repo="mteb/cqadupstack-webmasters",
+            language="en",
+            domain="community QA",
+            license="Apache-2.0",
+            role="confirm",
+            corpus=("corpus", "corpus"),
+            queries=("queries", "queries"),
+            qrels=("default", "test"),
+            note="StackExchange webmasters questions -> duplicate questions",
+        ),
+        Dataset(
+            name="turhistquad",
+            kind="mteb",
+            repo="mteb/TurHistQuadRetrieval",
+            language="tr",
+            domain="history",
+            license="MIT",
+            role="confirm",
+            corpus=("corpus", "test"),
+            queries=("queries", "test"),
+            qrels=("qrels", "test"),
+            note="Turkish history passages, SQuAD-style questions",
+        ),
     ]
 }
+
+
+def role(name: str) -> str:
+    return DATASETS[name].role if name in DATASETS else ""
 
 
 @dataclass(frozen=True)
