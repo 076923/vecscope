@@ -51,9 +51,11 @@ def main(argv: list[str]) -> int:
     gate = evidence.get("gate") or {}
     names = (gate.get("verdict_regressions") or []) + (gate.get("value_regressions") or [])
     regressions = list(dict.fromkeys(names))
-    retrieval = list(gate.get("retrieval_regressions") or []) + [
-        f"unchecked:{k}" for k in gate.get("retrieval_unchecked") or []
-    ]
+    retrieval = (
+        list(gate.get("retrieval_regressions") or [])
+        + [f"unchecked:{k}" for k in gate.get("retrieval_unchecked") or []]
+        + [f"inconclusive:{k}" for k in gate.get("retrieval_inconclusive") or []]
+    )
     verdict = evidence.get("verdict", "unknown")
     _write(
         "GITHUB_OUTPUT",
@@ -111,6 +113,23 @@ def main(argv: list[str]) -> int:
             lines.append(
                 "\nRetrieval tolerances not checked: " + ", ".join(diff["retrieval_unchecked"])
             )
+        checks = diff.get("retrieval_confidence_checks") or {}
+        for key in diff.get("retrieval_inconclusive") or []:
+            c = checks.get(key) or {}
+            lines.append(
+                f"\nRetrieval inconclusive (label more queries, not broken): {_cell(key)} drop "
+                f"{_value(c.get('mean_drop'))} in [{_value(c.get('low'))}, {_value(c.get('high'))}]"
+                + (
+                    f", about {c['queries_needed']} labeled queries"
+                    if c.get("queries_needed")
+                    else ""
+                )
+            )
+    if isinstance(diff, dict) and diff.get("reference_regressions"):
+        lines.append(
+            "\nResults moved away from the reference model (likely harmful, check with labels): "
+            + ", ".join(_cell(s) for s in diff["reference_regressions"])
+        )
     lines += ["", f"Full evidence: `{path}`", ""]
     _write("GITHUB_STEP_SUMMARY", "\n".join(lines))
     return 0

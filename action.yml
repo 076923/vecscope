@@ -72,7 +72,8 @@ outputs:
   retrieval-regressions:
     description: >-
       Comma-separated retrieval metrics (e.g. exact.ndcg_at_k) that dropped beyond their tolerance,
-      followed by any tolerance that could not be checked, marked "unchecked:".
+      followed by any tolerance that could not be checked, marked "unchecked:", and any the
+      labeled queries could not settle under --retrieval-confidence, marked "inconclusive:".
     value: ${{ steps.audit.outputs.retrieval-regressions }}
   evidence:
     description: Path of the evidence JSON.

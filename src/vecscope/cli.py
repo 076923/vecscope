@@ -242,6 +242,24 @@ def main(argv: list[str] | None = None) -> int:
         "--result-sample)",
     )
     a.add_argument(
+        "--retrieval-confidence",
+        type=float,
+        metavar="LEVEL",
+        help="judge each --retrieval-tolerance against the noise of the labeled queries, "
+        "paired per query, e.g. 0.95: fail only when the drop is beyond the tolerance and "
+        "real at that level, pass only when the interval stays within it, else "
+        "INCONCLUSIVE (exits 1 and says how many labeled queries would settle it)",
+    )
+    a.add_argument(
+        "--reference-tolerance",
+        type=float,
+        metavar="DROP",
+        help="allowed drop of the sampled results' overlap with the --reference model against "
+        "the baseline, e.g. 0.02; a larger drop (beyond 2 standard errors) is a likely "
+        "harmful change and exits 1 (needs --baseline, --result-sample and --reference on "
+        "both runs)",
+    )
+    a.add_argument(
         "--require-comparable",
         action="store_true",
         help="with --baseline: exit 2 instead of printing a note when n, dim, k, "
@@ -473,11 +491,20 @@ def _run(args) -> int:
         or args.require_comparable
         or args.retrieval_tolerance
         or args.result_tolerance is not None
+        or args.reference_tolerance is not None
     ) and not args.baseline:
         raise ValueError(
-            "--tolerances, --retrieval-tolerance, --result-tolerance and --require-comparable "
-            "need --baseline"
+            "--tolerances, --retrieval-tolerance, --result-tolerance, --reference-tolerance and "
+            "--require-comparable need --baseline"
         )
+    if args.retrieval_confidence is not None and not args.retrieval_tolerance:
+        raise ValueError("--retrieval-confidence needs --retrieval-tolerance")
+    if args.retrieval_confidence is not None and not 0.5 <= args.retrieval_confidence < 1:
+        raise ValueError("--retrieval-confidence is a level in [0.5, 1), e.g. 0.95")
+    if args.reference_tolerance is not None and not (args.result_sample and args.reference):
+        raise ValueError("--reference-tolerance needs --result-sample and --reference on this run")
+    if args.reference_tolerance is not None and not 0 <= args.reference_tolerance <= 1:
+        raise ValueError("--reference-tolerance is a share between 0 and 1")
     if args.result_tolerance is not None and not args.result_sample:
         raise ValueError("--result-tolerance needs --result-sample on this run")
     if args.result_tolerance is not None and not 0 <= args.result_tolerance <= 1:
@@ -519,6 +546,8 @@ def _run(args) -> int:
             tolerances=tol,
             retrieval_tolerances=rtol,
             result_tolerance=args.result_tolerance,
+            retrieval_confidence=args.retrieval_confidence,
+            reference_tolerance=args.reference_tolerance,
         )
         if args.require_comparable and not d["comparable"]:
             raise ValueError(
@@ -571,6 +600,9 @@ def gate_decision(
     unchecked = list(diff.get("retrieval_unchecked") or []) if diff else []
     result_reg = list(diff.get("result_regressions") or []) if diff else []
     result_unchecked = list(diff.get("result_unchecked") or []) if diff else []
+    retrieval_inc = list(diff.get("retrieval_inconclusive") or []) if diff else []
+    reference_reg = list(diff.get("reference_regressions") or []) if diff else []
+    reference_unchecked = list(diff.get("reference_unchecked") or []) if diff else []
     reasons = []
     if absolute:
         reasons.append(f"verdict {verdict} reaches --fail-on {fail_on}")
@@ -593,6 +625,31 @@ def gate_decision(
             f"retrieval tolerance not checked: {', '.join(unchecked)} (both runs need a "
             "retrieval block with the same qrels and k, and the ranking it names)"
         )
+    if retrieval_inc:
+        cc = diff.get("retrieval_confidence_checks") or {}
+        reasons.append(
+            "retrieval drop not settled by the labeled queries (label more, not broken): "
+            + ", ".join(
+                f"{k} {cc[k]['mean_drop']:.4f} in [{cc[k]['low']:.4f}, {cc[k]['high']:.4f}]"
+                + (f", about {cc[k]['queries_needed']} queries" if cc[k]["queries_needed"] else "")
+                for k in retrieval_inc
+            )
+        )
+    if reference_reg:
+        agree = diff.get("result_agreement") or {}
+        reasons.append(
+            "results moved away from the reference model beyond --reference-tolerance "
+            f"{diff.get('reference_tolerance'):g} (likely harmful, check with labels): "
+            + ", ".join(
+                f"{s} overlap {agree[s]['reference']['baseline_overlap']:.3f} -> "
+                f"{agree[s]['reference']['overlap']:.3f} (z {agree[s]['reference']['z']:.1f})"
+                for s in reference_reg
+            )
+        )
+    if reference_unchecked:
+        reasons.append(
+            "reference tolerance not checked: both runs need --result-sample and --reference"
+        )
     if result_reg:
         agree = diff.get("result_agreement") or {}
         reasons.append(
@@ -613,6 +670,9 @@ def gate_decision(
         "retrieval_unchecked": unchecked,
         "result_regressions": result_reg,
         "result_unchecked": result_unchecked,
+        "retrieval_inconclusive": retrieval_inc,
+        "reference_regressions": reference_reg,
+        "reference_unchecked": reference_unchecked,
         "baseline": diff is not None,
         "inconclusive": list(inconclusive or []),
         "exit_code": 1 if reasons else 0,
@@ -709,9 +769,22 @@ def _render_diff(d: dict, path: str) -> str:
         lines.append(f"  retrieval vs baseline{note}:")
         for r in d["retrieval_changes"]:
             key = f"{r['ranking']}.{r['metric']}"
+            cc = (d.get("retrieval_confidence_checks") or {}).get(key)
+            interval = (
+                f" [{cc['low']:.4f}, {cc['high']:.4f}] at {d['retrieval_confidence']:g}"
+                if cc
+                else ""
+            )
             mark = (
-                f"  WORSE by {r['worsening']:.4f} > {r['tolerance']:g}"
+                f"  WORSE by {r['worsening']:.4f} > {r['tolerance']:g}{interval}"
                 if key in d.get("retrieval_regressions", [])
+                else f"  INCONCLUSIVE: drop{interval} straddles {r['tolerance']:g}"
+                + (
+                    f", about {cc['queries_needed']} labeled queries"
+                    if cc["queries_needed"]
+                    else ""
+                )
+                if cc and cc["decision"] == "inconclusive"
                 else f"  within {r['tolerance']:g}"
                 if r.get("tolerance") is not None and d["retrieval_comparable"]
                 else ""
@@ -741,8 +814,21 @@ def _render_diff(d: dict, path: str) -> str:
                 else ""
             )
         )
+        if "reference" in r:
+            ref = r["reference"]
+            lines.append(
+                f"    overlap with the reference model {ref['baseline_overlap']:.3f} -> "
+                f"{ref['overlap']:.3f} (drop {ref['drop']:+.4f}, z {ref['z']:.1f})"
+                + (
+                    f"  AWAY FROM THE REFERENCE beyond {d['reference_tolerance']:g}"
+                    if side in d.get("reference_regressions", [])
+                    else ""
+                )
+            )
     if d.get("result_unchecked"):
         lines.append("  result tolerance not checked: a run has no --result-sample")
+    if d.get("reference_unchecked"):
+        lines.append("  reference tolerance not checked: a run has no reference overlap")
     cd = d.get("change_decision")
     if cd:
         lines.append(f"  change decision: {cd['decision']}; {'; '.join(cd['reasons'])}")

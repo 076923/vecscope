@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 
@@ -309,10 +310,28 @@ def change_decision(diff: Mapping) -> dict:
         }
 
     if not diff.get("retrieval_comparable"):
-        moved = [
-            f"{side} {r['changed_share']:.1%}"
-            for side, r in (diff.get("result_agreement") or {}).items()
-        ]
+        agreement = diff.get("result_agreement") or {}
+        moved = [f"{side} {r['changed_share']:.1%}" for side, r in agreement.items()]
+        ref = {s: r["reference"] for s, r in agreement.items() if "reference" in r}
+        ref_reason = []
+        if ref:
+            from vecscope.results import REFERENCE_TOLERANCE, reference_regressions
+
+            tol = diff.get("reference_tolerance")
+            away = reference_regressions(agreement, REFERENCE_TOLERANCE if tol is None else tol)
+            shown = ", ".join(
+                f"{s} {r['baseline_overlap']:.3f} -> {r['overlap']:.3f} (z {r['z']:.1f})"
+                for s, r in ref.items()
+            )
+            ref_reason = [
+                "results moved away from the reference model: overlap "
+                + shown
+                + "; likely harmful, check with labels before adopting"
+                if away
+                else "overlap with the reference model held: "
+                + shown
+                + "; no sign of harm, which is not proof of none"
+            ]
         return out(
             "needs_review",
             "no labeled retrieval on both runs with the same qrels and k: a finding that "
@@ -327,6 +346,7 @@ def change_decision(diff: Mapping) -> dict:
                 if moved
                 else []
             ),
+            *ref_reason,
         )
     changes = diff.get("retrieval_changes") or []
     if diff.get("retrieval_tolerances"):
@@ -339,6 +359,24 @@ def change_decision(diff: Mapping) -> dict:
             for c in changes
             if c["metric"] in _DECISION_METRICS and (c.get("worsening") or 0) > _EPS
         ]
+    inconclusive = list(diff.get("retrieval_inconclusive") or [])
+    if inconclusive and not drops:
+        cc = diff.get("retrieval_confidence_checks") or {}
+        return out(
+            "needs_review",
+            "retrieval drop not settled by the labeled queries: "
+            + ", ".join(
+                f"{k} drop {cc[k]['mean_drop']:.4f} (interval {cc[k]['low']:.4f} to "
+                f"{cc[k]['high']:.4f}, tolerance {cc[k]['tolerance']})"
+                + (
+                    f", about {cc[k]['queries_needed']} labeled queries would settle it"
+                    if cc[k].get("queries_needed")
+                    else ""
+                )
+                for k in inconclusive
+            )
+            + "; label more queries before adopting",
+        )
     if drops:
         shown = {f"{c['ranking']}.{c['metric']}": c for c in changes}
         return out(
@@ -375,12 +413,60 @@ def change_decision(diff: Mapping) -> dict:
     return out("adopt", *reasons)
 
 
+def _confident_drop(key: str, tol: float, ra: Mapping, rb: Mapping, level: float) -> dict | None:
+    """Paired per-query check of one retrieval tolerance; None when either run lacks the
+    per-query values (then the mean rule applies)."""
+    from statistics import NormalDist
+
+    part, metric = key.split(".", 1)
+    pa, pb = ra.get("per_query") or {}, rb.get("per_query") or {}
+    va, vb = (pa.get(part) or {}).get(metric), (pb.get(part) or {}).get(metric)
+    if va is None or vb is None:
+        return None
+    a = dict(zip(pa.get("query_rows") or [], va))
+    b = dict(zip(pb.get("query_rows") or [], vb))
+    shared = sorted(a.keys() & b.keys())
+    if len(shared) < 2:
+        return None
+    higher_worse = RETRIEVAL_METRICS.get(metric)
+    d = np.array([(a[q] - b[q]) if higher_worse else (b[q] - a[q]) for q in shared], float)
+    mean = float(d.mean())
+    sd = float(d.std(ddof=1))
+    se = sd / math.sqrt(len(d))
+    z = NormalDist().inv_cdf(level)
+    low, high = mean - z * se, mean + z * se
+    if mean > tol and low > 0:
+        decision = "fail"
+    elif high <= tol:
+        decision = "pass"
+    else:
+        decision = "inconclusive"
+    needed = None
+    if decision == "inconclusive" and sd > 0:
+        # queries at which the interval would clear the tolerance (or zero, for a drop
+        # beyond it) if the mean and spread held
+        gap = mean if mean > tol else tol - mean
+        needed = math.ceil((z * sd / gap) ** 2) if gap > 0 else None
+    return {
+        "queries": len(shared),
+        "mean_drop": mean,
+        "standard_error": se,
+        "low": low,
+        "high": high,
+        "tolerance": tol,
+        "decision": decision,
+        "queries_needed": needed,
+    }
+
+
 def diff_evidence(
     new: dict,
     old: dict,
     tolerances: Mapping | None = None,
     retrieval_tolerances: Mapping | None = None,
     result_tolerance: float | None = None,
+    retrieval_confidence: float | None = None,
+    reference_tolerance: float | None = None,
 ) -> dict:
     """Compare two evidence dicts (``Evidence.to_dict()`` or a parsed ``--json`` file).
 
@@ -412,6 +498,23 @@ def diff_evidence(
     of top-k slots allowed to change (0 for a pipeline meant to return the same results);
     a side beyond it is listed in ``result_regressions``, and a tolerance that cannot be
     checked because either run has no sample is listed in ``result_unchecked``.
+
+    ``retrieval_confidence`` (e.g. 0.95) judges each retrieval tolerance against the noise of
+    the labeled set instead of the mean alone, from the per-query values both runs stored,
+    paired by query row (``retrieval_confidence_checks``): a metric fails when its drop is
+    beyond the tolerance and above zero by more than the one-sided interval at that level,
+    passes when the interval's upper end is within the tolerance, and is otherwise
+    ``retrieval_inconclusive``, with an estimate of the labeled queries that would settle
+    it. On the first held-out set's injected faults with 100 labeled queries, it let 1% of
+    harmful changes pass (8% for the mean alone) and failed 14% of harmless ones (24%); the
+    rest were inconclusive. A gate must not read inconclusive as a pass.
+
+    ``reference_tolerance`` uses the reference overlap both runs stored
+    (``audit(reference_embeddings=..., result_sample=...)``): a side whose overlap with the
+    reference dropped by more than the tolerance and by more than
+    ``vecscope.results.REFERENCE_Z`` standard errors is listed in ``reference_regressions``
+    ("likely harmful, check with labels"), and a tolerance with nothing to compare is listed in
+    ``reference_unchecked``.
     """
     tol = resolve_tolerances(tolerances)
     rtol = resolve_retrieval_tolerances(retrieval_tolerances)
@@ -476,6 +579,22 @@ def diff_evidence(
     )
     checks = _retrieval_checks(rtol, ra, rb)
     retrieval_regressions, retrieval_unchecked = [], []
+    if retrieval_confidence is not None and not (
+        isinstance(retrieval_confidence, (int, float))
+        and not isinstance(retrieval_confidence, bool)
+        and 0.5 <= retrieval_confidence < 1
+    ):
+        raise ValueError(f"retrieval_confidence must be in [0.5, 1), got {retrieval_confidence!r}")
+    confidence_checks: dict = {}
+    if retrieval_confidence is not None and retrieval_comparable:
+        for key, (t, _) in checks.items():
+            c = _confident_drop(key, t, ra, rb, retrieval_confidence)
+            if c is not None:
+                confidence_checks[key] = c
+    confident = set(confidence_checks)
+    retrieval_inconclusive = sorted(
+        k for k, c in confidence_checks.items() if c["decision"] == "inconclusive"
+    )
     for part in _RANKINGS:
         pa, pb = ra.get(part) or {}, rb.get(part) or {}
         for metric in pa.keys() & pb.keys():
@@ -495,10 +614,11 @@ def diff_evidence(
                     "tolerance": t,
                 }
             )
-            if t is not None and retrieval_comparable and worsening > t:
+            if t is not None and retrieval_comparable and key not in confident and worsening > t:
                 retrieval_regressions.append(key)
     retrieval_changes.sort(key=lambda r: (r["ranking"], r["metric"]))
     measured = {f"{r['ranking']}.{r['metric']}" for r in retrieval_changes}
+    retrieval_regressions += [k for k, c in confidence_checks.items() if c["decision"] == "fail"]
     for key in sorted(checks):
         if not retrieval_comparable or key not in measured:
             retrieval_unchecked.append(key)
@@ -523,8 +643,11 @@ def diff_evidence(
         "retrieval_tolerances": rtol,
         "retrieval_regressions": sorted(retrieval_regressions),
         "retrieval_unchecked": retrieval_unchecked,
+        "retrieval_confidence": retrieval_confidence,
+        "retrieval_confidence_checks": confidence_checks,
+        "retrieval_inconclusive": retrieval_inconclusive,
     }
-    from vecscope.results import result_agreement
+    from vecscope.results import reference_regressions, result_agreement
 
     agreement = result_agreement(new.get("result_sample") or {}, old.get("result_sample") or {})
     out["result_agreement"] = agreement
@@ -535,6 +658,16 @@ def diff_evidence(
         else [s for s, r in agreement.items() if r["changed_share"] > result_tolerance]
     )
     out["result_unchecked"] = ["results"] if result_tolerance is not None and not agreement else []
+    has_ref = any("reference" in r for r in agreement.values())
+    out["reference_tolerance"] = reference_tolerance
+    out["reference_regressions"] = (
+        reference_regressions(agreement, reference_tolerance)
+        if reference_tolerance is not None
+        else []
+    )
+    out["reference_unchecked"] = (
+        ["reference"] if reference_tolerance is not None and not has_ref else []
+    )
     out["change_decision"] = change_decision(out)
     return out
 
@@ -1387,7 +1520,8 @@ def audit(
     reference value and the verdict without it in ``details.reference``
     (``vecscope.reference``). ``result_sample`` > 0 stores the exact top-k of that many
     sampled queries and rows (``vecscope.results``), so a later ``diff_evidence`` can report
-    how much of what search returns changed without labels.
+    how much of what search returns changed without labels; with a reference it also stores
+    how much of each sampled top-k the reference returns too (``reference_overlap``).
     ``thresholds`` overrides default (warn, fail) pairs by key, e.g.
     ``{"anisotropy.mean_random_cosine": (0.4, 0.7)}``.
     ``sample_repeats`` > 1 re-audits that many independent samples (seeds ``seed+1`` ...)
@@ -1605,7 +1739,9 @@ def audit(
     if result_sample:
         from vecscope.results import result_sample as _result_sample
 
-        samples = _result_sample(x_full, queries, int(result_sample), k)
+        samples = _result_sample(
+            x_full, queries, int(result_sample), k, reference_embeddings, reference_queries
+        )
     from vecscope.plan import build_plan
 
     findings = _attach_thresholds(findings, th)

@@ -10,6 +10,11 @@ before any of it was embedded, to check the changes made after the first set was
 query_hubness null, judging findings against a reference model, the label-free result change
 and the labeled-query budget. confirm.py analyses it; report.py leaves it out.
 
+``role="third"`` marks a third held-out set, frozen in preregistration_third.md before it was
+embedded, for the changes made after the second was read: the reference-overlap signal, the
+labeled gate judged against the noise of its queries, and the query_hubness chance rule,
+which the second set could not test. third.py analyses it.
+
 No private or company data belongs in this file, in the cache it writes, or in the report.
 """
 
@@ -51,7 +56,7 @@ def _xpqa(lang: str, code: str) -> Dataset:
     )
 
 
-def _miracl(lang: str) -> Dataset:
+def _miracl(lang: str, role: str = "heldout", max_queries: int = 0) -> Dataset:
     return Dataset(
         name=f"miracl-{lang}",
         kind="mteb",
@@ -62,7 +67,10 @@ def _miracl(lang: str) -> Dataset:
         corpus=(f"{lang}-corpus", "dev"),
         queries=(f"{lang}-queries", "dev"),
         qrels=(f"{lang}-qrels", "dev"),
-        note="MIRACL dev with the MTEB hard-negative corpus",
+        role=role,
+        max_queries=max_queries,
+        note="MIRACL dev with the MTEB hard-negative corpus"
+        + (f"; {max_queries} seeded queries" if max_queries else ""),
     )
 
 
@@ -81,7 +89,23 @@ def _csn(lang: str) -> Dataset:
     )
 
 
-def _webfaq(code: str, lang: str) -> Dataset:
+def _wiki(lang: str) -> Dataset:
+    return Dataset(
+        name=f"wikipedia-{lang}",
+        kind="mteb",
+        repo="mteb/WikipediaRetrievalMultilingual",
+        language=lang,
+        domain="wikipedia",
+        license="CC-BY-SA-3.0",
+        role="third",
+        corpus=(f"{lang}-corpus", "test"),
+        queries=(f"{lang}-queries", "test"),
+        qrels=(f"{lang}-qrels", "test"),
+        note="Wikipedia passages with generated questions (WikipediaRetrievalMultilingual)",
+    )
+
+
+def _webfaq(code: str, lang: str, role: str = "confirm", max_queries: int = 1000) -> Dataset:
     return Dataset(
         name=f"webfaq-{code}",
         kind="mteb",
@@ -89,12 +113,12 @@ def _webfaq(code: str, lang: str) -> Dataset:
         language=lang,
         domain="web FAQ",
         license="CC-BY-4.0",
-        role="confirm",
+        role=role,
         corpus=(f"{code}-corpus", "test"),
         queries=(f"{code}-queries", "test"),
         qrels=(f"{code}-qrels", "test"),
-        max_queries=1000,
-        note="FAQ answers from the web (WebFAQ); 1000 seeded queries",
+        max_queries=max_queries,
+        note=f"FAQ answers from the web (WebFAQ); {max_queries} seeded queries",
     )
 
 
@@ -225,6 +249,61 @@ DATASETS: dict[str, Dataset] = {
             queries=("queries", "test"),
             qrels=("qrels", "test"),
             note="Turkish history passages, SQuAD-style questions",
+        ),
+        # third held-out set (role="third"), frozen in preregistration_third.md. The first
+        # four have few queries over a large corpus, where chance alone gives query_hubness
+        # a high skewness; the others have at most 25k documents for the injected faults.
+        _miracl("ko", role="third"),
+        _miracl("th", role="third", max_queries=200),
+        Dataset(
+            name="scidocs",
+            kind="mteb",
+            repo="mteb/scidocs",
+            language="en",
+            domain="science",
+            license="CC-BY-SA-4.0",
+            role="third",
+            max_queries=60,
+            note="paper titles -> cited abstracts (BEIR SCIDOCS); 60 seeded queries",
+        ),
+        _webfaq("ind", "id", role="third", max_queries=150),
+        Dataset(
+            name="arguana",
+            kind="mteb",
+            repo="mteb/arguana",
+            language="en",
+            domain="arguments",
+            license="CC-BY-SA-4.0",
+            role="third",
+            note="argument -> best counter-argument (BEIR ArguAna)",
+        ),
+        Dataset(
+            name="stackoverflowqa",
+            kind="mteb",
+            repo="mteb/StackOverflowQA",
+            language="en",
+            domain="code QA",
+            license="MIT",
+            role="third",
+            corpus=("corpus", "test"),
+            queries=("queries", "test"),
+            qrels=("qrels", "test"),
+            note="StackOverflow questions -> accepted answers with code",
+        ),
+        _wiki("bn"),
+        _wiki("cs"),
+        Dataset(
+            name="autorag-ko",
+            kind="mteb",
+            repo="mteb/AutoRAGRetrieval",
+            language="ko",
+            domain="finance, public, medical, legal, commerce",
+            license="MIT",
+            role="third",
+            corpus=("corpus", "test"),
+            queries=("queries", "test"),
+            qrels=("qrels", "test"),
+            note="Korean documents of five domains with generated questions",
         ),
     ]
 }

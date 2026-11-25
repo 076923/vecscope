@@ -1117,7 +1117,7 @@ def test_mcp_baseline_by_audit_id_and_summary(tmp_path, monkeypatch):
     assert again["baseline_diff"]["baseline_verdict"] == first["verdict"]
     with pytest.raises(Exception, match="not an audit_id of this server session"):
         audit_embeddings(str(tmp_path / "b.npy"), baseline="0123456789abcdef")
-    with pytest.raises(Exception, match="result_tolerance need baseline"):
+    with pytest.raises(Exception, match="reference_tolerance need baseline"):
         audit_embeddings(str(tmp_path / "b.npy"), tolerances={"collapse": 0.01})
     # a lost id mapping: the same rows in another order; findings cannot see it, labels can
     np.save(tmp_path / "moved.npy", x[np.random.default_rng(1).permutation(len(x))])
