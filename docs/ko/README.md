@@ -239,7 +239,9 @@ vecscope audit embeddings.npy --queries q.npy --qrels qrels.json --baseline base
 결과 자체에 게이트를 걸 수 있습니다. 이 수치는 해로움이 아니라 변화를 보여 줍니다.
 `--retrieval-confidence 0.95`는 라벨 하락을 라벨 질의의 잡음과 견주어 판정하고(fail, pass,
 판단 불가), 두 실행에 기준 모델을 주면 `--reference-tolerance 0.02`가 결과가 기준 모델에서 멀어진
-변경을 라벨 없는 해로움 신호로 표시합니다([CI](ci.md)).
+변경을 라벨 없는 해로움 신호로 표시합니다([CI](ci.md)). 사전 등록한 처음 보는 세트에서 잡음과
+견주는 게이트는 기준을 통과했고, 기준 모델 겹침은 해로움을 AUC 0.80으로 줄 세웠지만 해롭지 않은
+변경도 44% 표시했으므로 "라벨로 확인하라"로 읽으십시오([검증](verification.md)).
 
 GitHub에서는 같은 게이트를 Action으로 쓸 수 있습니다.
 

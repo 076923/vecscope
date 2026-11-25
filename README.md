@@ -248,7 +248,10 @@ that number shows change, not harm. `--retrieval-confidence 0.95` judges a label
 against the noise of the labeled queries (fail, pass or inconclusive), and with a reference
 model on both runs `--reference-tolerance 0.02` flags results that moved away from the
 reference's, a label-free sign of harm
-([CI](https://076923.github.io/vecscope/ci/)).
+([CI](https://076923.github.io/vecscope/ci/)). On a preregistered unseen set the noise-aware
+gate met its criteria; the reference overlap ranked harm at AUC 0.80 but also flagged 44% of
+harmless changes, so read it as "check with labels"
+([Verification](https://076923.github.io/vecscope/verification/)).
 
 On GitHub the same gate is an Action:
 

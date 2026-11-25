@@ -375,6 +375,87 @@ What this changes:
 - The chance rule for `query_hubness` was not tested here, because every dataset had enough
   queries. The first set and the random-data checks are still its only evidence.
 
+### A third held-out set, preregistered
+
+The second set left the chance rule for `query_hubness` untested. Two changes were designed
+after it, on the first set's faults: the overlap with a reference model's results as a
+label-free sign of harm (`--reference-tolerance`), and the labeled gate judged against the
+noise of its queries (`--retrieval-confidence`). The code, the thresholds and the criteria
+were committed
+([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_third.md))
+before nine more public datasets were downloaded:
+
+- four with few queries over 25k to 117k documents, so chance alone puts `query_hubness`
+  above warn: MIRACL Korean and Thai, SCIDOCS, WebFAQ Indonesian
+- five with at most 25k documents for the injected faults: ArguAna, StackOverflowQA,
+  Wikipedia Bengali and Czech, AutoRAG (Korean)
+
+They were run once with the same 14 models: 126 pipelines, 47 good and 40 bad.
+`examples/validation/third.py` scores the criteria (`third_summary.json`). No bug was found
+in the script after the freeze. One criterion failed.
+
+| prediction | criterion | result |
+|---|---|---|
+| P1a `query_hubness` against chance, good | good pipelines flagged with the rule at most half of those flagged by the thresholds alone | passed: 21 of 21 flagged by the thresholds alone, 0 with the rule (chance skewness 4.5 to 8.2) |
+| P1b same, bad | at least 90% of the bad pipelines at `fail` by the thresholds alone kept at `fail` | passed: 17 of 17 |
+| P5a reference overlap, separation | z of the paired drop separates harmful from harmless faults at AUC 0.80 or more, and 0.10 above the changed share | passed, at the edge: 0.802; the changed share gave 0.468 |
+| P5b reference overlap at 0.02 | at least 70% of the faults costing more than 0.02 flagged, at most 35% of the harmless ones | **failed**: 64 of 81 (79%) flagged, but also 18 of 41 harmless (44%) |
+| P6a labeled gate at 0.95, harmful | harmful faults pass at most 3% of the time and at most half as often as with the mean alone | passed: 0.4%, against 3.9% with the mean |
+| P6b same, harmless | harmless faults fail at most 0.75 times as often as with the mean alone | passed: 10.1%, against 23.7% |
+| P7 determinism | the audit with reference, result sample and qrels gives identical JSON twice | passed: 5 of 5 |
+
+The faults were the six of `faults.py` on 26 good pipelines (156 runs; 130 without the
+duplicates; 89 of those harmful, 41 harmless). P6 drew 200 subsets of 100 labeled queries
+per fault.
+
+Why P5b failed. The overlap tracks distance from the reference, and some changes move away
+from it without costing labeled retrieval:
+
+| fault | runs | nDCG@10 drop above 0.01 | flagged at 0.02 | harmless flagged |
+|---|---|---|---|---|
+| query model swapped | 26 | 23 | 23 | 0 of 3 |
+| id mapping lost (10% of rows) | 26 | 26 | 26 | none harmless |
+| truncated to half the dimensions | 26 | 11 | 22 | 11 of 15 |
+| quantized to 4 bits | 26 | 5 | 10 | 6 of 21 |
+| 5% zero rows | 26 | 24 | 8 | 1 of 2 |
+| 20% duplicated rows | 26 | 26 | 0 | none harmless |
+
+- Truncation and quantization: most of the false alarms. On the Wikipedia and AutoRAG
+  corpora they pull the results 0.02 to 0.11 away from the reference while nDCG@10 falls by
+  less than 0.01. A reference shares only part of the top-k with any model, and moving
+  within the rest does not always cost relevant results.
+- Zero rows: missed 17 of 24 times. Losing 5% of the rows lowered the overlap by a median of
+  0.018, under the tolerance, while it cost a median 0.036 nDCG@10 because the lost rows
+  include relevant documents. The findings catch zero rows: on the first set the baseline
+  diff caught all 84 harmful ones.
+- Duplicates: unseen, as predicted. The reference embeds the duplicated rows too.
+
+P6 confirms the labeled gate judged against noise. With 100 labeled queries, harmful
+faults failed 87.5% of the time, were inconclusive 12.0% and passed 0.4%. Harmless faults
+failed 10.1%, were inconclusive 68.1% and passed 21.8%. Most harmless faults cost just
+under 0.01, and 100 labels cannot settle them; the gate says so instead of guessing.
+
+P1 confirms the chance rule where it applies: on four corpora with 60 to 213 queries, every
+good pipeline that the thresholds put on `query_hubness` was cleared, and no bad pipeline at
+`fail` was.
+
+The reference rule for findings, reported without a prediction, behaved as on the second
+set. Good pipelines flagged went from 32 to 15 of 47. The same 6 stayed at `fail`: e5 models
+on StackOverflowQA and WebFAQ Indonesian, and KURE-v1 and Qwen3 on WebFAQ Indonesian, all
+on `hubness`. Of the bad pipelines, 39 of 40 stayed at `fail` and all 40 were still flagged.
+
+What this changes:
+
+- `--retrieval-confidence 0.95` is the recommended labeled gate: on unseen data it let
+  harmful changes through at a tenth of the mean rule's rate and failed harmless ones less
+  than half as often. Read inconclusive as "label more queries".
+- The reference overlap orders changes by likely harm (AUC 0.80), but at 0.02 it also flags
+  close to half of the harmless changes on these corpora, and it misses lost rows. Treat
+  `reference_regressions` as "check with labels before merging", not as a failure on its
+  own.
+- The chance rule for `query_hubness` held on its first test: on small query sets, trust it
+  over the thresholds alone.
+
 ## 3. Sampled audits
 
 | claim | result |
@@ -478,14 +559,22 @@ not that every agent follows them.
   absolute verdict. Production query logs and private corpora were not measured.
 - The `query_hubness` change was prompted by the held-out results; it follows from a null
   model and was checked on random data, but those datasets are no longer blind for that
-  finding, and the preregistered second set had enough queries everywhere to leave it
-  untested.
+  finding. The preregistered second set had enough queries everywhere to leave it untested;
+  the third set tested it on four corpora with 60 to 213 queries and it passed.
 - On the second set ([preregistered](#a-second-held-out-set-preregistered)) the reference model
   cut flagged good pipelines from 34 to 14 of 36 but left all 6 good pipelines at `fail`
   (prediction P2a failed): hubs one model makes on rows a reference handles are not
   explained away. That set is no longer blind for the reference rule either.
 - The label-free result change detects change, not harm (AUC 0.58 between harmful and
   harmless faults); gate on it only where results must not change.
+- The overlap with a reference model is a sign of harm, not a measure of it. On the third
+  set ([preregistered](#a-third-held-out-set-preregistered)) it separated harmful from
+  harmless faults at AUC 0.80, but at 0.02 it flagged 44% of the harmless ones (prediction
+  P5b failed), mostly truncation and quantization, and it missed 17 of 24 harmful zero-row
+  faults and every duplicate fault.
+- The labeled gate judged against noise passed its test with 100 labeled queries; with
+  fewer, most changes are inconclusive, and it assumes the labeled queries are a random
+  sample of the traffic.
 - The injected faults are six kinds applied one at a time to corpora of at most 25k
   documents; mixed faults and larger corpora were not injected. A lost id mapping moves no
   finding and is caught only with labeled queries.
@@ -527,6 +616,10 @@ not that every agent follows them.
   `label_budget.py --role confirm` and `confirm.py`, which writes
   `examples/validation/confirm_summary.json`. `label_budget.py` without `--role` gives the
   budget on the first set.
+- The third held-out set: `run.py` on the nine datasets of
+  `examples/validation/preregistration_third.md`, then `third.py`, which injects the faults,
+  scores P1 and P5 to P7 and writes `examples/validation/third_summary.json` (about two hours
+  on one L4 after the embeddings).
 - The 19-model, nine-dataset, query-finding and intervention runs use a harness that is not
   shipped with the package. The behavior they set is pinned by tests instead:
   - `tests/test_query_findings.py` (query_gap and query_shift)

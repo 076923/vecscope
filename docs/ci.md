@@ -146,8 +146,11 @@ On the first held-out set's injected faults with 100 labeled queries, this rule 
 harmful changes pass, where the mean alone let 8% through. It failed 14% of harmless
 changes, where the mean alone failed 24%. The rest were inconclusive: 17% of harmful and
 62% of harmless changes. Most harmless faults there cost just under 0.01, so 100 labels
-cannot settle them. The rule was designed on that set; the third held-out set, frozen
-before it was embedded, checks it ([Verification](verification.md)). A baseline written
+cannot settle them. The rule was designed on that set and confirmed on the third held-out
+set, frozen before it was embedded: 0.4% of harmful changes passed (3.9% with the mean
+alone), 10.1% of harmless ones failed (23.7%), and 12% of harmful and 68% of harmless
+changes were inconclusive ([Verification](verification.md#a-third-held-out-set-preregistered)).
+A baseline written
 before this version has no per-query values, and its tolerances fall back to the mean.
 
 ## Results that must not change
@@ -206,8 +209,15 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
 On the first held-out set's injected faults, duplicates left out, the drop's z separated
 harmful from harmless changes at AUC 0.875, where the share of changed results did at 0.56.
 At 0.02 it flagged 79% of the faults that cost more than 0.02 nDCG@10, and 24% of the
-harmless ones. Read it as "likely harmful, check with labels", not as a measured loss:
+harmless ones. On the preregistered third held-out set it separated them at AUC 0.80 (the
+changed share at 0.47) and flagged 79% of the faults above 0.02, but also 44% of the
+harmless ones, mostly truncated or quantized vectors that moved away from the reference
+without costing nDCG@10
+([Verification](verification.md#a-third-held-out-set-preregistered)). Read it as "likely
+harmful, check with labels", not as a measured loss or a failure on its own:
 
+- It misses lost rows: 5% zero vectors lowered the overlap by about 0.02 while costing 0.04
+  nDCG@10. The findings catch those.
 - It cannot see rows that are wrong for both models. Duplicated rows show up in the
   reference too; `collapse` finds those.
 - A change that makes the pipeline better than the reference also lowers the overlap.

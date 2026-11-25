@@ -30,7 +30,13 @@ All notable changes to this project are documented here. The format follows
   `inconclusive:<metric>` in `retrieval-regressions`.
 - A third held-out set (nine public datasets, `role="third"`) frozen with its criteria in
   `examples/validation/preregistration_third.md` before it was embedded, scored by
-  `examples/validation/third.py`.
+  `examples/validation/third.py`. Results (`third_summary.json`, docs/verification.md): P1 passed (the
+  `query_hubness` chance rule cleared 21 of 21 good pipelines flagged by the thresholds alone
+  and kept 17 of 17 bad ones at `fail`); P5a passed at the edge (reference overlap AUC 0.802,
+  changed share 0.468); P5b failed (79% of faults above 0.02 flagged, but also 44% of
+  harmless ones, against a 35% limit); P6 passed (at 100 labeled queries harmful changes
+  passed 0.4% of the time against 3.9% with the mean, harmless ones failed 10.1% against
+  23.7%); P7 passed.
 - Judging findings against a reference model: `vecscope audit --reference ref.npy
   [--reference-queries ref_q.npy]` (MCP `reference_path`, `reference_queries_path`; Python
   `audit(reference_embeddings=..., reference_queries=...)`) audits the same rows embedded by a

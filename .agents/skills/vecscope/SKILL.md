@@ -61,7 +61,9 @@ In CI:
   itself: `retrieval_regressions` only for a drop that is real and beyond the tolerance,
   `retrieval_inconclusive` (exit 1, `INCONCLUSIVE`, with `queries_needed`) when the labeled
   set cannot tell. Report inconclusive as "label about N more queries", never as a pass and
-  never as "broken"; `change_decision` is `needs_review` then, not `reject`.
+  never as "broken"; `change_decision` is `needs_review` then, not `reject`. On a
+  preregistered unseen set at 100 queries it passed 0.4% of harmful changes (3.9% with the
+  mean alone) and failed 10.1% of harmless ones (23.7%): prefer it to the mean alone.
 - Without labels, `--result-sample 500` on the baseline and the new run adds
   `result_agreement` (share of the sampled top-k that changed). It shows change, not harm
   (it did not separate harmful from harmless faults), so use `--result-tolerance 0` only for a
@@ -74,7 +76,10 @@ In CI:
   and `--reference-tolerance 0.02` (MCP `reference_tolerance`) lists a drop beyond it in
   `reference_regressions`. Report it as "results moved away from the reference: likely
   harmful, check with labels", and a held overlap as "no sign of harm", never as proof. It
-  does not see duplicated rows (`collapse` does).
+  does not see duplicated rows (`collapse` does) or most lost rows (zero vectors; the
+  findings do). On a preregistered unseen set it ranked harm at AUC 0.80 but flagged 44% of
+  harmless changes at 0.02 (mostly truncation and quantization), so never block a merge on
+  `reference_regressions` alone: ask for labels.
 - Pick tolerances from measured retrieval quality ("Calibrating thresholds to your domain" in
   https://076923.github.io/vecscope/quality/), not from what makes the pipeline green.
 - Two rules can fail a run and the `gate` block (JSON) or line (text) names which one did:

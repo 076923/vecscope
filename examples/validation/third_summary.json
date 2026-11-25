@@ -1,0 +1,168 @@
+{
+ "pipelines": 126,
+ "good": 47,
+ "bad": 40,
+ "P1_query_hubness_null": {
+  "datasets": [
+   [
+    "miracl-ko",
+    4.51
+   ],
+   [
+    "miracl-th",
+    7.07
+   ],
+   [
+    "scidocs",
+    6.54
+   ],
+   [
+    "webfaq-ind",
+    8.16
+   ]
+  ],
+  "good": 21,
+  "good_flagged_threshold_only": 21,
+  "good_flagged_rule": 0,
+  "bad": 20,
+  "bad_fail_threshold_only": 17,
+  "bad_fail_kept_by_rule": 17,
+  "testable_a": true,
+  "testable_b": true,
+  "pass_a": true,
+  "pass_b": true
+ },
+ "reference_rule": {
+  "good_fail_without": 6,
+  "good_fail_with": 6,
+  "good_flagged_without": 32,
+  "good_flagged_with": 15,
+  "bad_fail_without": 39,
+  "bad_fail_with": 39,
+  "bad_flagged_with": 40,
+  "good_fail_left": [
+   "stackoverflowqa multilingual-e5-base: hubness",
+   "stackoverflowqa multilingual-e5-large: hubness, query_hubness",
+   "webfaq-ind KURE-v1: hubness",
+   "webfaq-ind Qwen3-Embedding-0.6B: hubness",
+   "webfaq-ind multilingual-e5-base: hubness",
+   "webfaq-ind multilingual-e5-large: hubness"
+  ]
+ },
+ "P5_reference_overlap": {
+  "faults": 156,
+  "without_duplicates": 130,
+  "harmful": 89,
+  "harmless": 41,
+  "auc_reference_z": 0.8021375719375171,
+  "auc_changed_share": 0.4679364209372431,
+  "flagged_of_drop_over_002": [
+   64,
+   81
+  ],
+  "flagged_of_harmless": [
+   18,
+   41
+  ],
+  "by_fault": {
+   "query_model": {
+    "harmful": 23,
+    "flagged": 23,
+    "of": 26
+   },
+   "truncate": {
+    "harmful": 11,
+    "flagged": 22,
+    "of": 26
+   },
+   "zero_rows": {
+    "harmful": 24,
+    "flagged": 8,
+    "of": 26
+   },
+   "duplicates": {
+    "harmful": 26,
+    "flagged": 0,
+    "of": 26
+   },
+   "id_shift": {
+    "harmful": 26,
+    "flagged": 26,
+    "of": 26
+   },
+   "quantize": {
+    "harmful": 5,
+    "flagged": 10,
+    "of": 26
+   }
+  },
+  "testable": true,
+  "pass_a": true,
+  "pass_b": false
+ },
+ "P6_labeled_confidence": {
+  "cases": {
+   "harmful": 115,
+   "harmless": 41
+  },
+  "share": {
+   "mean": {
+    "harmful": {
+     "fail": 0.9607826086954087,
+     "inconclusive": 0.0,
+     "pass": 0.039217391304347184
+    },
+    "harmless": {
+     "fail": 0.2368292682926858,
+     "inconclusive": 0.0,
+     "pass": 0.7631707317072698
+    }
+   },
+   "confidence": {
+    "harmful": {
+     "fail": 0.8754347826085298,
+     "inconclusive": 0.12017391304348488,
+     "pass": 0.0043913043478260895
+    },
+    "harmless": {
+     "fail": 0.10109756097560814,
+     "inconclusive": 0.6810975609755787,
+     "pass": 0.2178048780487804
+    }
+   }
+  },
+  "testable": true,
+  "pass_a": true,
+  "pass_b": true
+ },
+ "P7_determinism": {
+  "reruns": [
+   {
+    "dataset": "arguana",
+    "model": "Qwen3-Embedding-0.6B",
+    "identical": true
+   },
+   {
+    "dataset": "autorag-ko",
+    "model": "KURE-v1",
+    "identical": true
+   },
+   {
+    "dataset": "stackoverflowqa",
+    "model": "Qwen3-Embedding-0.6B",
+    "identical": true
+   },
+   {
+    "dataset": "wikipedia-bn",
+    "model": "KURE-v1",
+    "identical": true
+   },
+   {
+    "dataset": "wikipedia-cs",
+    "model": "KURE-v1",
+    "identical": true
+   }
+  ],
+  "pass": true
+ }
+}
