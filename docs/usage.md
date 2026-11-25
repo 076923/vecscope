@@ -329,6 +329,8 @@ vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --baseline old.json
 vecscope audit vectors.npy --reference ref.npy        # same rows from another good model; findings it shares read ok
 vecscope audit vectors.npy --result-sample 500 --json   # keep the top-k of 500 queries/rows for a label-free diff
 vecscope audit vectors.npy --result-sample 500 --baseline old.json --result-tolerance 0   # exit 1 when results changed
+vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --baseline old.json --retrieval-tolerance ndcg_at_k=0.01 --retrieval-confidence 0.95   # fail / pass / INCONCLUSIVE against the noise of the labels
+vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy --result-sample 200 --baseline old.json --reference-tolerance 0.02   # exit 1 when results moved away from the reference
 vecscope audit vectors.npy --near-dup 0.98             # cosine threshold for near-duplicates
 vecscope audit vectors.npy --sample 0                  # audit every row (default samples 100k)
 vecscope audit vectors.npy --sample-repeats 3          # re-audit 3 samples; report value ranges and verdict stability

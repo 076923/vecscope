@@ -119,6 +119,31 @@ nDCG 허용량 0.01을 걸었을 때 전체 질의로 본 답과 비교한 결�
 질의 집합은 이를 실제 0.01 하락과 구분하지 못하므로, 작은 집합에서 게이트가 실패하면 "망가졌다"가
 아니라 "더 많은 질의로 다시 확인하라"로 읽으십시오.
 
+### 라벨 질의의 잡음을 감안해 하락 판단하기
+
+`--retrieval-confidence LEVEL`을 주면 위의 조언을 게이트가 직접 판정합니다. 두 실행 모두 판정
+대상 질의마다 값을 저장하고(`retrieval.per_query`), diff는 질의 행끼리 짝지어 비교합니다.
+
+```bash
+vecscope audit embeddings.npy --queries queries.npy --qrels qrels.json --sample 0 \
+  --baseline baseline.json --retrieval-tolerance ndcg_at_k=0.01 --retrieval-confidence 0.95
+```
+
+- **fail**(`retrieval_regressions`): 평균 하락이 허용량을 넘고, 그 수준의 단측 구간으로 봐도 0보다
+  커서 실제 하락인 경우입니다.
+- **pass**: 구간의 위쪽 끝이 허용량 안에 있는 경우입니다.
+- **inconclusive**(`retrieval_inconclusive`): 나머지 경우입니다. 실행은 1로 끝나고 텍스트에
+  `INCONCLUSIVE`가 표시됩니다. `retrieval_confidence_checks`에 구간과, 라벨 질의가 몇 개쯤 있으면
+  판가름 날지가 들어갑니다. `change_decision`은 `reject`가 아니라 `needs_review`입니다.
+
+첫 held-out 세트의 결함 주입에서 라벨 질의 100개로 이 규칙을 적용했습니다. 해로운 변경이 통과한
+경우는 1%였습니다(평균만 볼 때는 8%). 해롭지 않은 변경을 실패시킨 경우는 14%였습니다(평균만 볼
+때는 24%). 나머지는 판단 불가로, 해로운 변경의 17%와 해롭지 않은 변경의 62%가 여기 해당했습니다.
+그 세트의 해롭지 않은 결함은 대부분 0.01을 살짝 밑도는 손해라 라벨 100개로는 판가름이 나지
+않습니다. 이 규칙은 그 세트로 설계했고, 임베딩 전에 동결한 세 번째 held-out 세트로 확인합니다
+([검증](verification.md)). 이 버전 이전에 만든 기준선에는 질의별 값이 없어서 평균 규칙으로
+판정합니다.
+
 ## 결과가 바뀌면 안 되는 변경
 
 라벨이 없으면 공간의 어떤 통계도 해로운 변경과 해롭지 않은 변경을 구분하지 못합니다. 같은 결함
@@ -147,6 +172,41 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 500 \
   `change_decision`은 `needs_review`이고 바뀐 비율을 근거로 적습니다. 더 나아졌는지는 위의 라벨
   게이트가 정합니다.
 
+### 라벨 없이: 결과가 기준 모델에서 멀어졌는가
+
+기준 모델이 라벨을 대신할 수 있습니다. 같은 행과 질의를 독립적으로 좋은 두 번째 공개 모델로
+임베딩해 두 실행 모두에 넘기십시오.
+
+```bash
+vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
+  --reference ref.npy --reference-queries ref_q.npy --json > baseline.json
+# 변경 후
+vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
+  --reference ref.npy --reference-queries ref_q.npy \
+  --baseline baseline.json --fail-on none --reference-tolerance 0.02
+```
+
+- 각 실행은 표본 질의와 행마다, 그 top-k 중 기준 모델도 돌려주는 비율을 저장합니다
+  (`result_sample.reference_overlap`).
+- diff는 쪽마다 `result_agreement.<side>.reference`에 변경 전후 겹침, 짝지은 하락과 그 z를
+  줍니다.
+- `--reference-tolerance DROP`은 하락이 허용량을 넘고 표준오차 2배도 넘으면 그 쪽을
+  `reference_regressions`에 넣습니다. 질의가 있으면 질의 쪽으로 판정합니다. 기준 모델 겹침이 없는
+  실행은 `reference_unchecked`입니다. 둘 다 1로 끝납니다.
+- 허용량이 없어도 `change_decision`은 결과가 기준 모델에서 멀어졌는지(0.02 기준), 겹침을
+  유지했는지 적습니다.
+
+첫 held-out 세트의 결함 주입(중복 제외)에서 이 하락의 z는 해로운 변경과 해롭지 않은 변경을
+AUC 0.875로 갈랐습니다. 바뀐 결과 비율은 0.56이었습니다. 0.02로 두면 nDCG@10을 0.02 넘게 떨어뜨린
+결함의 79%와 해롭지 않은 결함의 24%를 표시했습니다. "해로울 가능성이 높으니 라벨로 확인하라"로
+읽고, 측정된 손해로 읽지 마십시오.
+
+- 두 모델 모두에게 틀린 행은 보지 못합니다. 중복된 행은 기준 모델에도 나타나며, 이런 행은
+  `collapse`가 찾습니다.
+- 파이프라인이 기준 모델보다 나아지는 변경도 겹침을 낮춥니다.
+- 기준 모델은 시험 대상 파이프라인과 독립적으로, 원본 텍스트에서 만들어야 합니다. 같은 잘못된
+  내보내기에서 만든 기준 모델은 같은 결함을 공유합니다.
+
 ## 어느 규칙이 실패시켰는지
 
 실행을 실패로 만드는 규칙은 두 가지이고, 출력에서 둘을 구분해 보여 줍니다.
@@ -156,7 +216,10 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 500 \
 - 다른 하나는 기준선 규칙으로, 판정이 나빠진 `regressions`, 값이 허용량 이상 나빠진
   `value_regressions`, 라벨 검색 지표가 허용량 이상 떨어진 `retrieval_regressions`, 검색 품질
   허용량을 확인하지 못한 `retrieval_unchecked`, 표본 검색 결과가 `--result-tolerance` 이상 바뀐
-  `result_regressions`, 어느 실행에 `--result-sample`이 없던 `result_unchecked`입니다.
+  `result_regressions`, 어느 실행에 `--result-sample`이 없던 `result_unchecked`,
+  `--retrieval-confidence`에서 라벨 질의로 판가름 나지 않은 `retrieval_inconclusive`, 결과가 기준
+  모델에서 `--reference-tolerance` 이상 멀어진 `reference_regressions`, 어느 실행에 기준 모델
+  겹침이 없던 `reference_unchecked`입니다.
 
 기본 임곗값은 공개 모델로 보정한 값이라, 정상적인 코퍼스가 어떤 항목에서 늘 `warn`이나
 `fail`에 걸리는 도메인이라면 절대 규칙으로 막으면 안 됩니다. 이때는

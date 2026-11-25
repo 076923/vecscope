@@ -244,7 +244,11 @@ vecscope audit embeddings.npy --queries q.npy --qrels qrels.json --baseline base
 About 100 labeled queries catch nearly every injected fault that costs more than two nDCG
 points. Without labels, a pipeline that must return the same results (a re-index, a
 refactor) can gate on the results themselves with `--result-sample 500 --result-tolerance 0`;
-that number shows change, not harm.
+that number shows change, not harm. `--retrieval-confidence 0.95` judges a labeled drop
+against the noise of the labeled queries (fail, pass or inconclusive), and with a reference
+model on both runs `--reference-tolerance 0.02` flags results that moved away from the
+reference's, a label-free sign of harm
+([CI](https://076923.github.io/vecscope/ci/)).
 
 On GitHub the same gate is an Action:
 

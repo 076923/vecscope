@@ -57,17 +57,31 @@ In CI:
   second set) and failed 24% of harmless changes
   that stayed just under 0.01. On a small set, read a failed gate as "re-check on more
   queries", and ask for about 100 labeled queries before gating merges on nDCG.
+- Add `--retrieval-confidence 0.95` (MCP `retrieval_confidence`) to let the gate say so
+  itself: `retrieval_regressions` only for a drop that is real and beyond the tolerance,
+  `retrieval_inconclusive` (exit 1, `INCONCLUSIVE`, with `queries_needed`) when the labeled
+  set cannot tell. Report inconclusive as "label about N more queries", never as a pass and
+  never as "broken"; `change_decision` is `needs_review` then, not `reject`.
 - Without labels, `--result-sample 500` on the baseline and the new run adds
   `result_agreement` (share of the sampled top-k that changed). It shows change, not harm
   (it did not separate harmful from harmless faults), so use `--result-tolerance 0` only for a
   pipeline that must return the same results (re-index, refactor, upgrade). It catches a lost
   id mapping that no finding sees. Never report a small changed share as "safe".
+- Without labels but with a reference model (same rows and queries embedded by a second,
+  independently good public model, made from the source texts), pass `--reference` and
+  `--reference-queries` with `--result-sample` on both runs: the diff gives
+  `result_agreement.<side>.reference` (overlap with the reference before and after, drop, z)
+  and `--reference-tolerance 0.02` (MCP `reference_tolerance`) lists a drop beyond it in
+  `reference_regressions`. Report it as "results moved away from the reference: likely
+  harmful, check with labels", and a held overlap as "no sign of harm", never as proof. It
+  does not see duplicated rows (`collapse` does).
 - Pick tolerances from measured retrieval quality ("Calibrating thresholds to your domain" in
   https://076923.github.io/vecscope/quality/), not from what makes the pipeline green.
 - Two rules can fail a run and the `gate` block (JSON) or line (text) names which one did:
   the absolute thresholds (`--fail-on`) or the baseline (`verdict_regressions`,
   `value_regressions`, `retrieval_regressions`, `retrieval_unchecked`, `result_regressions`,
-  `result_unchecked`).
+  `result_unchecked`, `retrieval_inconclusive`, `reference_regressions`,
+  `reference_unchecked`).
 - When the user's healthy corpus sits at `warn`/`fail` on a finding by the public defaults,
   gate with `--fail-on none --baseline` so only the change is judged, and say that is the
   policy.

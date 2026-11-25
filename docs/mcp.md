@@ -85,7 +85,14 @@ summary lists them as explained by the rows; see
 the server's memory (the response only counts them); a later call with that `audit_id` as
 `baseline` reports `baseline_diff.result_agreement`, and `result_tolerance` turns it into a
 check (`RESULTS CHANGED` in the summary). It measures change, not harm; see
-[Results that must not change](ci.md#results-that-must-not-change).
+[Results that must not change](ci.md#results-that-must-not-change). With `reference_path` on
+both calls, the diff also says how far the sampled results moved from the reference model's
+(`result_agreement.<side>.reference`), and `reference_tolerance` (e.g. 0.02) flags a drop
+beyond it as likely harmful (`AWAY FROM THE REFERENCE` in the summary). `retrieval_confidence`
+(e.g. 0.95, with `retrieval_tolerances`) judges a labeled drop against the noise of the
+labeled queries and reports `retrieval_inconclusive` when they cannot settle it; see
+[Judging a drop against the noise of the labeled queries](ci.md#judging-a-drop-against-the-noise-of-the-labeled-queries).
+The per-query values stay in the server's memory for the baseline, like the result sample.
 
 Every `baseline_diff` also carries `change_decision` (`adopt`, `reject` or `needs_review`,
 with reasons and a `watch` list) and, for a baseline with a plan, `attempts`: how many changes

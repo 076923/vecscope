@@ -83,7 +83,14 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 보관합니다(응답에는 개수만 나옵니다). 나중에 그 `audit_id`를 `baseline`으로 넘기면
 `baseline_diff.result_agreement`가 붙고, `result_tolerance`를 주면 검사가 됩니다(요약에
 `RESULTS CHANGED`). 해로움이 아니라 변화를 잽니다.
-[결과가 바뀌면 안 되는 변경](ci.md#결과가-바뀌면-안-되는-변경)을 참고하십시오.
+[결과가 바뀌면 안 되는 변경](ci.md#결과가-바뀌면-안-되는-변경)을 참고하십시오. 두 호출 모두에
+`reference_path`를 주면 diff가 표본 결과가 기준 모델의 결과에서 얼마나 멀어졌는지도 알려
+줍니다(`result_agreement.<side>.reference`). `reference_tolerance`(예: 0.02)를 주면 그보다 큰
+하락을 해로울 가능성이 높다고 표시합니다(요약에 `AWAY FROM THE REFERENCE`).
+`retrieval_confidence`(예: 0.95, `retrieval_tolerances`와 함께)는 라벨 하락을 라벨 질의의 잡음과
+견주어 판정하고, 판가름 나지 않으면 `retrieval_inconclusive`로 알립니다.
+[라벨 질의의 잡음을 감안해 하락 판단하기](ci.md#라벨-질의의-잡음을-감안해-하락-판단하기)를
+참고하십시오. 질의별 값은 결과 표본처럼 기준선용으로 서버 메모리에 남습니다.
 
 모든 `baseline_diff`에는 `change_decision`(`adopt`, `reject`, `needs_review`와 그 이유, `watch`
 목록)이 붙고, 기준선에 plan이 있으면 `attempts`도 붙습니다. 이 서버 세션에서 그 첫 단계에 대해

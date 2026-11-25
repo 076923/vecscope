@@ -125,6 +125,31 @@ Drops between 0.01 and 0.02 need several hundred. The false alarms are changes w
 full-set drop stayed just under 0.01; a small set cannot tell them from a real 0.01 drop, so
 a failed gate on a small set means "re-check on more queries", not "broken".
 
+### Judging a drop against the noise of the labeled queries
+
+`--retrieval-confidence LEVEL` turns that advice into the gate's own answer. Both runs keep
+each judged query's values (`retrieval.per_query`), and the diff pairs them by query row:
+
+```bash
+vecscope audit embeddings.npy --queries queries.npy --qrels qrels.json --sample 0 \
+  --baseline baseline.json --retrieval-tolerance ndcg_at_k=0.01 --retrieval-confidence 0.95
+```
+
+- **fail** (`retrieval_regressions`): the mean drop is beyond the tolerance and above zero
+  by more than the one-sided interval at that level, so the drop is real.
+- **pass**: the interval's upper end is within the tolerance.
+- **inconclusive** (`retrieval_inconclusive`): anything else. The run exits 1, the text
+  says `INCONCLUSIVE`, and `retrieval_confidence_checks` gives the interval and about how
+  many labeled queries would settle it. `change_decision` is `needs_review`, not `reject`.
+
+On the first held-out set's injected faults with 100 labeled queries, this rule let 1% of
+harmful changes pass, where the mean alone let 8% through. It failed 14% of harmless
+changes, where the mean alone failed 24%. The rest were inconclusive: 17% of harmful and
+62% of harmless changes. Most harmless faults there cost just under 0.01, so 100 labels
+cannot settle them. The rule was designed on that set; the third held-out set, frozen
+before it was embedded, checks it ([Verification](verification.md)). A baseline written
+before this version has no per-query values, and its tolerances fall back to the mean.
+
 ## Results that must not change
 
 Without labels, no statistic of the space tells a harmful change from a harmless one. On the
@@ -154,6 +179,41 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 500 \
   number. Without labels its `change_decision` is `needs_review` and cites the changed
   share; the labeled gate above decides whether it is better.
 
+### Without labels: did the results move away from a reference model?
+
+A reference model can stand in for labels. Embed the same rows and queries with a second,
+independently good public model, and pass it on both runs:
+
+```bash
+vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
+  --reference ref.npy --reference-queries ref_q.npy --json > baseline.json
+# after the change
+vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
+  --reference ref.npy --reference-queries ref_q.npy \
+  --baseline baseline.json --fail-on none --reference-tolerance 0.02
+```
+
+- Each run stores, per sampled query and row, how much of its top-k the reference returns
+  too (`result_sample.reference_overlap`).
+- The diff gives, per side, `result_agreement.<side>.reference`: the overlap before and
+  after, the paired drop and its z.
+- `--reference-tolerance DROP` lists a side in `reference_regressions` when the drop is
+  beyond the tolerance and beyond 2 standard errors. The queries side decides when there are
+  queries. A run without reference overlap is `reference_unchecked`. Both exit 1.
+- Without a tolerance, `change_decision` still says whether the results moved away (at
+  0.02) or kept the overlap.
+
+On the first held-out set's injected faults, duplicates left out, the drop's z separated
+harmful from harmless changes at AUC 0.875, where the share of changed results did at 0.56.
+At 0.02 it flagged 79% of the faults that cost more than 0.02 nDCG@10, and 24% of the
+harmless ones. Read it as "likely harmful, check with labels", not as a measured loss:
+
+- It cannot see rows that are wrong for both models. Duplicated rows show up in the
+  reference too; `collapse` finds those.
+- A change that makes the pipeline better than the reference also lowers the overlap.
+- The reference must be made from the source texts, independently of the pipeline under
+  test. A reference built from the same faulty export shares the fault.
+
 ## Which rule failed the run
 
 Two different rules can fail a run, and the output keeps them apart:
@@ -163,8 +223,11 @@ Two different rules can fail a run, and the output keeps them apart:
 - The baseline rules are `regressions` (a verdict got worse), `value_regressions` (a value
   worsened beyond its tolerance), `retrieval_regressions` (a labeled retrieval metric dropped
   beyond its tolerance), `retrieval_unchecked` (a retrieval tolerance could not be checked),
-  `result_regressions` (sampled results changed beyond `--result-tolerance`) and
-  `result_unchecked` (a run had no `--result-sample`).
+  `result_regressions` (sampled results changed beyond `--result-tolerance`),
+  `result_unchecked` (a run had no `--result-sample`), `retrieval_inconclusive` (the
+  labeled queries could not settle a tolerance under `--retrieval-confidence`),
+  `reference_regressions` (results moved away from the reference beyond
+  `--reference-tolerance`) and `reference_unchecked` (a run had no reference overlap).
 
 The defaults are calibrated on public models, so a domain whose healthy corpus sits at `warn`
 or `fail` on some finding should not be blocked by the absolute rule at all.

@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A labeled gate judged against the noise of its queries: retrieval blocks keep each judged
+  query's values (`retrieval.per_query`; the MCP response only counts them), and
+  `--retrieval-confidence LEVEL` (MCP `retrieval_confidence`, Python
+  `diff_evidence(retrieval_confidence=...)`) pairs them by query row. A tolerance fails
+  (`retrieval_regressions`) when the drop is beyond it and real at that level, passes when the
+  interval stays within it, and is otherwise `retrieval_inconclusive` (exit 1, with
+  `retrieval_confidence_checks` and an estimate of the labeled queries needed);
+  `change_decision` is then `needs_review`. Designed on the first held-out set's faults: at
+  100 labeled queries 1% of harmful changes passed (8% with the mean alone) and 14% of
+  harmless ones failed (24%).
+- The overlap with a reference model's results as a label-free sign of harm: with
+  `--reference` and `--result-sample`, each run stores per sampled query and row how much of
+  its top-k the reference returns too (`result_sample.reference_overlap`); the diff gives
+  `result_agreement.<side>.reference` (overlap before and after, paired drop, z), and
+  `--reference-tolerance DROP` (MCP `reference_tolerance`) lists a drop beyond it and beyond 2
+  standard errors in `reference_regressions` (`reference_unchecked` without overlap on both
+  runs). Without a tolerance, `change_decision` says whether results moved away (at 0.02).
+  Designed on the first held-out set: duplicates left out, AUC 0.875 between harmful and
+  harmless faults, where the changed share gave 0.56. The Action lists
+  `inconclusive:<metric>` in `retrieval-regressions`.
+- A third held-out set (nine public datasets, `role="third"`) frozen with its criteria in
+  `examples/validation/preregistration_third.md` before it was embedded, scored by
+  `examples/validation/third.py`.
 - Judging findings against a reference model: `vecscope audit --reference ref.npy
   [--reference-queries ref_q.npy]` (MCP `reference_path`, `reference_queries_path`; Python
   `audit(reference_embeddings=..., reference_queries=...)`) audits the same rows embedded by a
