@@ -1,0 +1,310 @@
+{
+ "pipelines": 112,
+ "good": 46,
+ "bad": 20,
+ "query_hubness_chance": {
+  "datasets": [],
+  "good_flagged_threshold_only": 0,
+  "good_flagged_rule": 0,
+  "bad_fail_threshold_only": 0,
+  "bad_fail_rule": 0
+ },
+ "reference_rule": {
+  "without": {
+   "good_fail": 5,
+   "good_flagged": 28,
+   "bad_fail": 17,
+   "bad_flagged": 20
+  },
+  "before_rules": {
+   "good_fail": 5,
+   "good_flagged": 14,
+   "bad_fail": 17,
+   "bad_flagged": 19
+  },
+  "final": {
+   "good_fail": 1,
+   "good_flagged": 14,
+   "bad_fail": 17,
+   "bad_flagged": 19
+  }
+ },
+ "P11_agreed_top_hits": {
+  "faults": 210,
+  "without_duplicates": 175,
+  "harmful": 128,
+  "harmless": 47,
+  "drop_over_002": 103,
+  "auc_top_hit_z": 0.9277759308510638,
+  "auc_overlap_drop_z": 0.8671875,
+  "auc_changed_share": 0.45902593085106386,
+  "flagged_of_drop_over_002": 80,
+  "flagged_of_harmless": 1,
+  "old_rule_flagged_of_drop_over_002": 81,
+  "old_rule_flagged_of_harmless": 13,
+  "by_fault": {
+   "query_model": {
+    "harmful": 30,
+    "flagged": 28,
+    "harmless_flagged": 0,
+    "of": 35
+   },
+   "truncate": {
+    "harmful": 18,
+    "flagged": 3,
+    "harmless_flagged": 1,
+    "of": 35
+   },
+   "zero_rows": {
+    "harmful": 35,
+    "flagged": 20,
+    "harmless_flagged": 0,
+    "of": 35
+   },
+   "duplicates": {
+    "harmful": 35,
+    "flagged": 0,
+    "harmless_flagged": 0,
+    "of": 35
+   },
+   "id_shift": {
+    "harmful": 35,
+    "flagged": 35,
+    "harmless_flagged": 0,
+    "of": 35
+   },
+   "quantize": {
+    "harmful": 10,
+    "flagged": 0,
+    "harmless_flagged": 0,
+    "of": 35
+   }
+  },
+  "testable": true,
+  "pass_a": true,
+  "pass_b": true
+ },
+ "P12_review_tier": {
+  "drop_over_002_not_flagged": 23,
+  "reviewed_of_those": 12,
+  "harmless": 47,
+  "harmless_reviewed": 3,
+  "flagged_or_reviewed_of_drop_over_002": 92,
+  "by_fault": {
+   "query_model": {
+    "harmful_reviewed": 1,
+    "harmless_reviewed": 0
+   },
+   "truncate": {
+    "harmful_reviewed": 4,
+    "harmless_reviewed": 2
+   },
+   "zero_rows": {
+    "harmful_reviewed": 9,
+    "harmless_reviewed": 0
+   },
+   "duplicates": {
+    "harmful_reviewed": 3,
+    "harmless_reviewed": 0
+   },
+   "id_shift": {
+    "harmful_reviewed": 0,
+    "harmless_reviewed": 0
+   },
+   "quantize": {
+    "harmful_reviewed": 2,
+    "harmless_reviewed": 1
+   }
+  },
+  "testable_a": true,
+  "testable_b": true,
+  "pass_a": true,
+  "pass_b": true
+ },
+ "P13_lowering_rules": {
+  "good_fail_with_reference": 5,
+  "good_cleared": 4,
+  "bad_fail_with_reference": 17,
+  "bad_kept": 17,
+  "good_fail_left": [
+   "webfaq-est multilingual-e5-large (agreement 0.39): hubness"
+  ],
+  "agreement_good": [
+   0.36,
+   0.36,
+   0.373,
+   0.377,
+   0.377,
+   0.393,
+   0.394,
+   0.404,
+   0.406,
+   0.407,
+   0.408,
+   0.414,
+   0.418,
+   0.42,
+   0.423,
+   0.425,
+   0.43,
+   0.437,
+   0.454,
+   0.454,
+   0.46,
+   0.495,
+   0.51,
+   0.51,
+   0.522,
+   0.525,
+   0.55,
+   0.557,
+   0.558,
+   0.562,
+   0.563,
+   0.57,
+   0.572,
+   0.573,
+   0.579,
+   0.579,
+   0.581,
+   0.582,
+   0.582,
+   0.582,
+   0.589,
+   0.595,
+   0.595,
+   0.595,
+   0.6,
+   0.602
+  ],
+  "agreement_bad": [
+   0.024,
+   0.032,
+   0.041,
+   0.043,
+   0.05,
+   0.057,
+   0.083,
+   0.098,
+   0.108,
+   0.131,
+   0.131,
+   0.141,
+   0.158,
+   0.158,
+   0.161,
+   0.161,
+   0.163,
+   0.164,
+   0.269,
+   0.28
+  ],
+  "auc_agreement_good_vs_bad": 1.0,
+  "lowered": {
+   "agreement": {
+    "good": 4,
+    "bad": 0
+   },
+   "one_step": {
+    "good": 0,
+    "bad": 3
+   }
+  },
+  "larger_corpora": {
+   "miracl-es": {
+    "n_docs": 146750,
+    "good_without": 0,
+    "good_before_rules": 0,
+    "good_final": 0,
+    "bad_without": 3,
+    "bad_before_rules": 3,
+    "bad_final": 3
+   },
+   "webfaq-ron": {
+    "n_docs": 59892,
+    "good_without": 0,
+    "good_before_rules": 0,
+    "good_final": 0,
+    "bad_without": 3,
+    "bad_before_rules": 3,
+    "bad_final": 3
+   }
+  },
+  "testable_a": true,
+  "testable_b": true,
+  "pass_a": true,
+  "pass_b": true,
+  "faults_harmful": 163,
+  "faults_caught_before_rules": 94,
+  "faults_still_caught": 94,
+  "testable_c": true,
+  "pass_c": true
+ },
+ "labeled_confidence": {
+  "cases": {
+   "harmful": 163,
+   "harmless": 47
+  },
+  "share": {
+   "mean": {
+    "harmful": {
+     "fail": 0.9164417177910223,
+     "inconclusive": 0.0,
+     "pass": 0.08355828220859343
+    },
+    "harmless": {
+     "fail": 0.21744680851064252,
+     "inconclusive": 0.0,
+     "pass": 0.7825531914893694
+    }
+   },
+   "confidence": {
+    "harmful": {
+     "fail": 0.8021165644168932,
+     "inconclusive": 0.1875766871165534,
+     "pass": 0.010306748466257584
+    },
+    "harmless": {
+     "fail": 0.10382978723404081,
+     "inconclusive": 0.6165957446808196,
+     "pass": 0.2795744680851203
+    }
+   }
+  }
+ },
+ "P14_determinism": {
+  "reruns": [
+   {
+    "dataset": "codesearchnet-ruby",
+    "model": "Qwen3-Embedding-0.6B",
+    "identical": true
+   },
+   {
+    "dataset": "cqadupstack-mathematica",
+    "model": "Qwen3-Embedding-0.6B",
+    "identical": true
+   },
+   {
+    "dataset": "webfaq-est",
+    "model": "KURE-v1",
+    "identical": true
+   },
+   {
+    "dataset": "webfaq-srp",
+    "model": "KURE-v1",
+    "identical": true
+   },
+   {
+    "dataset": "wikipedia-fi",
+    "model": "KURE-v1",
+    "identical": true
+   },
+   {
+    "dataset": "wikipedia-pt",
+    "model": "KURE-v1",
+    "identical": true
+   }
+  ],
+  "pass": true
+ }
+}

@@ -79,8 +79,9 @@ In CI:
   as "lost the top hits the reference agrees on: likely harmful, check with labels", and
   kept hits as "no sign of harm", never as proof. It misses small losses spread over lower
   ranks, about half of the lost-row faults (zero vectors; the findings catch them) and
-  duplicated rows (`collapse` does). On a preregistered held-out set it flagged 72% of
-  drops above 0.02 and 2% of harmless changes, so no flag is not proof of no harm.
+  duplicated rows (`collapse` does). On two preregistered held-out sets, with two different
+  reference models, it flagged 72% and 78% of drops above 0.02 and 2% of harmless changes,
+  so no flag is not proof of no harm.
   `reference_review` (above 0.03, below the tolerance; never fails) means "a small loss is
   possible": ask for labeled queries before adopting, do not call it a regression.
 - With `--reference-queries`, a hub finding (`hubness`, `query_hubness`, `antihubs`) still

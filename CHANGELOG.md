@@ -55,7 +55,13 @@ All notable changes to this project are documented here. The format follows
 - A fifth held-out set (eight public datasets, `role="fifth"`, gte-multilingual-base as the
   reference, two larger corpora) frozen with its criteria in
   `examples/validation/preregistration_fifth.md` before it was embedded, scored by
-  `examples/validation/fifth.py`.
+  `examples/validation/fifth.py` (`fifth_summary.json`). Every prediction passed: P11 (agreed
+  top hits with gte-multilingual-base as the reference, AUC 0.928; at 0.05, 80 of 103 drops
+  above 0.02 and 1 of 47 harmless faults flagged); P12 (review tier: 12 of the 23 missed
+  drops above 0.02 and 3 of 47 harmless faults listed); P13 (the two lowering rules cleared
+  4 of 5 good pipelines at `fail`, kept 17 of 17 bad ones at `fail` and 94 of 94 caught
+  faults caught; the one-step rule lowered no good pipeline here); P14 (6 of 6 identical
+  reruns).
 - A fourth held-out set (eleven public datasets, `role="fourth"`) frozen with its criteria in
   `examples/validation/preregistration_fourth.md` before it was embedded, scored by
   `examples/validation/fourth.py`. Results (`fourth_summary.json`, docs/verification.md), all

@@ -209,8 +209,10 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
   `reference_review` (text: `REVIEW: a small loss is possible, check with labels`). It never
   fails the gate; `change_decision` says a small loss is possible. On the faults of four
   held-out sets it listed 80 of the 117 changes costing more than 0.02 nDCG@10 that 0.05 let
-  through, and 29 of 244 harmless changes; a fifth set, frozen before it was embedded, checks
-  it.
+  through, and 29 of 244 harmless changes. On a fifth set, frozen before it was embedded and
+  run with another reference model
+  ([Verification](verification.md#a-fifth-held-out-set-preregistered)), it listed 12 of the
+  23 such changes and 3 of 47 harmless ones.
 - Without a tolerance, `change_decision` still says whether the agreed top hits were lost (at
   0.05), lost a little (above 0.03) or kept.
 
@@ -226,7 +228,10 @@ cost more than 0.02 nDCG@10 per set and 5% to 8% of the harmless ones. Those set
 the design data. On a fourth held-out set, frozen before it was embedded
 ([Verification](verification.md#a-fourth-held-out-set-preregistered)), it separated them at
 AUC 0.97 and flagged 72% of the faults costing more than 0.02 and 1 of 48 harmless ones
-(2%), where the whole-overlap drop flagged 21 of 48. Read a loss as "likely harmful,
+(2%), where the whole-overlap drop flagged 21 of 48. On a fifth, with gte-multilingual-base
+instead of bge-m3 as the reference
+([Verification](verification.md#a-fifth-held-out-set-preregistered)), it separated them at
+AUC 0.93 and flagged 78% of the faults costing more than 0.02 and 1 of 47 harmless ones. Read a loss as "likely harmful,
 check with labels", not as a measured loss:
 
 - It misses small losses spread over the lower ranks: most truncation and quantization

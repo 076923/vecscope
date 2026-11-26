@@ -288,8 +288,9 @@ product category) lowers it for every model. When it is at `fail` and the refere
 `fail`. The row-level findings (collapse, outliers, hubs) keep the strict rule, because they
 are the ones that catch duplicated, zeroed and crowding rows. On the four held-out sets this
 lowered the finding on 10 good and 17 bad pipelines and left 1 bad pipeline without a
-`fail`; a fifth set, frozen before it was embedded, checks it
-([Verification](verification.md)).
+`fail`. On a fifth set, frozen before it was embedded
+([Verification](verification.md#a-fifth-held-out-set-preregistered)), it lowered no good
+pipeline and 3 bad ones, all of which kept another `fail`.
 
 Pick a reference with published scores on your language and domain. A reference that shares
 the fault (another model that does not cover the language) explains away a real problem.
@@ -314,7 +315,9 @@ are still there, so the verdict is `warn`, not `ok`. This rule was designed on t
 On a fourth held-out set, frozen before it was embedded
 ([Verification](verification.md#a-fourth-held-out-set-preregistered)), it cleared 6 of the 8
 good pipelines at `fail` with the reference and kept all 38 bad ones at `fail`. The 2 left
-were `effective_rank`, which it does not lower.
+were `effective_rank`, which it does not lower. On a fifth set with another reference model,
+gte-multilingual-base, the two rules together cleared 4 of the 5 good pipelines at `fail` and
+kept all 17 bad ones at `fail`; the one left was a hub agreeing at 0.39.
 
 ## Use as a library
 

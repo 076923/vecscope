@@ -192,7 +192,7 @@ queries, a hub finding still at `fail` is lowered to `warn` when the reference r
 least 40% of the pipeline's top results for the same queries; any other finding still at
 `fail` is the model's own, and labeled queries decide what it costs. On a fourth
 preregistered set this cleared 6 of 8 good pipelines left at `fail` and kept every bad one
-at `fail`.
+at `fail`; on a fifth, with another reference model, 4 of 5 and every bad one.
 
 Override any pair per run, or derive them from your own data with
 [`vecscope calibrate`](https://076923.github.io/vecscope/quality/#calibrating-thresholds-to-your-domain):
@@ -256,8 +256,10 @@ pipeline and the reference agreed on, a label-free sign of harm
 gate met its criteria; the earlier label-free rule, the drop of the whole overlap, also
 flagged 44% of harmless changes, which is why it now looks at the agreed top hits. On a
 fourth preregistered set the agreed top hits flagged 72% of changes costing more than 0.02
-nDCG@10 and 2% of harmless ones; read a flag as "check with labels" and its absence as no
-proof ([Verification](https://076923.github.io/vecscope/verification/)).
+nDCG@10 and 2% of harmless ones, and on a fifth, with another reference model, 78% and 2%.
+Below the tolerance, `reference_review` lists smaller losses to check with labels (half of
+the missed large losses on the fifth set, 6% of harmless changes); read a flag as "check
+with labels" and its absence as no proof ([Verification](https://076923.github.io/vecscope/verification/)).
 
 On GitHub the same gate is an Action:
 
