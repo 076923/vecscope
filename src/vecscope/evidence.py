@@ -90,6 +90,8 @@ class Finding:
 SCHEMA_VERSION = 1  # bumped when a key in the JSON is renamed, removed or changes meaning
 
 WORSE = {"ok": 0, "warn": 1, "fail": 2}
+# sampled queries over which the reference agreement of the hub findings is measured
+AGREEMENT_SAMPLE = 200
 
 
 @dataclass
@@ -312,7 +314,7 @@ def change_decision(diff: Mapping) -> dict:
     if not diff.get("retrieval_comparable"):
         agreement = diff.get("result_agreement") or {}
         moved = [f"{side} {r['changed_share']:.1%}" for side, r in agreement.items()]
-        ref = {s: r["reference"] for s, r in agreement.items() if "reference" in r}
+        ref = {s: r["reference_top_hit"] for s, r in agreement.items() if "reference_top_hit" in r}
         ref_reason = []
         if ref:
             from vecscope.results import REFERENCE_TOLERANCE, reference_regressions
@@ -320,17 +322,17 @@ def change_decision(diff: Mapping) -> dict:
             tol = diff.get("reference_tolerance")
             away = reference_regressions(agreement, REFERENCE_TOLERANCE if tol is None else tol)
             shown = ", ".join(
-                f"{s} {r['baseline_overlap']:.3f} -> {r['overlap']:.3f} (z {r['z']:.1f})"
+                f"{s} {r['lost']} of {r['agreed']} ({r['lost_share']:.1%}, z {r['z']:.1f})"
                 for s, r in ref.items()
             )
             ref_reason = [
-                "results moved away from the reference model: overlap "
+                "results lost the top hits this pipeline and the reference model agreed on: "
                 + shown
                 + "; likely harmful, check with labels before adopting"
                 if away
-                else "overlap with the reference model held: "
+                else "the top hits agreed with the reference model were kept (lost "
                 + shown
-                + "; no sign of harm, which is not proof of none"
+                + "); no sign of harm, which is not proof of none"
             ]
         return out(
             "needs_review",
@@ -509,12 +511,12 @@ def diff_evidence(
     harmful changes pass (8% for the mean alone) and failed 14% of harmless ones (24%); the
     rest were inconclusive. A gate must not read inconclusive as a pass.
 
-    ``reference_tolerance`` uses the reference overlap both runs stored
-    (``audit(reference_embeddings=..., result_sample=...)``): a side whose overlap with the
-    reference dropped by more than the tolerance and by more than
-    ``vecscope.results.REFERENCE_Z`` standard errors is listed in ``reference_regressions``
-    ("likely harmful, check with labels"), and a tolerance with nothing to compare is listed in
-    ``reference_unchecked``.
+    ``reference_tolerance`` uses the reference's first results the baseline stored
+    (``audit(reference_embeddings=..., result_sample=...)``): of the sampled items whose
+    baseline top-k held the reference's first result (an agreed top hit), a side that lost a
+    share beyond the tolerance, by more than ``vecscope.results.REFERENCE_Z`` standard
+    errors, is listed in ``reference_regressions`` ("likely harmful, check with labels"), and
+    a tolerance with nothing to compare is listed in ``reference_unchecked``.
     """
     tol = resolve_tolerances(tolerances)
     rtol = resolve_retrieval_tolerances(retrieval_tolerances)
@@ -658,7 +660,7 @@ def diff_evidence(
         else [s for s, r in agreement.items() if r["changed_share"] > result_tolerance]
     )
     out["result_unchecked"] = ["results"] if result_tolerance is not None and not agreement else []
-    has_ref = any("reference" in r for r in agreement.values())
+    has_ref = any("reference_top_hit" in r for r in agreement.values())
     out["reference_tolerance"] = reference_tolerance
     out["reference_regressions"] = (
         reference_regressions(agreement, reference_tolerance)
@@ -1735,6 +1737,25 @@ def audit(
             "findings": {f.name: {"value": f.value, "verdict": f.verdict} for f in ref_ev.findings},
             "explained": explained,
         }
+        if queries is not None and reference_queries is not None:
+            from vecscope.reference import AGREEMENT, apply_agreement
+            from vecscope.results import _overlap, _topk, pick_rows
+
+            qrows = pick_rows(queries.shape[0], AGREEMENT_SAMPLE)
+            agree = float(
+                np.mean(
+                    _overlap(
+                        _topk(queries[qrows], x_full, k, None),
+                        _topk(reference_queries[qrows], reference_embeddings, k, None),
+                    )
+                )
+            )
+            ref_block["agreement"] = {
+                "queries": agree,
+                "sampled_queries": len(qrows),
+                "threshold": AGREEMENT,
+                "tolerated": apply_agreement(findings, agree),
+            }
     samples: dict = {}
     if result_sample:
         from vecscope.results import result_sample as _result_sample

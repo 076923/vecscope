@@ -107,3 +107,41 @@ def test_cli_reference(tmp_path, capsys):
         == 2
     )
     assert "needs --reference" in capsys.readouterr().err
+
+
+def test_hub_findings_at_fail_are_lowered_when_results_agree_with_the_reference():
+    from vecscope.evidence import Finding
+    from vecscope.reference import AGREEMENT, apply_agreement
+
+    def fs():
+        return [
+            Finding("hubness", "m", 9.0, "fail", "x"),
+            Finding("query_hubness", "m", 30.0, "warn", "x"),
+            Finding("collapse", "m", 0.5, "fail", "x"),
+        ]
+
+    low = fs()
+    assert apply_agreement(low, AGREEMENT - 0.01) == []
+    assert [f.verdict for f in low] == ["fail", "warn", "fail"]
+    high = fs()
+    assert apply_agreement(high, 0.6) == ["hubness"]
+    # only a hub finding at fail moves, and only to warn; collapse never does
+    assert [f.verdict for f in high] == ["warn", "warn", "fail"]
+    assert high[0].details["reference"] == {"agreement": 0.6, "verdict_before_agreement": "fail"}
+    assert "TOLERATED BY RETRIEVAL AGREEMENT" in high[0].explanation
+
+
+def test_agreement_is_measured_with_queries_and_a_reference():
+    rng = np.random.default_rng(2)
+    latent = rng.standard_normal((1200, 16))
+    ql = latent[rng.choice(1200, 300)] + 0.1 * rng.standard_normal((300, 16))
+    w = rng.standard_normal((16, 64))
+    rot, _ = np.linalg.qr(rng.standard_normal((64, 64)))
+    x, q = (latent @ w).astype(np.float32), (ql @ w).astype(np.float32)
+    ev = audit(x, k=10, queries=q, reference_embeddings=x @ rot, reference_queries=q @ rot)
+    a = ev.reference["agreement"]
+    # a rotation returns the same neighbors: full agreement
+    assert a["queries"] == pytest.approx(1.0) and a["sampled_queries"] == 200
+    assert a["threshold"] == 0.40
+    # without reference queries there is nothing to agree on
+    assert "agreement" not in audit(x, k=10, queries=q, reference_embeddings=x @ rot).reference

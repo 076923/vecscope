@@ -127,8 +127,8 @@ def main(argv: list[str]) -> int:
             )
     if isinstance(diff, dict) and diff.get("reference_regressions"):
         lines.append(
-            "\nResults moved away from the reference model (likely harmful, check with labels): "
-            + ", ".join(_cell(s) for s in diff["reference_regressions"])
+            "\nTop hits agreed with the reference model were lost (likely harmful, check with "
+            "labels): " + ", ".join(_cell(s) for s in diff["reference_regressions"])
         )
     lines += ["", f"Full evidence: `{path}`", ""]
     _write("GITHUB_STEP_SUMMARY", "\n".join(lines))

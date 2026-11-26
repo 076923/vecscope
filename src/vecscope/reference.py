@@ -14,6 +14,17 @@ the model's output format or the index (norms, rogue dimensions, metric mismatch
 query shift) are never explained this way: a reference with the same defect would have the
 same bug, not the same rows.
 
+A finding that stays at ``fail`` with the reference is this model's own, and for the hub
+findings (``HUB_SHAPED``) that alone does not say retrieval suffers: some good models put a
+few rows into many result lists and still rank the right row first. With queries, the
+reference also measures how much of this pipeline's top-k the reference returns for the same
+queries (``agreement``). Over 300 public pipelines of three held-out sets that agreement
+separated good pipelines from bad ones at AUC 0.99: no bad pipeline at ``fail`` reached
+0.31, and the good ones the hub findings kept at ``fail`` agreed at 0.40 to 0.77, except two
+code-QA pipelines at 0.29. So a hub finding at ``fail`` on a pipeline that agrees with the
+reference at ``AGREEMENT`` or more is lowered to ``warn``, never to ``ok``: the hubs are
+real, and labeled retrieval decides what they cost.
+
 The reference must be good on its own, a public model with published scores on the
 language and domain. A reference that is broken in the same way (two English-only models on
 Korean text) explains away a real fault. Its own verdict is reported next to the result.
@@ -36,6 +47,35 @@ DATA_SHAPED = (
     "query_gap",
     "query_hubness",
 )
+
+
+# findings about how often rows appear in other rows' or queries' results
+HUB_SHAPED = ("hubness", "query_hubness", "antihubs")
+# share of this pipeline's top-k the reference returns too, over sampled queries, from which a
+# hub finding at fail is lowered to warn
+AGREEMENT = 0.40
+
+
+def apply_agreement(findings: list, agreement: float) -> list[str]:
+    """Lower the hub findings still at ``fail`` to ``warn`` when this pipeline's results agree
+    with the reference's at ``AGREEMENT`` or more; return their names. ``findings`` is
+    changed in place."""
+    lowered = []
+    for f in findings:
+        if f.name not in HUB_SHAPED or f.verdict != "fail" or agreement < AGREEMENT:
+            continue
+        ref = dict(f.details.get("reference") or {})
+        ref.update({"agreement": agreement, "verdict_before_agreement": "fail"})
+        f.details = {**f.details, "reference": ref}
+        f.explanation += (
+            f" TOLERATED BY RETRIEVAL AGREEMENT: the reference model returns {agreement:.0%} of "
+            f"this pipeline's top results for the same queries (lowered at {AGREEMENT:.0%}), "
+            "so these hubs do not keep it from finding what the reference finds; verdict "
+            "without that: fail. The hubs are still there: labeled retrieval says what they cost."
+        )
+        f.verdict = "warn"
+        lowered.append(f.name)
+    return lowered
 
 
 def apply_reference(findings: list, ref_findings: list) -> list[str]:

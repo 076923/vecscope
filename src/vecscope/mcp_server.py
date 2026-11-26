@@ -489,6 +489,13 @@ def _summary(ev: dict) -> str:
             "; explained by the rows (the reference model reaches them too, so they read "
             f"ok): {', '.join(explained)}"
         )
+    tolerated = ((ev.get("reference") or {}).get("agreement") or {}).get("tolerated")
+    if tolerated:
+        head += (
+            "; lowered from fail to warn because results agree with the reference model's "
+            f"({ev['reference']['agreement']['queries']:.0%} of top results shared): "
+            + ", ".join(tolerated)
+        )
     if ev.get("needs_full_audit"):
         head += f"; needs a full audit (sample=0) to settle: {', '.join(ev['needs_full_audit'])}"
     if not bad:
@@ -534,19 +541,19 @@ def _summary(ev: dict) -> str:
             head += " (retrieval: different qrels or k, not comparable)"
         for side, r in (d.get("result_agreement") or {}).items():
             head += f", {side} results changed {r['changed_share']:.1%}"
-            if "reference" in r:
-                ref = r["reference"]
+            if "reference_top_hit" in r:
+                hit = r["reference_top_hit"]
                 head += (
-                    f" (overlap with the reference {ref['baseline_overlap']:.3f} -> "
-                    f"{ref['overlap']:.3f}, z {ref['z']:.1f})"
+                    f" (top hits agreed with the reference lost: {hit['lost']} of "
+                    f"{hit['agreed']}, z {hit['z']:.1f})"
                 )
         if d.get("reference_regressions"):
             head += (
-                ", AWAY FROM THE REFERENCE beyond tolerance (likely harmful, check with labels): "
+                ", AGREED TOP HITS LOST beyond tolerance (likely harmful, check with labels): "
                 + ", ".join(d["reference_regressions"])
             )
         if d.get("reference_unchecked"):
-            head += ", reference tolerance NOT CHECKED (a run has no reference overlap)"
+            head += ", reference tolerance NOT CHECKED (the baseline has no reference results)"
         if d.get("result_regressions"):
             head += f", RESULTS CHANGED beyond tolerance: {', '.join(d['result_regressions'])}"
         if d.get("result_unchecked"):
@@ -645,7 +652,11 @@ def audit_embeddings(
     `reference_path`: the same rows embedded by another, independently good public model
     (any dim; `reference_queries_path` the same queries). A finding the reference reaches
     too is attributed to the rows and reads ok, with `details.reference` holding the
-    reference value and the verdict without it; `reference.explained` lists them. Use it on
+    reference value and the verdict without it; `reference.explained` lists them. With
+    queries on both, a hub finding (hubness, query_hubness, antihubs) still at fail is
+    lowered to warn when the reference returns at least 40% of this pipeline's top results
+    for the same queries (`reference.agreement`): the hubs are real but do not keep it from
+    finding what the reference finds. Use it on
     short or templated texts and narrow domains, where good models trip findings; never
     with a reference that may share the fault (another model that does not cover the
     language).
@@ -655,13 +666,13 @@ def audit_embeddings(
     those results that changed. It measures change, not harm. `result_tolerance` (needs
     `baseline`) is the share allowed to change, 0 for a re-index or refactor that must
     return the same results; beyond it `result_regressions` names the side.
-    With `reference_path` (and `reference_queries_path`) too, each run keeps how much of every
-    sampled top-k the reference returns, and the diff reports
-    `result_agreement.<side>.reference` (overlap before and after, drop, z): results that
-    moved away from the reference are likely harmful, results that changed but kept the
-    overlap show no sign of harm. `reference_tolerance` (e.g. 0.02, needs `baseline`) lists
-    a drop beyond it and beyond 2 standard errors in `reference_regressions`. It is a proxy
-    for labels, not a measured loss.
+    With `reference_path` (and `reference_queries_path`) on the baseline, it keeps the
+    reference's first result for every sampled item, and the diff reports
+    `result_agreement.<side>.reference_top_hit`: of the items whose baseline top-k held that
+    result (a top hit both models agree on), how many the new run lost. Losing agreed top
+    hits is likely harmful; keeping them is no sign of harm. `reference_tolerance` (e.g.
+    0.05, needs `baseline`) lists a lost share beyond it and beyond 2 standard errors in
+    `reference_regressions`. It is a proxy for labels, not a measured loss.
     `retrieval_confidence` (e.g. 0.95, with `retrieval_tolerances`) judges each tolerance
     against the noise of the labeled queries, paired per query: `retrieval_regressions` only
     when the drop is real and beyond the tolerance, `retrieval_inconclusive` (with
@@ -729,10 +740,8 @@ def audit_embeddings(
                 )
             if retrieval_confidence is not None and not retrieval_tolerances:
                 raise ValueError("retrieval_confidence needs retrieval_tolerances")
-            if reference_tolerance is not None and not (result_sample and reference_path):
-                raise ValueError(
-                    "reference_tolerance needs result_sample and reference_path on this call"
-                )
+            if reference_tolerance is not None and not result_sample:
+                raise ValueError("reference_tolerance needs result_sample on this call")
             if result_tolerance is not None and not result_sample:
                 raise ValueError("result_tolerance needs result_sample on this call")
             if retrieval_tolerances and qrels is None:

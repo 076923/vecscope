@@ -14,6 +14,10 @@ comes from the vecscope library as shipped at the freeze: ``audit`` with
 ``reference_embeddings`` and ``result_sample``, ``diff_evidence`` with
 ``reference_tolerance`` and ``retrieval_confidence``. Nothing here is tuned.
 
+The summary in third_summary.json was scored at commit 0d554ad. After it,
+``reference_regressions`` changed from the drop of the whole overlap to the share of agreed
+top hits lost (preregistration_fourth.md), so a re-run scores P5b with the new rule.
+
 Run (after run.py on the third set):
     python examples/validation/third.py
 Writes <cache>/third/*.json, <cache>/third_faults/*.json and

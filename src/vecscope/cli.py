@@ -36,8 +36,13 @@ def _render_text(ev) -> str:
             line += "  INCONCLUSIVE (sampled)"
         if f.details.get("not_judged"):
             line += f"  NOT JUDGED at {'/'.join(f.details['not_judged'])} (too few queries)"
-        ref = f.details.get("reference")
-        if ref and ref["verdict_without_reference"] != f.verdict:
+        ref = f.details.get("reference") or {}
+        if "agreement" in ref:
+            line += (
+                f"  TOLERATED BY RETRIEVAL AGREEMENT (fail without it; the reference returns "
+                f"{ref['agreement']:.0%} of these results)"
+            )
+        elif "verdict_without_reference" in ref and ref["verdict_without_reference"] != f.verdict:
             line += (
                 f"  EXPLAINED BY THE ROWS ({ref['verdict_without_reference']} without the "
                 f"reference, which reads {ref['value']:.4f})"
@@ -254,10 +259,11 @@ def main(argv: list[str] | None = None) -> int:
         "--reference-tolerance",
         type=float,
         metavar="DROP",
-        help="allowed drop of the sampled results' overlap with the --reference model against "
-        "the baseline, e.g. 0.02; a larger drop (beyond 2 standard errors) is a likely "
-        "harmful change and exits 1 (needs --baseline, --result-sample and --reference on "
-        "both runs)",
+        help="allowed share of lost agreed top hits, e.g. 0.05: of the sampled queries whose "
+        "baseline results held the --reference model's first result, the share whose results "
+        "no longer do; a larger loss (beyond 2 standard errors) is a likely harmful change "
+        "and exits 1 (needs --baseline audited with --result-sample and --reference, and "
+        "--result-sample on this run)",
     )
     a.add_argument(
         "--require-comparable",
@@ -501,8 +507,8 @@ def _run(args) -> int:
         raise ValueError("--retrieval-confidence needs --retrieval-tolerance")
     if args.retrieval_confidence is not None and not 0.5 <= args.retrieval_confidence < 1:
         raise ValueError("--retrieval-confidence is a level in [0.5, 1), e.g. 0.95")
-    if args.reference_tolerance is not None and not (args.result_sample and args.reference):
-        raise ValueError("--reference-tolerance needs --result-sample and --reference on this run")
+    if args.reference_tolerance is not None and not args.result_sample:
+        raise ValueError("--reference-tolerance needs --result-sample on this run")
     if args.reference_tolerance is not None and not 0 <= args.reference_tolerance <= 1:
         raise ValueError("--reference-tolerance is a share between 0 and 1")
     if args.result_tolerance is not None and not args.result_sample:
@@ -638,17 +644,20 @@ def gate_decision(
     if reference_reg:
         agree = diff.get("result_agreement") or {}
         reasons.append(
-            "results moved away from the reference model beyond --reference-tolerance "
-            f"{diff.get('reference_tolerance'):g} (likely harmful, check with labels): "
+            "results lost the top hits agreed with the reference model beyond "
+            f"--reference-tolerance {diff.get('reference_tolerance'):g} (likely harmful, check "
+            "with labels): "
             + ", ".join(
-                f"{s} overlap {agree[s]['reference']['baseline_overlap']:.3f} -> "
-                f"{agree[s]['reference']['overlap']:.3f} (z {agree[s]['reference']['z']:.1f})"
+                f"{s} {agree[s]['reference_top_hit']['lost']} of "
+                f"{agree[s]['reference_top_hit']['agreed']} "
+                f"({agree[s]['reference_top_hit']['lost_share']:.1%}, "
+                f"z {agree[s]['reference_top_hit']['z']:.1f})"
                 for s in reference_reg
             )
         )
     if reference_unchecked:
         reasons.append(
-            "reference tolerance not checked: both runs need --result-sample and --reference"
+            "reference tolerance not checked: the baseline needs --result-sample and --reference"
         )
     if result_reg:
         agree = diff.get("result_agreement") or {}
@@ -819,8 +828,14 @@ def _render_diff(d: dict, path: str) -> str:
             lines.append(
                 f"    overlap with the reference model {ref['baseline_overlap']:.3f} -> "
                 f"{ref['overlap']:.3f} (drop {ref['drop']:+.4f}, z {ref['z']:.1f})"
+            )
+        if "reference_top_hit" in r:
+            hit = r["reference_top_hit"]
+            lines.append(
+                f"    top hits agreed with the reference model lost: {hit['lost']} of "
+                f"{hit['agreed']} ({hit['lost_share']:.1%}, z {hit['z']:.1f})"
                 + (
-                    f"  AWAY FROM THE REFERENCE beyond {d['reference_tolerance']:g}"
+                    f"  AGREED TOP HITS LOST beyond {d['reference_tolerance']:g}"
                     if side in d.get("reference_regressions", [])
                     else ""
                 )

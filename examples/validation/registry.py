@@ -15,6 +15,11 @@ embedded, for the changes made after the second was read: the reference-overlap 
 labeled gate judged against the noise of its queries, and the query_hubness chance rule,
 which the second set could not test. third.py analyses it.
 
+``role="fourth"`` marks a fourth held-out set, frozen in preregistration_fourth.md before it
+was embedded, for the two changes made after the third was read: the agreed top hits as a
+label-free sign of harm, and lowering hub findings at fail when the results agree with the
+reference. fourth.py analyses it.
+
 No private or company data belongs in this file, in the cache it writes, or in the report.
 """
 
@@ -89,7 +94,7 @@ def _csn(lang: str) -> Dataset:
     )
 
 
-def _wiki(lang: str) -> Dataset:
+def _wiki(lang: str, role: str = "third") -> Dataset:
     return Dataset(
         name=f"wikipedia-{lang}",
         kind="mteb",
@@ -97,7 +102,7 @@ def _wiki(lang: str) -> Dataset:
         language=lang,
         domain="wikipedia",
         license="CC-BY-SA-3.0",
-        role="third",
+        role=role,
         corpus=(f"{lang}-corpus", "test"),
         queries=(f"{lang}-queries", "test"),
         qrels=(f"{lang}-qrels", "test"),
@@ -304,6 +309,83 @@ DATASETS: dict[str, Dataset] = {
             queries=("queries", "test"),
             qrels=("qrels", "test"),
             note="Korean documents of five domains with generated questions",
+        ),
+        # fourth held-out set (role="fourth"), frozen in preregistration_fourth.md. The first
+        # six have at most 25k documents for the injected faults; the others are short FAQ
+        # answers, where good models made the hubs left at fail on the second and third
+        # sets, and larger corpora.
+        Dataset(
+            name="cqadupstack-android",
+            kind="mteb",
+            repo="mteb/cqadupstack-android",
+            language="en",
+            domain="community QA",
+            license="Apache-2.0",
+            role="fourth",
+            corpus=("corpus", "corpus"),
+            queries=("queries", "queries"),
+            qrels=("default", "test"),
+            note="StackExchange android questions -> duplicate questions",
+        ),
+        Dataset(
+            name="feedbackqa",
+            kind="mteb",
+            repo="mteb/FeedbackQARetrieval",
+            language="en",
+            domain="public health and government FAQ",
+            license="Apache-2.0",
+            role="fourth",
+            corpus=("corpus", "test"),
+            queries=("queries", "test"),
+            qrels=("qrels", "test"),
+            note="questions -> FAQ passages of public health and government sites",
+        ),
+        Dataset(
+            name="hunsum2",
+            kind="mteb",
+            repo="mteb/HunSum2AbstractiveRetrieval",
+            language="hu",
+            domain="news",
+            license="CC-BY-4.0",
+            role="fourth",
+            corpus=("corpus", "test"),
+            queries=("queries", "test"),
+            qrels=("qrels", "test"),
+            note="Hungarian news lead -> article",
+        ),
+        _wiki("it", role="fourth"),
+        _wiki("fa", role="fourth"),
+        _webfaq("msa", "ms", role="fourth", max_queries=1000),
+        _webfaq("heb", "he", role="fourth", max_queries=1000),
+        _webfaq("ell", "el", role="fourth", max_queries=1000),
+        _webfaq("hun", "hu", role="fourth", max_queries=1000),
+        Dataset(
+            name="rubq",
+            kind="mteb",
+            repo="mteb/RuBQRetrieval",
+            language="ru",
+            domain="wikipedia QA",
+            license="CC-BY-SA-4.0",
+            role="fourth",
+            corpus=("corpus", "test"),
+            queries=("queries", "test"),
+            qrels=("qrels", "test"),
+            max_queries=1000,
+            note="Russian questions -> Wikipedia paragraphs; 1000 seeded queries",
+        ),
+        Dataset(
+            name="litsearch",
+            kind="mteb",
+            repo="mteb/LitSearchRetrieval",
+            language="en",
+            domain="science",
+            license="MIT",
+            role="fourth",
+            corpus=("corpus", "test"),
+            queries=("queries", "test"),
+            qrels=("qrels", "test"),
+            max_queries=120,
+            note="literature search questions -> paper abstracts; 120 seeded queries",
         ),
     ]
 }

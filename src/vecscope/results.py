@@ -12,15 +12,19 @@ that is meant to move results goes to labeled queries or a person.
 
 With a reference model (the same rows and queries embedded by another, independently good
 model), each run also stores how much of every sampled top-k the reference returns too
-(``reference_overlap``). The reference stands in for labels: a change that moves results
-away from what the reference retrieves on the same rows is more likely harmful than one that
-moves them as much but keeps the agreement. On the first held-out set's injected faults
-(duplicates left out, see below), the paired drop in that overlap over 200 sampled queries
-separated harmful from harmless changes at AUC 0.875, where the changed share did at 0.56.
-It is a proxy: it cannot see rows that are wrong for both models (duplicated rows show up
-in the reference too; ``collapse`` finds them), and a change that makes the pipeline better
-than the reference also lowers the overlap. Read a drop as "likely harmful, check with
-labels", not as a measured loss.
+(``reference_overlap``) and the reference's first result (``reference_first``). The
+reference stands in for labels. Where the reference's first result is also in this
+pipeline's top-k, both models agree on it, and such an agreed top hit is far more often
+relevant than the rest of the list. A later run that no longer returns it has likely lost a
+relevant result: ``reference_top_hit`` is the share of those agreed top hits the new run
+lost. On the injected faults of three held-out sets (duplicates left out), that share
+separated harmful from harmless changes at AUC 0.91, where the drop of the whole overlap did
+at 0.86 and the changed share at 0.51: a harmless truncation reshuffles the lower ranks the
+two models never agreed on, a harmful change loses the agreed hits. Only the baseline needs
+the reference. It is a proxy: it cannot see rows that are wrong for both models (duplicated
+rows show up in the reference too; ``collapse`` finds them), and it misses small losses
+spread over the lower ranks. Read a loss as "likely harmful, check with labels", not as a
+measured loss.
 
 The sample is chosen by a multiplicative hash of the row number, keeping the rows with the
 smallest hashes. Rows appended later never displace a kept row from the old range, they
@@ -83,8 +87,11 @@ def result_sample(
     nb = _topk(x[rows], x, k, rows)
     out["row_neighbors"] = nb.tolist()
     ref: dict = {}
+    first: dict = {}
     if reference is not None:
-        ref["rows"] = _overlap(nb, _topk(reference[rows], reference, k, rows))
+        rnb = _topk(reference[rows], reference, k, rows)
+        ref["rows"] = _overlap(nb, rnb)
+        first["rows"] = rnb[:, 0].tolist()
     if queries is not None:
         qrows = pick_rows(queries.shape[0], m)
         out["n_queries"] = int(queries.shape[0])
@@ -92,9 +99,12 @@ def result_sample(
         res = _topk(queries[qrows], x, k, None)
         out["query_results"] = res.tolist()
         if reference is not None and reference_queries is not None:
-            ref["queries"] = _overlap(res, _topk(reference_queries[qrows], reference, k, None))
+            rres = _topk(reference_queries[qrows], reference, k, None)
+            ref["queries"] = _overlap(res, rres)
+            first["queries"] = rres[:, 0].tolist()
     if ref:
         out["reference_overlap"] = ref
+        out["reference_first"] = first
     return out
 
 
@@ -115,13 +125,14 @@ def _agreement(ids_a, res_a, ids_b, res_b) -> dict | None:
     }
 
 
-# a drop in the overlap with the reference counts only beyond this many standard errors
-# of the paired per-item drop, so sampling noise alone does not read as a change
+# a loss of agreed top hits counts only beyond this many standard errors of the per-item
+# loss, so sampling noise alone does not read as a change
 REFERENCE_Z = 2.0
-# the drop a change decision reads as "moved away" when no tolerance was given: on the first
-# held-out set's faults it flagged 79% of changes that cost more than 0.02 nDCG@10 and 24% of
-# harmless ones (200 sampled queries)
-REFERENCE_TOLERANCE = 0.02
+# the share of agreed top hits lost that a change decision reads as "moved away" when no
+# tolerance was given: on the injected faults of three held-out sets (200 sampled queries)
+# it flagged 72% to 83% of the changes that cost more than 0.02 nDCG@10 and 5% to 8% of the
+# harmless ones
+REFERENCE_TOLERANCE = 0.05
 
 
 def _reference_drop(ids_a, ov_a, ids_b, ov_b) -> dict | None:
@@ -147,14 +158,43 @@ def _reference_drop(ids_a, ov_a, ids_b, ov_b) -> dict | None:
     }
 
 
+def _top_hit(ids_a, res_a, first_a, ids_b, res_b) -> dict | None:
+    """Of the items whose baseline top-k held the reference's first result (an agreed top
+    hit), the share whose new top-k no longer holds it."""
+    a = {i: (r, f) for i, r, f in zip(ids_a, res_a, first_a)}
+    b = dict(zip(ids_b, res_b))
+    shared = sorted(a.keys() & b.keys())
+    agreed = [i for i in shared if a[i][1] in a[i][0]]
+    if not agreed:
+        return None
+    lost = np.array([float(a[i][1] not in b[i]) for i in agreed])
+    mean = float(lost.mean())
+    se = float(lost.std(ddof=1) / np.sqrt(len(lost))) if len(lost) > 1 else 0.0
+    if se > 0:
+        z = mean / se
+    else:
+        z = 0.0 if mean == 0 else 1e6
+    return {
+        "compared": len(shared),
+        "agreed": len(agreed),
+        "lost": int(lost.sum()),
+        "lost_share": mean,
+        "standard_error": se,
+        "z": float(z),
+    }
+
+
 def result_agreement(new: dict, old: dict) -> dict:
     """``{"queries": ..., "rows": ...}``: per side, how much of the sampled top-k the two runs
     share; ``changed_share`` is the share of top-k slots that hold another row. A side is
-    missing when either run lacks it or the samples share no item."""
+    missing when either run lacks it or the samples share no item. With a reference on the
+    baseline, ``reference_top_hit`` gives the share of agreed top hits the new run lost; with
+    a reference on both runs, ``reference`` gives the overlap with it before and after."""
     out = {}
     if not all("rows" in s for s in (new or {}, old or {})) or new.get("k") != old.get("k"):
         return out
     ra, rb = old.get("reference_overlap") or {}, new.get("reference_overlap") or {}
+    fa = old.get("reference_first") or {}
     r = _agreement(old["rows"], old["row_neighbors"], new["rows"], new["row_neighbors"])
     if r is not None:
         out["rows"] = r
@@ -162,6 +202,12 @@ def result_agreement(new: dict, old: dict) -> dict:
             ref = _reference_drop(old["rows"], ra["rows"], new["rows"], rb["rows"])
             if ref is not None:
                 r["reference"] = ref
+        if "rows" in fa:
+            hit = _top_hit(
+                old["rows"], old["row_neighbors"], fa["rows"], new["rows"], new["row_neighbors"]
+            )
+            if hit is not None:
+                r["reference_top_hit"] = hit
     if "queries" in new and "queries" in old and new.get("n_queries") == old.get("n_queries"):
         q = _agreement(old["queries"], old["query_results"], new["queries"], new["query_results"])
         if q is not None:
@@ -170,19 +216,29 @@ def result_agreement(new: dict, old: dict) -> dict:
                 ref = _reference_drop(old["queries"], ra["queries"], new["queries"], rb["queries"])
                 if ref is not None:
                     q["reference"] = ref
+            if "queries" in fa:
+                hit = _top_hit(
+                    old["queries"],
+                    old["query_results"],
+                    fa["queries"],
+                    new["queries"],
+                    new["query_results"],
+                )
+                if hit is not None:
+                    q["reference_top_hit"] = hit
     return out
 
 
 def reference_regressions(agreement: dict, tolerance: float) -> list[str]:
-    """Sides whose overlap with the reference dropped by more than ``tolerance`` and by more
-    than ``REFERENCE_Z`` standard errors. The queries side decides when it was measured (it
-    is the one that separated harmful changes); the rows side only without queries."""
-    sides = [s for s in ("queries", "rows") if "reference" in agreement.get(s, {})]
+    """Sides that lost more than ``tolerance`` of their agreed top hits, by more than
+    ``REFERENCE_Z`` standard errors. The queries side decides when it was measured (it is the
+    one validated on injected faults); the rows side only without queries."""
+    sides = [s for s in ("queries", "rows") if "reference_top_hit" in agreement.get(s, {})]
     if "queries" in sides:
         sides = ["queries"]
     return [
         s
         for s in sides
-        if agreement[s]["reference"]["drop"] > tolerance
-        and agreement[s]["reference"]["z"] > REFERENCE_Z
+        if agreement[s]["reference_top_hit"]["lost_share"] > tolerance
+        and agreement[s]["reference_top_hit"]["z"] > REFERENCE_Z
     ]

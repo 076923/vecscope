@@ -1,6 +1,6 @@
 """Two ways to read a change with fewer false alarms: a labeled gate judged against the noise
 of the labeled queries (pass, fail or inconclusive), and the label-free overlap with a
-reference model's results (moved away from the reference, or not)."""
+reference model's results (the top hits both models agreed on were lost, or kept)."""
 
 from __future__ import annotations
 
@@ -90,22 +90,26 @@ def test_without_per_query_values_the_mean_rule_applies():
     assert d["retrieval_regressions"] == [] and d["retrieval_unchecked"] == []
 
 
-def test_reference_overlap_separates_a_lost_mapping_from_a_harmless_reorder():
+def test_agreed_top_hits_separate_a_lost_mapping_from_a_harmless_reorder():
     x, q, _, rx, rq = _data()
     kw = {"k": 10, "queries": q, "result_sample": 200}
     base = audit(x, reference_embeddings=rx, reference_queries=rq, **kw)
     ro = base.result_sample["reference_overlap"]
     assert len(ro["queries"]) == len(base.result_sample["queries"]) == 200
     assert np.mean(ro["queries"]) > 0.5  # a rotation keeps cosine neighbors
+    first = base.result_sample["reference_first"]
+    assert len(first["queries"]) == 200 and len(first["rows"]) == 200
     base = base.to_dict()
 
-    # harmless: a tiny perturbation changes some results but not the agreement
+    # harmless: a tiny perturbation changes some results but keeps the agreed top hits
     jit = (x + 1e-3 * np.random.default_rng(3).standard_normal(x.shape)).astype(np.float32)
     ok = audit(jit, reference_embeddings=rx, reference_queries=rq, **kw).to_dict()
-    d = diff_evidence(ok, base, reference_tolerance=0.02)
+    d = diff_evidence(ok, base, reference_tolerance=0.05)
     assert d["reference_regressions"] == []
+    hit = d["result_agreement"]["queries"]["reference_top_hit"]
+    assert hit["agreed"] > 150 and hit["lost_share"] < 0.05
     assert abs(d["result_agreement"]["queries"]["reference"]["drop"]) < 0.02
-    assert "held" in " ".join(d["change_decision"]["reasons"])
+    assert "were kept" in " ".join(d["change_decision"]["reasons"])
 
     # harmful: 30% of rows hold another document's vector, the reference (from the texts)
     # does not
@@ -114,16 +118,34 @@ def test_reference_overlap_separates_a_lost_mapping_from_a_harmless_reorder():
     moved = x.copy()
     moved[rows] = x[np.roll(rows, 1)]
     bad = audit(moved, reference_embeddings=rx, reference_queries=rq, **kw).to_dict()
-    d = diff_evidence(bad, base, reference_tolerance=0.02)
-    ref = d["result_agreement"]["queries"]["reference"]
-    assert ref["drop"] > 0.05 and ref["z"] > 2
+    d = diff_evidence(bad, base, reference_tolerance=0.05)
+    hit = d["result_agreement"]["queries"]["reference_top_hit"]
+    assert hit["lost_share"] > 0.1 and hit["z"] > 2
     assert d["reference_regressions"] == ["queries"]
-    assert "moved away from the reference" in " ".join(d["change_decision"]["reasons"])
+    assert "lost the top hits" in " ".join(d["change_decision"]["reasons"])
 
-    # a run without a reference cannot be checked
+    # only the baseline needs the reference
     plain = audit(moved, **kw).to_dict()
-    d = diff_evidence(plain, base, reference_tolerance=0.02)
+    d = diff_evidence(plain, base, reference_tolerance=0.05)
+    assert d["reference_regressions"] == ["queries"] and d["reference_unchecked"] == []
+    # a baseline without a reference cannot be checked
+    d = diff_evidence(bad, plain, reference_tolerance=0.05)
     assert d["reference_unchecked"] == ["reference"]
+
+
+def test_top_hit_loss_counts_only_agreed_items():
+    from vecscope.results import _top_hit, reference_regressions
+
+    # item 0: agreed (first 5 in the baseline) and lost; item 1: agreed, kept;
+    # item 2: not agreed (first 9 was never in the baseline), so it does not count
+    hit = _top_hit(
+        [0, 1, 2], [[5, 6], [7, 8], [1, 2]], [5, 7, 9], [0, 1, 2], [[1, 6], [7, 3], [9, 4]]
+    )
+    assert hit["agreed"] == 2 and hit["lost"] == 1 and hit["lost_share"] == 0.5
+    agreement = {"queries": {"reference_top_hit": hit}, "rows": {"reference_top_hit": hit}}
+    assert reference_regressions(agreement, 0.6) == []
+    # se of [1, 0] is 0.5, z = 1: not beyond 2 standard errors
+    assert reference_regressions(agreement, 0.05) == []
 
 
 def test_cli_confidence_and_reference_gates(tmp_path, capsys):
@@ -147,17 +169,18 @@ def test_cli_confidence_and_reference_gates(tmp_path, capsys):
     base.write_text(buf.getvalue())
     gate = [
         "--baseline", str(base), "--retrieval-tolerance", "ndcg_at_k=0.01",
-        "--retrieval-confidence", "0.95", "--reference-tolerance", "0.02",
+        "--retrieval-confidence", "0.95", "--reference-tolerance", "0.05",
     ]  # fmt: skip
     assert main(["audit", p["x"], *common, *gate]) == 0
     capsys.readouterr()
     assert main(["audit", p["moved"], *common, *gate]) == 1
     out = capsys.readouterr().out
-    assert "overlap with the reference model" in out and "AWAY FROM THE REFERENCE" in out
+    assert "top hits agreed with the reference model lost" in out
+    assert "AGREED TOP HITS LOST" in out
     assert main(["audit", p["x"], "--retrieval-confidence", "0.9"]) == 2
-    assert main(["audit", p["x"], "--baseline", str(base), "--reference-tolerance", "0.02"]) == 2
+    assert main(["audit", p["x"], "--baseline", str(base), "--reference-tolerance", "0.05"]) == 2
     err = capsys.readouterr().err
-    assert "needs --result-sample and --reference" in err
+    assert "needs --result-sample on this run" in err
 
 
 def test_mcp_keeps_per_query_values_for_the_baseline_only(tmp_path, monkeypatch):
@@ -185,10 +208,10 @@ def test_mcp_keeps_per_query_values_for_the_baseline_only(tmp_path, monkeypatch)
         baseline=base["audit_id"],
         retrieval_tolerances={"ndcg_at_k": 0.01},
         retrieval_confidence=0.95,
-        reference_tolerance=0.02,
+        reference_tolerance=0.05,
         **kw,
     )
     d = res["baseline_diff"]
     assert d["retrieval_confidence_checks"]["exact.ndcg_at_k"]["decision"] == "pass"
     assert d["reference_regressions"] == []
-    assert "overlap with the reference" in res["summary"]
+    assert "top hits agreed with the reference lost" in res["summary"]
