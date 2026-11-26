@@ -145,3 +145,30 @@ def test_agreement_is_measured_with_queries_and_a_reference():
     assert a["threshold"] == 0.40
     # without reference queries there is nothing to agree on
     assert "agreement" not in audit(x, k=10, queries=q, reference_embeddings=x @ rot).reference
+
+
+def test_effective_rank_at_fail_is_lowered_one_step_when_the_reference_is_at_warn():
+    from vecscope.evidence import Finding
+    from vecscope.reference import apply_reference
+
+    def f(name, value, verdict):
+        return Finding(
+            name=name,
+            metric="m",
+            value=value,
+            verdict=verdict,
+            healthy_range="",
+            explanation="x.",
+            suggested_action="",
+            details={},
+        )
+
+    mine = [f("effective_rank", 0.03, "fail"), f("collapse", 0.2, "fail")]
+    ref = [f("effective_rank", 0.06, "warn"), f("collapse", 0.1, "warn")]
+    explained = apply_reference(mine, ref)
+    assert explained == ["effective_rank"]
+    assert mine[0].verdict == "warn"
+    assert "PARTLY EXPLAINED BY THE ROWS" in mine[0].explanation
+    assert mine[0].details["reference"]["verdict_without_reference"] == "fail"
+    # row-level findings keep the strict rule
+    assert mine[1].verdict == "fail"

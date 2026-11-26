@@ -133,6 +133,11 @@ REFERENCE_Z = 2.0
 # it flagged 72% to 83% of the changes that cost more than 0.02 nDCG@10 and 5% to 8% of the
 # harmless ones
 REFERENCE_TOLERANCE = 0.05
+# below the tolerance, a loss beyond this share (and 2 standard errors) is listed for review:
+# it never fails a gate. On the faults of four held-out sets it caught 80 of the 117 changes
+# costing more than 0.02 nDCG@10 that the tolerance missed, and sent 29 of 244 harmless ones
+# to review
+REFERENCE_REVIEW = 0.03
 
 
 def _reference_drop(ids_a, ov_a, ids_b, ov_b) -> dict | None:
@@ -227,6 +232,15 @@ def result_agreement(new: dict, old: dict) -> dict:
                 if hit is not None:
                     q["reference_top_hit"] = hit
     return out
+
+
+def reference_review(agreement: dict, tolerance: float | None) -> list[str]:
+    """Sides that lost more than ``REFERENCE_REVIEW`` of their agreed top hits, beyond
+    ``REFERENCE_Z`` standard errors, but are not over ``tolerance`` (``REFERENCE_TOLERANCE``
+    when None): small losses the tolerance lets through, to check with labels."""
+    tol = REFERENCE_TOLERANCE if tolerance is None else tolerance
+    over = set(reference_regressions(agreement, tol))
+    return [s for s in reference_regressions(agreement, REFERENCE_REVIEW) if s not in over]
 
 
 def reference_regressions(agreement: dict, tolerance: float) -> list[str]:

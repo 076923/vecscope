@@ -20,6 +20,12 @@ was embedded, for the two changes made after the third was read: the agreed top 
 label-free sign of harm, and lowering hub findings at fail when the results agree with the
 reference. fourth.py analyses it.
 
+``role="fifth"`` marks a fifth held-out set, frozen in preregistration_fifth.md before it was
+embedded, for the changes made after the fourth was read: a review tier for small losses of
+agreed top hits, lowering an effective_rank at fail one step where the reference is at warn,
+and the rules of the fourth set with another reference model (gte-multilingual-base) and a
+larger corpus. fifth.py analyses it.
+
 No private or company data belongs in this file, in the cache it writes, or in the report.
 """
 
@@ -79,7 +85,7 @@ def _miracl(lang: str, role: str = "heldout", max_queries: int = 0) -> Dataset:
     )
 
 
-def _csn(lang: str) -> Dataset:
+def _csn(lang: str, role: str = "heldout") -> Dataset:
     return Dataset(
         name=f"codesearchnet-{lang}",
         kind="mteb",
@@ -90,6 +96,7 @@ def _csn(lang: str) -> Dataset:
         corpus=(f"{lang}-corpus", "test"),
         queries=(f"{lang}-queries", "test"),
         qrels=(f"{lang}-qrels", "test"),
+        role=role,
         note=f"docstring -> {lang} function",
     )
 
@@ -387,6 +394,28 @@ DATASETS: dict[str, Dataset] = {
             max_queries=120,
             note="literature search questions -> paper abstracts; 120 seeded queries",
         ),
+        # fifth held-out set (role="fifth"), frozen in preregistration_fifth.md. The first six
+        # have at most 25k documents for the injected faults; the last two are larger.
+        Dataset(
+            name="cqadupstack-mathematica",
+            kind="mteb",
+            repo="mteb/cqadupstack-mathematica",
+            language="en",
+            domain="community QA",
+            license="Apache-2.0",
+            role="fifth",
+            corpus=("corpus", "corpus"),
+            queries=("queries", "queries"),
+            qrels=("default", "test"),
+            note="StackExchange Mathematica questions -> duplicate questions",
+        ),
+        _wiki("pt", role="fifth"),
+        _wiki("fi", role="fifth"),
+        _webfaq("est", "et", role="fifth", max_queries=1000),
+        _webfaq("srp", "sr", role="fifth", max_queries=1000),
+        _csn("ruby", role="fifth"),
+        _webfaq("ron", "ro", role="fifth", max_queries=1000),
+        _miracl("es", role="fifth"),
     ]
 }
 

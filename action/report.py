@@ -130,6 +130,12 @@ def main(argv: list[str]) -> int:
             "\nTop hits agreed with the reference model were lost (likely harmful, check with "
             "labels): " + ", ".join(_cell(s) for s in diff["reference_regressions"])
         )
+    if isinstance(diff, dict) and diff.get("reference_review"):
+        lines.append(
+            "\nA few top hits agreed with the reference model were lost, below the tolerance "
+            "(not a failure; a small loss is possible, check with labels): "
+            + ", ".join(_cell(s) for s in diff["reference_review"])
+        )
     lines += ["", f"Full evidence: `{path}`", ""]
     _write("GITHUB_STEP_SUMMARY", "\n".join(lines))
     return 0

@@ -215,3 +215,33 @@ def test_mcp_keeps_per_query_values_for_the_baseline_only(tmp_path, monkeypatch)
     assert d["retrieval_confidence_checks"]["exact.ndcg_at_k"]["decision"] == "pass"
     assert d["reference_regressions"] == []
     assert "top hits agreed with the reference lost" in res["summary"]
+
+
+def test_a_small_loss_of_agreed_top_hits_is_listed_for_review_not_failed():
+    from vecscope.results import reference_regressions, reference_review, result_agreement
+
+    n = 200
+    ids = list(range(n))
+    res = [[i * 10 + j for j in range(10)] for i in ids]
+    old = {
+        "k": 10,
+        "rows": [],
+        "row_neighbors": [],
+        "queries": ids,
+        "n_queries": n,
+        "query_results": res,
+        "reference_first": {"queries": [r[0] for r in res]},
+    }
+    # 8 of 200 agreed top hits lost: 4%, between the review share and the tolerance
+    new_res = [([-1] + r[1:]) if i < 8 else r for i, r in zip(ids, res)]
+    new = {**old, "query_results": new_res}
+    del new["reference_first"]
+    agreement = result_agreement(new, old)
+    hit = agreement["queries"]["reference_top_hit"]
+    assert hit["lost"] == 8 and hit["z"] > 2
+    assert reference_regressions(agreement, 0.05) == []
+    assert reference_review(agreement, 0.05) == ["queries"]
+    assert reference_review(agreement, None) == ["queries"]
+    # at a tolerance below the loss it is a regression, not a review
+    assert reference_regressions(agreement, 0.02) == ["queries"]
+    assert reference_review(agreement, 0.02) == []

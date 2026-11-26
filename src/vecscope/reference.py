@@ -25,6 +25,15 @@ code-QA pipelines at 0.29. So a hub finding at ``fail`` on a pipeline that agree
 reference at ``AGREEMENT`` or more is lowered to ``warn``, never to ``ok``: the hubs are
 real, and labeled retrieval decides what they cost.
 
+The effective rank is a property of the whole space, and a narrow corpus (one scientific
+field, one product category) lowers it for every model. When the reference sits at ``warn``
+and this model at ``fail``, the rows explain most of it, and this model goes one step
+further than a good model does on them; ``effective_rank`` is then lowered to ``warn``
+(``PARTLY_EXPLAINED``), never to ``ok``. On the four held-out sets this lowered it on 10
+good pipelines and 17 bad ones; 1 bad pipeline was left without a ``fail``. The row-level
+findings (collapse, outliers, hubs) keep the strict rule: they are the ones that catch
+duplicated, zeroed and crowding rows.
+
 The reference must be good on its own, a public model with published scores on the
 language and domain. A reference that is broken in the same way (two English-only models on
 Korean text) explains away a real fault. Its own verdict is reported next to the result.
@@ -48,6 +57,10 @@ DATA_SHAPED = (
     "query_hubness",
 )
 
+
+# findings about the whole space that a narrow corpus lowers for every model: at fail where
+# the reference is at warn, they are lowered one step, to warn
+PARTLY_EXPLAINED = ("effective_rank",)
 
 # findings about how often rows appear in other rows' or queries' results
 HUB_SHAPED = ("hubness", "query_hubness", "antihubs")
@@ -79,8 +92,9 @@ def apply_agreement(findings: list, agreement: float) -> list[str]:
 
 
 def apply_reference(findings: list, ref_findings: list) -> list[str]:
-    """Mark the findings the reference reaches too and return their names. ``findings``
-    and ``ref_findings`` are ``Finding`` objects; ``findings`` is changed in place."""
+    """Mark the findings the reference reaches too (and an ``effective_rank`` at fail where the
+    reference is at warn, lowered to warn) and return their names. ``findings`` and
+    ``ref_findings`` are ``Finding`` objects; ``findings`` is changed in place."""
     ref = {f.name: f for f in ref_findings}
     explained = []
     for f in findings:
@@ -89,6 +103,15 @@ def apply_reference(findings: list, ref_findings: list) -> list[str]:
             continue
         info = {"value": r.value, "verdict": r.verdict, "verdict_without_reference": f.verdict}
         f.details = {**f.details, "reference": info}
+        if f.name in PARTLY_EXPLAINED and f.verdict == "fail" and r.verdict == "warn":
+            f.explanation += (
+                f" PARTLY EXPLAINED BY THE ROWS: the reference model reaches warn on the same "
+                f"rows ({r.value:.4g}), so the rows produce most of it and this model goes one "
+                "step further; verdict without the reference: fail."
+            )
+            f.verdict = "warn"
+            explained.append(f.name)
+            continue
         if f.verdict == "ok" or WORSE[r.verdict] < WORSE[f.verdict]:
             continue
         f.explanation += (

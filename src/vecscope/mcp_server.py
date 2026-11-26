@@ -487,7 +487,8 @@ def _summary(ev: dict) -> str:
     if explained:
         head += (
             "; explained by the rows (the reference model reaches them too, so they read "
-            f"ok): {', '.join(explained)}"
+            "ok; an effective_rank at fail where the reference is at warn reads warn): "
+            f"{', '.join(explained)}"
         )
     tolerated = ((ev.get("reference") or {}).get("agreement") or {}).get("tolerated")
     if tolerated:
@@ -551,6 +552,11 @@ def _summary(ev: dict) -> str:
             head += (
                 ", AGREED TOP HITS LOST beyond tolerance (likely harmful, check with labels): "
                 + ", ".join(d["reference_regressions"])
+            )
+        if d.get("reference_review"):
+            head += (
+                ", a few agreed top hits lost (below the tolerance; a small loss is possible, "
+                "check with labels): " + ", ".join(d["reference_review"])
             )
         if d.get("reference_unchecked"):
             head += ", reference tolerance NOT CHECKED (the baseline has no reference results)"
@@ -652,7 +658,8 @@ def audit_embeddings(
     `reference_path`: the same rows embedded by another, independently good public model
     (any dim; `reference_queries_path` the same queries). A finding the reference reaches
     too is attributed to the rows and reads ok, with `details.reference` holding the
-    reference value and the verdict without it; `reference.explained` lists them. With
+    reference value and the verdict without it; `reference.explained` lists them (an
+    effective_rank at fail where the reference is at warn is lowered to warn only). With
     queries on both, a hub finding (hubness, query_hubness, antihubs) still at fail is
     lowered to warn when the reference returns at least 40% of this pipeline's top results
     for the same queries (`reference.agreement`): the hubs are real but do not keep it from

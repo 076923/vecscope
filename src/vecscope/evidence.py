@@ -317,10 +317,15 @@ def change_decision(diff: Mapping) -> dict:
         ref = {s: r["reference_top_hit"] for s, r in agreement.items() if "reference_top_hit" in r}
         ref_reason = []
         if ref:
-            from vecscope.results import REFERENCE_TOLERANCE, reference_regressions
+            from vecscope.results import (
+                REFERENCE_TOLERANCE,
+                reference_regressions,
+                reference_review,
+            )
 
             tol = diff.get("reference_tolerance")
             away = reference_regressions(agreement, REFERENCE_TOLERANCE if tol is None else tol)
+            review = reference_review(agreement, tol)
             shown = ", ".join(
                 f"{s} {r['lost']} of {r['agreed']} ({r['lost_share']:.1%}, z {r['z']:.1f})"
                 for s, r in ref.items()
@@ -330,6 +335,10 @@ def change_decision(diff: Mapping) -> dict:
                 + shown
                 + "; likely harmful, check with labels before adopting"
                 if away
+                else "results lost a few of the top hits agreed with the reference model: "
+                + shown
+                + "; a small loss is possible, check with labels before adopting"
+                if review
                 else "the top hits agreed with the reference model were kept (lost "
                 + shown
                 + "); no sign of harm, which is not proof of none"
@@ -649,7 +658,7 @@ def diff_evidence(
         "retrieval_confidence_checks": confidence_checks,
         "retrieval_inconclusive": retrieval_inconclusive,
     }
-    from vecscope.results import reference_regressions, result_agreement
+    from vecscope.results import reference_regressions, reference_review, result_agreement
 
     agreement = result_agreement(new.get("result_sample") or {}, old.get("result_sample") or {})
     out["result_agreement"] = agreement
@@ -670,6 +679,7 @@ def diff_evidence(
     out["reference_unchecked"] = (
         ["reference"] if reference_tolerance is not None and not has_ref else []
     )
+    out["reference_review"] = reference_review(agreement, reference_tolerance) if has_ref else []
     out["change_decision"] = change_decision(out)
     return out
 

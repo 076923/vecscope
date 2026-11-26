@@ -42,6 +42,15 @@ def _render_text(ev) -> str:
                 f"  TOLERATED BY RETRIEVAL AGREEMENT (fail without it; the reference returns "
                 f"{ref['agreement']:.0%} of these results)"
             )
+        elif (
+            "verdict_without_reference" in ref
+            and ref["verdict_without_reference"] != f.verdict
+            and f.verdict != "ok"
+        ):
+            line += (
+                f"  PARTLY EXPLAINED BY THE ROWS ({ref['verdict_without_reference']} without the "
+                f"reference, which reads {ref['value']:.4f})"
+            )
         elif "verdict_without_reference" in ref and ref["verdict_without_reference"] != f.verdict:
             line += (
                 f"  EXPLAINED BY THE ROWS ({ref['verdict_without_reference']} without the "
@@ -682,6 +691,7 @@ def gate_decision(
         "retrieval_inconclusive": retrieval_inc,
         "reference_regressions": reference_reg,
         "reference_unchecked": reference_unchecked,
+        "reference_review": list(diff.get("reference_review") or []) if diff else [],
         "baseline": diff is not None,
         "inconclusive": list(inconclusive or []),
         "exit_code": 1 if reasons else 0,
@@ -837,6 +847,8 @@ def _render_diff(d: dict, path: str) -> str:
                 + (
                     f"  AGREED TOP HITS LOST beyond {d['reference_tolerance']:g}"
                     if side in d.get("reference_regressions", [])
+                    else "  REVIEW: a small loss is possible, check with labels"
+                    if side in d.get("reference_review", [])
                     else ""
                 )
             )
