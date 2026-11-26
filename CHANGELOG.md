@@ -42,6 +42,20 @@ All notable changes to this project are documented here. The format follows
   (`details.reference.verdict_before_agreement`, `TOLERATED BY RETRIEVAL AGREEMENT`). Designed
   on 490 pipelines of the three held-out sets: AUC 0.999 between good and bad pipelines, no
   bad pipeline at `fail` above 0.31, 9 of the 12 good pipelines left at `fail` cleared.
+- A review tier for small losses of agreed top hits: the diff lists in `reference_review`
+  a side whose lost share is above 0.03 and 2 standard errors but within the tolerance
+  (`REFERENCE_REVIEW`). It never fails a gate; the CLI shows `REVIEW`, the MCP summary and
+  the Action report say a small loss is possible, and `change_decision` asks for labels.
+  Designed on the four held-out sets: 80 of the 117 faults costing more than 0.02 that 0.05
+  let through were listed, and 29 of 244 harmless ones.
+- One step for `effective_rank` against a reference: at `fail` where the reference is at
+  `warn`, it reads `warn` (`PARTLY EXPLAINED BY THE ROWS`, listed in `reference.explained`).
+  The row-level findings keep the strict rule. Designed on the four held-out sets: lowered
+  on 10 good and 17 bad pipelines, 1 bad pipeline left without a `fail`.
+- A fifth held-out set (eight public datasets, `role="fifth"`, gte-multilingual-base as the
+  reference, two larger corpora) frozen with its criteria in
+  `examples/validation/preregistration_fifth.md` before it was embedded, scored by
+  `examples/validation/fifth.py`.
 - A fourth held-out set (eleven public datasets, `role="fourth"`) frozen with its criteria in
   `examples/validation/preregistration_fourth.md` before it was embedded, scored by
   `examples/validation/fourth.py`. Results (`fourth_summary.json`, docs/verification.md), all

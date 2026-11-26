@@ -81,12 +81,15 @@ In CI:
   ranks, about half of the lost-row faults (zero vectors; the findings catch them) and
   duplicated rows (`collapse` does). On a preregistered held-out set it flagged 72% of
   drops above 0.02 and 2% of harmless changes, so no flag is not proof of no harm.
+  `reference_review` (above 0.03, below the tolerance; never fails) means "a small loss is
+  possible": ask for labeled queries before adopting, do not call it a regression.
 - With `--reference-queries`, a hub finding (`hubness`, `query_hubness`, `antihubs`) still
   at `fail` reads `warn` when the reference returns at least 40% of the pipeline's top
   results for the same queries (`reference.agreement`, `TOLERATED BY RETRIEVAL AGREEMENT`).
   Report it as "real hubs that do not keep the pipeline from finding what the reference
-  finds", not as healthy; labeled retrieval says what they cost. Other findings at `fail`
-  (for example `effective_rank`) are not lowered.
+  finds", not as healthy; labeled retrieval says what they cost. An `effective_rank` at
+  `fail` where the reference is at `warn` reads `warn` (`PARTLY EXPLAINED BY THE ROWS`): a
+  narrow corpus lowers it for every model. Other findings at `fail` are not lowered.
 - Pick tolerances from measured retrieval quality ("Calibrating thresholds to your domain" in
   https://076923.github.io/vecscope/quality/), not from what makes the pipeline green.
 - Two rules can fail a run and the `gate` block (JSON) or line (text) names which one did:

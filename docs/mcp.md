@@ -81,7 +81,8 @@ the baseline, different qrels or k) in `retrieval_unchecked`, and the summary sa
 independently good model: findings it reaches too read ok with `details.reference`, and the
 summary lists them as explained by the rows. With queries on both, a hub finding still at
 `fail` is lowered to `warn` when the reference returns at least 40% of this pipeline's top
-results for the same queries (`reference.agreement`); see
+results for the same queries (`reference.agreement`), and an `effective_rank` at `fail`
+where the reference is at `warn` reads `warn`; see
 [Short texts and narrow domains](usage.md#short-texts-and-narrow-domains-a-reference-model).
 `result_sample` keeps the exact top-k of that many sampled queries and rows with the audit in
 the server's memory (the response only counts them); a later call with that `audit_id` as
@@ -91,7 +92,8 @@ check (`RESULTS CHANGED` in the summary). It measures change, not harm; see
 the baseline call, the diff also says how many of the top hits this pipeline and the
 reference agreed on the new run lost (`result_agreement.<side>.reference_top_hit`), and
 `reference_tolerance` (e.g. 0.05) flags a lost share beyond it as likely harmful
-(`AGREED TOP HITS LOST` in the summary); see
+(`AGREED TOP HITS LOST` in the summary). A smaller loss above 0.03 is listed in
+`reference_review` and never fails (the summary says a small loss is possible); see
 [Without labels](ci.md#without-labels-did-the-change-lose-the-top-hits-a-reference-model-agrees-on). `retrieval_confidence`
 (e.g. 0.95, with `retrieval_tolerances`) judges a labeled drop against the noise of the
 labeled queries and reports `retrieval_inconclusive` when they cannot settle it; see

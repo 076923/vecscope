@@ -281,6 +281,16 @@ shares still means duplicated rows that crowd results. Findings that describe th
 output or the index (norms, rogue dimensions, metric mismatch, ANN recall, query shift) are
 never explained this way.
 
+`effective_rank` describes the whole space, and a narrow corpus (one scientific field, one
+product category) lowers it for every model. When it is at `fail` and the reference at
+`warn`, it is lowered one step, to `warn`: the text output says
+`PARTLY EXPLAINED BY THE ROWS`, and `details.reference.verdict_without_reference` keeps
+`fail`. The row-level findings (collapse, outliers, hubs) keep the strict rule, because they
+are the ones that catch duplicated, zeroed and crowding rows. On the four held-out sets this
+lowered the finding on 10 good and 17 bad pipelines and left 1 bad pipeline without a
+`fail`; a fifth set, frozen before it was embedded, checks it
+([Verification](verification.md)).
+
 Pick a reference with published scores on your language and domain. A reference that shares
 the fault (another model that does not cover the language) explains away a real problem.
 On the first held-out set, with bge-m3 as reference, good pipelines at `fail` went from 28 to

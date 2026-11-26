@@ -270,6 +270,15 @@ collapse는 여전히 결과를 채우는 중복 행이라는 뜻입니다. 모�
 항목(norms, rogue dimensions, metric mismatch, ANN recall, query shift)은 이 방식으로 설명하지
 않습니다.
 
+`effective_rank`는 공간 전체를 보는 항목이라, 좁은 코퍼스(과학 한 분야, 상품 한 카테고리)에서는
+모든 모델의 값이 낮아집니다. 이 항목이 `fail`이고 기준 모델이 `warn`이면 한 단계 낮춰 `warn`으로
+둡니다. 텍스트 출력에 `PARTLY EXPLAINED BY THE ROWS`가 붙고,
+`details.reference.verdict_without_reference`에 `fail`이 남습니다. 행 단위 항목(collapse,
+outliers, 허브)은 중복·영벡터·결과를 채우는 행을 잡는 항목이라 기존의 엄격한 규칙을 그대로
+씁니다. 네 held-out 세트에서 이 규칙은 좋은 파이프라인 10개와 나쁜 파이프라인 17개에서 이 항목을
+낮췄고, 나쁜 파이프라인 1개는 `fail`이 없어졌습니다. 임베딩 전에 동결한 다섯 번째 세트로
+확인합니다([검증](verification.md)).
+
 기준 모델은 해당 언어와 도메인에 공개 점수가 있는 모델로 고르십시오. 같은 결함을 가진 기준
 모델(그 언어를 지원하지 않는 다른 모델)은 실제 문제를 덮어 버립니다. 첫 held-out 세트에서
 bge-m3를 기준으로 쓰면 `fail`을 받은 좋은 파이프라인이 114개 중 28개에서 21개로 줄었고, `fail`을

@@ -205,8 +205,14 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
 - `--reference-tolerance SHARE` lists a side in `reference_regressions` when the lost share
   is beyond the tolerance and beyond 2 standard errors. The queries side decides when there
   are queries. A baseline without the reference is `reference_unchecked`. Both exit 1.
+- Below the tolerance, a lost share above 0.03 and 2 standard errors is listed in
+  `reference_review` (text: `REVIEW: a small loss is possible, check with labels`). It never
+  fails the gate; `change_decision` says a small loss is possible. On the faults of four
+  held-out sets it listed 80 of the 117 changes costing more than 0.02 nDCG@10 that 0.05 let
+  through, and 29 of 244 harmless changes; a fifth set, frozen before it was embedded, checks
+  it.
 - Without a tolerance, `change_decision` still says whether the agreed top hits were lost (at
-  0.05) or kept.
+  0.05), lost a little (above 0.03) or kept.
 
 Why the top hits and not the whole list: a harmless change such as truncated or quantized
 vectors reshuffles the lower ranks, where the two models never agreed, and a harmful one
@@ -224,7 +230,7 @@ AUC 0.97 and flagged 72% of the faults costing more than 0.02 and 1 of 48 harmle
 check with labels", not as a measured loss:
 
 - It misses small losses spread over the lower ranks: most truncation and quantization
-  faults that cost 0.01 to 0.02 nDCG@10.
+  faults that cost 0.01 to 0.02 nDCG@10. `reference_review` lists some of them for review.
 - It catches about half of the lost-row faults (5% zero vectors); the findings catch those.
 - It cannot see rows that are wrong for both models. Duplicated rows show up in the
   reference too; `collapse` finds those.

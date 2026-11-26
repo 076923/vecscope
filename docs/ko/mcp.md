@@ -80,6 +80,7 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 것입니다. 기준 모델도 걸린 항목은 `details.reference`와 함께 ok로 읽히고, 요약에 행 탓으로 설명된
 항목으로 나옵니다. 두 쪽 모두 질의가 있으면, 기준 모델이 같은 질의에서 이 파이프라인 상위 결과의
 40% 이상을 돌려줄 때 여전히 `fail`인 허브 항목을 `warn`으로 낮춥니다(`reference.agreement`).
+`effective_rank`가 `fail`이고 기준 모델이 `warn`이면 `warn`으로 읽힙니다.
 [짧은 텍스트와 좁은 도메인](usage.md#짧은-텍스트와-좁은-도메인-기준-모델)을
 참고하십시오. `result_sample`은 그만큼의 질의와 행의 정확 top-k를 서버 메모리에 감사 결과와 함께
 보관합니다(응답에는 개수만 나옵니다). 나중에 그 `audit_id`를 `baseline`으로 넘기면
@@ -89,6 +90,8 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 `reference_path`를 주면 diff가 이 파이프라인과 기준 모델이 합의한 상위 결과 중 새 실행이 잃은 수도
 알려 줍니다(`result_agreement.<side>.reference_top_hit`). `reference_tolerance`(예: 0.05)를 주면
 그보다 큰 비율을 잃었을 때 해로울 가능성이 높다고 표시합니다(요약에 `AGREED TOP HITS LOST`).
+0.03을 넘는 더 작은 손실은 `reference_review`에 넣고 실패시키지 않습니다(요약에 작은 손실이 있을
+수 있다고 나옵니다).
 [라벨 없이](ci.md#라벨-없이-기준-모델과-합의한-상위-결과를-잃었는가)를 참고하십시오.
 `retrieval_confidence`(예: 0.95, `retrieval_tolerances`와 함께)는 라벨 하락을 라벨 질의의 잡음과
 견주어 판정하고, 판가름 나지 않으면 `retrieval_inconclusive`로 알립니다.
