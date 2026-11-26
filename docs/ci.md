@@ -216,9 +216,11 @@ overlap; on the preregistered third held-out set it flagged 44% of the harmless 
 of the three held-out sets (duplicates left out), the lost share of agreed top hits separated
 harmful from harmless changes at AUC 0.91, where the drop of the whole overlap did at 0.86
 and the share of changed results at 0.51. At 0.05 it flagged 72% to 83% of the faults that
-cost more than 0.02 nDCG@10 per set and 5% to 8% of the harmless ones. These numbers come
-from the data the rule was designed on; a fourth held-out set, frozen before it was
-embedded, checks it ([Verification](verification.md)). Read a loss as "likely harmful,
+cost more than 0.02 nDCG@10 per set and 5% to 8% of the harmless ones. Those sets were
+the design data. On a fourth held-out set, frozen before it was embedded
+([Verification](verification.md#a-fourth-held-out-set-preregistered)), it separated them at
+AUC 0.97 and flagged 72% of the faults costing more than 0.02 and 1 of 48 harmless ones
+(2%), where the whole-overlap drop flagged 21 of 48. Read a loss as "likely harmful,
 check with labels", not as a measured loss:
 
 - It misses small losses spread over the lower ranks: most truncation and quantization

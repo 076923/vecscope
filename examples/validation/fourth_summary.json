@@ -1,0 +1,283 @@
+{
+ "pipelines": 154,
+ "good": 59,
+ "bad": 40,
+ "query_hubness_chance": {
+  "datasets": [
+   [
+    "litsearch",
+    7.31
+   ]
+  ],
+  "good_flagged_threshold_only": 4,
+  "good_flagged_rule": 0,
+  "bad_fail_threshold_only": 0,
+  "bad_fail_rule": 0
+ },
+ "reference_rule": {
+  "without": {
+   "good_fail": 14,
+   "good_flagged": 46,
+   "bad_fail": 38,
+   "bad_flagged": 40
+  },
+  "before_agreement": {
+   "good_fail": 8,
+   "good_flagged": 18,
+   "bad_fail": 38,
+   "bad_flagged": 40
+  },
+  "final": {
+   "good_fail": 2,
+   "good_flagged": 18,
+   "bad_fail": 38,
+   "bad_flagged": 40
+  }
+ },
+ "P8_agreed_top_hits": {
+  "faults": 222,
+  "without_duplicates": 185,
+  "harmful": 137,
+  "harmless": 48,
+  "drop_over_002": 116,
+  "auc_top_hit_z": 0.9708029197080292,
+  "auc_overlap_drop_z": 0.8074817518248175,
+  "auc_changed_share": 0.43316605839416056,
+  "flagged_of_drop_over_002": 83,
+  "flagged_of_harmless": 1,
+  "old_rule_flagged_of_drop_over_002": 97,
+  "old_rule_flagged_of_harmless": 21,
+  "by_fault": {
+   "query_model": {
+    "harmful": 32,
+    "flagged": 28,
+    "harmless_flagged": 0,
+    "of": 37
+   },
+   "truncate": {
+    "harmful": 20,
+    "flagged": 5,
+    "harmless_flagged": 1,
+    "of": 37
+   },
+   "zero_rows": {
+    "harmful": 37,
+    "flagged": 16,
+    "harmless_flagged": 0,
+    "of": 37
+   },
+   "duplicates": {
+    "harmful": 37,
+    "flagged": 0,
+    "harmless_flagged": 0,
+    "of": 37
+   },
+   "id_shift": {
+    "harmful": 37,
+    "flagged": 37,
+    "harmless_flagged": 0,
+    "of": 37
+   },
+   "quantize": {
+    "harmful": 11,
+    "flagged": 2,
+    "harmless_flagged": 0,
+    "of": 37
+   }
+  },
+  "testable": true,
+  "pass_a": true,
+  "pass_b": true,
+  "pass_c": true
+ },
+ "P9_agreement_rule": {
+  "good_fail_with_reference": 8,
+  "good_cleared": 6,
+  "bad_fail_with_reference": 38,
+  "bad_kept": 38,
+  "good_fail_left": [
+   "litsearch Qwen3-Embedding-0.6B (agreement 0.35): effective_rank",
+   "litsearch bge-base-en-v1.5 (agreement 0.32): effective_rank"
+  ],
+  "agreement_good": [
+   0.309,
+   0.323,
+   0.326,
+   0.348,
+   0.396,
+   0.396,
+   0.43,
+   0.431,
+   0.433,
+   0.443,
+   0.444,
+   0.445,
+   0.45,
+   0.45,
+   0.455,
+   0.455,
+   0.46,
+   0.464,
+   0.464,
+   0.465,
+   0.48,
+   0.48,
+   0.484,
+   0.49,
+   0.505,
+   0.507,
+   0.538,
+   0.543,
+   0.55,
+   0.55,
+   0.555,
+   0.558,
+   0.558,
+   0.559,
+   0.566,
+   0.574,
+   0.576,
+   0.589,
+   0.591,
+   0.595,
+   0.595,
+   0.612,
+   0.612,
+   0.613,
+   0.613,
+   0.627,
+   0.627,
+   0.648,
+   0.65,
+   0.683,
+   0.75,
+   0.778,
+   0.786,
+   0.786,
+   0.794,
+   0.799,
+   0.805,
+   0.822,
+   0.828
+  ],
+  "agreement_bad": [
+   0.004,
+   0.005,
+   0.008,
+   0.013,
+   0.018,
+   0.019,
+   0.027,
+   0.028,
+   0.033,
+   0.034,
+   0.035,
+   0.039,
+   0.039,
+   0.041,
+   0.042,
+   0.045,
+   0.046,
+   0.049,
+   0.051,
+   0.056,
+   0.057,
+   0.058,
+   0.068,
+   0.076,
+   0.079,
+   0.084,
+   0.09,
+   0.097,
+   0.098,
+   0.101,
+   0.102,
+   0.104,
+   0.109,
+   0.11,
+   0.112,
+   0.141,
+   0.155,
+   0.179,
+   0.202,
+   0.225
+  ],
+  "auc_agreement_good_vs_bad": 1.0,
+  "testable_a": true,
+  "testable_b": true,
+  "pass_a": true,
+  "pass_b": true,
+  "faults_harmful": 174,
+  "faults_caught_before_agreement": 100,
+  "faults_still_caught": 100,
+  "testable_c": true,
+  "pass_c": true
+ },
+ "labeled_confidence": {
+  "cases": {
+   "harmful": 174,
+   "harmless": 48
+  },
+  "share": {
+   "mean": {
+    "harmful": {
+     "fail": 0.9303448275857774,
+     "inconclusive": 0.0,
+     "pass": 0.06965517241379594
+    },
+    "harmless": {
+     "fail": 0.2433333333333422,
+     "inconclusive": 0.0,
+     "pass": 0.7566666666666694
+    }
+   },
+   "confidence": {
+    "harmful": {
+     "fail": 0.8123275862065744,
+     "inconclusive": 0.17919540229883954,
+     "pass": 0.008477011494252819
+    },
+    "harmless": {
+     "fail": 0.13124999999999767,
+     "inconclusive": 0.6128124999999673,
+     "pass": 0.25593750000001086
+    }
+   }
+  }
+ },
+ "P10_determinism": {
+  "reruns": [
+   {
+    "dataset": "cqadupstack-android",
+    "model": "Qwen3-Embedding-0.6B",
+    "identical": true
+   },
+   {
+    "dataset": "feedbackqa",
+    "model": "KURE-v1",
+    "identical": true
+   },
+   {
+    "dataset": "hunsum2",
+    "model": "KURE-v1",
+    "identical": true
+   },
+   {
+    "dataset": "webfaq-msa",
+    "model": "KURE-v1",
+    "identical": true
+   },
+   {
+    "dataset": "wikipedia-fa",
+    "model": "KURE-v1",
+    "identical": true
+   },
+   {
+    "dataset": "wikipedia-it",
+    "model": "KURE-v1",
+    "identical": true
+   }
+  ],
+  "pass": true
+ }
+}

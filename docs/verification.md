@@ -9,7 +9,8 @@ areas:
    published tables against float64 and against a full recomputation
 2. [Thresholds and retrieval quality](#2-thresholds-and-retrieval-quality): every finding
    against nDCG@10 on labeled data, the query findings, what retrieval does when a plan
-   step is applied, and the defaults on 19 held-out public datasets
+   step is applied, the defaults on 19 held-out public datasets and three preregistered
+   held-out sets
 3. [Sampled audits](#3-sampled-audits): what a sample can and cannot stand for
 4. [ANN recall and index sweeps](#4-ann-recall-and-index-sweeps): the recall scorer and the
    sweep
@@ -456,6 +457,94 @@ What this changes:
 - The chance rule for `query_hubness` held on its first test: on small query sets, trust it
   over the thresholds alone.
 
+### A fourth held-out set, preregistered
+
+The third set left two problems. The overlap drop flagged 44% of the harmless faults (P5b
+failed), and a hub that a good model makes stayed at `fail` with the reference rule (6 good
+pipelines on the second set and 6 on the third). Two changes were designed on the first three
+sets:
+
+- **Agreed top hits:** the share of the agreed top hits that the new run lost
+  (`reference_top_hit`, flagged above 0.05 and 2 standard errors). An agreed top hit is the
+  reference's first result, counted only when it is also in the baseline top-10.
+- **Retrieval agreement:** a hub finding still at `fail` is lowered to `warn` when the
+  reference returns at least 40% of the pipeline's top-10 for the same queries.
+
+The code, the thresholds and the criteria were committed
+([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_fourth.md))
+before eleven more public datasets were downloaded:
+
+- six with at most 25k documents, used for the injected faults:
+  - CQADupStack Android
+  - FeedbackQA
+  - HunSum2 (Hungarian)
+  - Wikipedia Italian and Persian
+  - WebFAQ Malay
+- five larger sets:
+  - WebFAQ Hebrew, Greek and Hungarian
+  - RuBQ (Russian)
+  - LitSearch
+
+They were run once with the same 14 models: 154 pipelines, 59 good and 40 bad.
+`examples/validation/fourth.py` scores the criteria (`fourth_summary.json`). It ran unchanged
+from the frozen commit, and no bug was found in it after the freeze. Every criterion passed.
+
+| prediction | criterion | result |
+|---|---|---|
+| P8a agreed top hits, separation | z of the lost share separates harmful from harmless faults at AUC 0.85 or more | passed: 0.971 (overlap drop 0.807, changed share 0.433) |
+| P8b same at 0.05 | at least 65% of the faults costing more than 0.02 flagged, at most 15% of the harmless ones | passed: 83 of 116 (72%), and 1 of 48 harmless (2%) |
+| P8c against the overlap drop | harmless faults flagged at most half as often as by the overlap drop at 0.02 | passed: 1 of 48, against 21 of 48 (44%) |
+| P9a agreement, good | at least half of the good pipelines at `fail` with the reference end without a `fail` | passed: 6 of 8 |
+| P9b same, bad | at least 95% of the bad pipelines at `fail` with the reference stay at `fail` | passed: 38 of 38 |
+| P9c same, faults | at least 95% of the harmful faults the findings caught are still caught | passed: 100 of 100 |
+| P10 determinism | the audit with reference, result sample and qrels gives identical JSON twice | passed: 6 of 6 |
+
+The faults were the six of `faults.py` on 37 good pipelines (222 runs; 185 without the
+duplicates, of which 137 were harmful and 48 harmless). By fault, at 0.05:
+
+| fault | runs | nDCG@10 drop above 0.01 | harmful flagged | harmless flagged |
+|---|---|---|---|---|
+| query model swapped | 37 | 32 | 28 | 0 of 5 |
+| id mapping lost (10% of rows) | 37 | 37 | 37 | none harmless |
+| truncated to half the dimensions | 37 | 20 | 5 | 1 of 17 |
+| quantized to 4 bits | 37 | 11 | 2 | 0 of 26 |
+| 5% zero rows | 37 | 37 | 16 | none harmless |
+| 20% duplicated rows | 37 | 37 | 0 | none harmless |
+
+- The rule now almost never flags a harmless change: truncation and quantization moved the
+  results away from the reference without losing the agreed top hits.
+- The cost is recall of small losses. The overlap drop flagged 97 of the 116 faults costing
+  more than 0.02, and the agreed top hits flagged 83. Truncations and quantizations that cost
+  nDCG@10 mostly lose relevant results below the agreed first hit, and the rule does not see
+  them.
+- Zero rows: still caught only 16 of 37 times. The findings catch them.
+- Duplicates: unseen, as predicted.
+
+Good pipelines at `fail` went from 14 without a reference to 8 with the reference rule, and
+to 2 with the agreement rule. Neither of the 2 left is a hub: both are `effective_rank` on
+LitSearch (Qwen3 and bge-base-en-v1.5, agreement 0.35 and 0.32). Good pipelines flagged went
+from 46 to 18 of 59. Bad pipelines stayed at `fail` 38 of 40 times, the same as without a
+reference, and all 40 were still flagged. Across the 99 good and bad pipelines, the agreement
+separated good from bad at AUC 1.0. Good pipelines agreed 0.31 to 0.83 with the reference;
+bad pipelines agreed at most 0.23.
+
+Reported without predictions:
+
+- **Chance rule for `query_hubness`:** it applied only to LitSearch. It cleared the 4 good
+  pipelines that the thresholds alone flagged; no bad pipeline was at `fail` there.
+- **Labeled gate at 0.95, with 100 labeled queries:**
+  - harmful faults, duplicates included: 0.8% passed, against 7.0% with the mean alone
+  - harmless faults: 13.1% failed, against 24.3% with the mean alone
+
+What this changes:
+
+- `reference_regressions` at 0.05 is a usable label-free gate on unseen data: in this test
+  it flagged 72% of the large losses and 2% of the harmless changes. Do not read its silence
+  as "no harm", because it misses lost rows, duplicates and small losses below the first
+  hit. Keep the findings and, where possible, labeled queries.
+- With a reference and queries, hub findings that a good model makes no longer fail the
+  audit. A finding of any other kind keeps its verdict.
+
 ## 3. Sampled audits
 
 | claim | result |
@@ -567,11 +656,19 @@ not that every agent follows them.
   explained away. That set is no longer blind for the reference rule either.
 - The label-free result change detects change, not harm (AUC 0.58 between harmful and
   harmless faults); gate on it only where results must not change.
-- The overlap with a reference model is a sign of harm, not a measure of it. On the third
-  set ([preregistered](#a-third-held-out-set-preregistered)) it separated harmful from
-  harmless faults at AUC 0.80, but at 0.02 it flagged 44% of the harmless ones (prediction
-  P5b failed), mostly truncation and quantization, and it missed 17 of 24 harmful zero-row
-  faults and every duplicate fault.
+- The agreed top hits are a sign of harm, not a measure of it. The whole-list overlap
+  flagged 44% of the harmless faults on the third set
+  ([preregistered](#a-third-held-out-set-preregistered), prediction P5b failed). The agreed
+  top hits replaced it, and on the fourth set
+  ([preregistered](#a-fourth-held-out-set-preregistered)) flagged 2% of the harmless faults
+  and 72% of those costing more than 0.02. They miss small losses below the reference's
+  first result (5 of 20 harmful truncations and 2 of 11 harmful quantizations flagged), 21 of
+  37 zero-row faults and every duplicate fault.
+- The retrieval agreement rule left 2 of 59 good pipelines at `fail` on the fourth set, both
+  on `effective_rank`, which it does not lower. Its threshold of 0.40 was set on the first
+  three sets; on the fourth, good pipelines agreed at 0.31 or more and bad ones at 0.23 or
+  less, so the margin is narrow at the low end. It needs query embeddings from both
+  models.
 - The labeled gate judged against noise passed its test with 100 labeled queries; with
   fewer, most changes are inconclusive, and it assumes the labeled queries are a random
   sample of the traffic.
@@ -620,6 +717,10 @@ not that every agent follows them.
   `examples/validation/preregistration_third.md`, then `third.py`, which injects the faults,
   scores P1 and P5 to P7 and writes `examples/validation/third_summary.json` (about two hours
   on one L4 after the embeddings).
+- The fourth held-out set: `run.py` on the eleven datasets of
+  `examples/validation/preregistration_fourth.md`, then `fourth.py`, which injects the faults,
+  scores P8 to P10 and writes `examples/validation/fourth_summary.json` (about 80 minutes on
+  one L4 after the embeddings).
 - The 19-model, nine-dataset, query-finding and intervention runs use a harness that is not
   shipped with the package. The behavior they set is pinned by tests instead:
   - `tests/test_query_findings.py` (query_gap and query_shift)

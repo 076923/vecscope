@@ -300,9 +300,11 @@ is lowered to `warn` when that agreement is 0.40 or more: the text output says
 `fail`. Over 490 public pipelines of the three held-out sets the agreement separated good
 from bad pipelines at AUC 0.999; no bad pipeline at `fail` reached 0.32, and 9 of the 12
 good pipelines left at `fail` on the second and third sets agreed at 0.40 or more. The hubs
-are still there, so the verdict is `warn`, not `ok`. This rule was designed on those sets; a
-fourth held-out set, frozen before it was embedded, checks it
-([Verification](verification.md)).
+are still there, so the verdict is `warn`, not `ok`. This rule was designed on those sets.
+On a fourth held-out set, frozen before it was embedded
+([Verification](verification.md#a-fourth-held-out-set-preregistered)), it cleared 6 of the 8
+good pipelines at `fail` with the reference and kept all 38 bad ones at `fail`. The 2 left
+were `effective_rank`, which it does not lower.
 
 ## Use as a library
 

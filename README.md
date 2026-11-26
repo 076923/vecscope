@@ -190,7 +190,9 @@ read ok ([reference model](https://076923.github.io/vecscope/usage/#short-texts-
 On a preregistered public set it cleared most flags on good pipelines but no `fail`. With
 queries, a hub finding still at `fail` is lowered to `warn` when the reference returns at
 least 40% of the pipeline's top results for the same queries; any other finding still at
-`fail` is the model's own, and labeled queries decide what it costs.
+`fail` is the model's own, and labeled queries decide what it costs. On a fourth
+preregistered set this cleared 6 of 8 good pipelines left at `fail` and kept every bad one
+at `fail`.
 
 Override any pair per run, or derive them from your own data with
 [`vecscope calibrate`](https://076923.github.io/vecscope/quality/#calibrating-thresholds-to-your-domain):
@@ -252,8 +254,10 @@ model on the baseline `--reference-tolerance 0.05` flags a change that lost the 
 pipeline and the reference agreed on, a label-free sign of harm
 ([CI](https://076923.github.io/vecscope/ci/)). On a preregistered unseen set the noise-aware
 gate met its criteria; the earlier label-free rule, the drop of the whole overlap, also
-flagged 44% of harmless changes, which is why it now looks at the agreed top hits; read either
-as "check with labels" ([Verification](https://076923.github.io/vecscope/verification/)).
+flagged 44% of harmless changes, which is why it now looks at the agreed top hits. On a
+fourth preregistered set the agreed top hits flagged 72% of changes costing more than 0.02
+nDCG@10 and 2% of harmless ones; read a flag as "check with labels" and its absence as no
+proof ([Verification](https://076923.github.io/vecscope/verification/)).
 
 On GitHub the same gate is an Action:
 

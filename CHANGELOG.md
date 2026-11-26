@@ -44,7 +44,12 @@ All notable changes to this project are documented here. The format follows
   bad pipeline at `fail` above 0.31, 9 of the 12 good pipelines left at `fail` cleared.
 - A fourth held-out set (eleven public datasets, `role="fourth"`) frozen with its criteria in
   `examples/validation/preregistration_fourth.md` before it was embedded, scored by
-  `examples/validation/fourth.py`.
+  `examples/validation/fourth.py`. Results (`fourth_summary.json`, docs/verification.md), all
+  passed: P8 (agreed top hits AUC 0.971 against 0.807 for the overlap drop; at 0.05, 83 of
+  116 faults above 0.02 flagged and 1 of 48 harmless ones, against 21 of 48 for the overlap
+  drop); P9 (retrieval agreement cleared 6 of 8 good pipelines at `fail` with the reference,
+  kept 38 of 38 bad ones at `fail` and lost none of the 100 harmful faults the findings
+  caught; the 2 left are `effective_rank`); P10 (6 of 6 identical reruns).
 - A third held-out set (nine public datasets, `role="third"`) frozen with its criteria in
   `examples/validation/preregistration_third.md` before it was embedded, scored by
   `examples/validation/third.py`. Results (`third_summary.json`, docs/verification.md): P1 passed (the
