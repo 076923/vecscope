@@ -258,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument(
         "--reference-tolerance",
         type=float,
-        metavar="DROP",
+        metavar="SHARE",
         help="allowed share of lost agreed top hits, e.g. 0.05: of the sampled queries whose "
         "baseline results held the --reference model's first result, the share whose results "
         "no longer do; a larger loss (beyond 2 standard errors) is a likely harmful change "

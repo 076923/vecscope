@@ -182,45 +182,50 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 500 \
   number. Without labels its `change_decision` is `needs_review` and cites the changed
   share; the labeled gate above decides whether it is better.
 
-### Without labels: did the results move away from a reference model?
+### Without labels: did the change lose the top hits a reference model agrees on?
 
 A reference model can stand in for labels. Embed the same rows and queries with a second,
-independently good public model, and pass it on both runs:
+independently good public model, and pass it when you write the baseline:
 
 ```bash
 vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
   --reference ref.npy --reference-queries ref_q.npy --json > baseline.json
-# after the change
+# after the change: only the baseline needs the reference
 vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
-  --reference ref.npy --reference-queries ref_q.npy \
-  --baseline baseline.json --fail-on none --reference-tolerance 0.02
+  --baseline baseline.json --fail-on none --reference-tolerance 0.05
 ```
 
-- Each run stores, per sampled query and row, how much of its top-k the reference returns
-  too (`result_sample.reference_overlap`).
-- The diff gives, per side, `result_agreement.<side>.reference`: the overlap before and
-  after, the paired drop and its z.
-- `--reference-tolerance DROP` lists a side in `reference_regressions` when the drop is
-  beyond the tolerance and beyond 2 standard errors. The queries side decides when there are
-  queries. A run without reference overlap is `reference_unchecked`. Both exit 1.
-- Without a tolerance, `change_decision` still says whether the results moved away (at
-  0.02) or kept the overlap.
+- The baseline stores, per sampled query and row, the reference's first result
+  (`result_sample.reference_first`). Where that result is also in the pipeline's top-k,
+  both models agree on it: an agreed top hit.
+- The diff gives, per side, `result_agreement.<side>.reference_top_hit`: how many items had
+  an agreed top hit, how many of those the new run no longer returns, the lost share and
+  its z. With the reference on both runs, `result_agreement.<side>.reference` also gives the
+  overlap with the reference before and after, for information.
+- `--reference-tolerance SHARE` lists a side in `reference_regressions` when the lost share
+  is beyond the tolerance and beyond 2 standard errors. The queries side decides when there
+  are queries. A baseline without the reference is `reference_unchecked`. Both exit 1.
+- Without a tolerance, `change_decision` still says whether the agreed top hits were lost (at
+  0.05) or kept.
 
-On the first held-out set's injected faults, duplicates left out, the drop's z separated
-harmful from harmless changes at AUC 0.875, where the share of changed results did at 0.56.
-At 0.02 it flagged 79% of the faults that cost more than 0.02 nDCG@10, and 24% of the
-harmless ones. On the preregistered third held-out set it separated them at AUC 0.80 (the
-changed share at 0.47) and flagged 79% of the faults above 0.02, but also 44% of the
-harmless ones, mostly truncated or quantized vectors that moved away from the reference
-without costing nDCG@10
-([Verification](verification.md#a-third-held-out-set-preregistered)). Read it as "likely
-harmful, check with labels", not as a measured loss or a failure on its own:
+Why the top hits and not the whole list: a harmless change such as truncated or quantized
+vectors reshuffles the lower ranks, where the two models never agreed, and a harmful one
+loses the results both models put first. An earlier version gated on the drop of the whole
+overlap; on the preregistered third held-out set it flagged 44% of the harmless faults
+([Verification](verification.md#a-third-held-out-set-preregistered)). On the injected faults
+of the three held-out sets (duplicates left out), the lost share of agreed top hits separated
+harmful from harmless changes at AUC 0.91, where the drop of the whole overlap did at 0.86
+and the share of changed results at 0.51. At 0.05 it flagged 72% to 83% of the faults that
+cost more than 0.02 nDCG@10 per set and 5% to 8% of the harmless ones. These numbers come
+from the data the rule was designed on; a fourth held-out set, frozen before it was
+embedded, checks it ([Verification](verification.md)). Read a loss as "likely harmful,
+check with labels", not as a measured loss:
 
-- It misses lost rows: 5% zero vectors lowered the overlap by about 0.02 while costing 0.04
-  nDCG@10. The findings catch those.
+- It misses small losses spread over the lower ranks: most truncation and quantization
+  faults that cost 0.01 to 0.02 nDCG@10.
+- It catches about half of the lost-row faults (5% zero vectors); the findings catch those.
 - It cannot see rows that are wrong for both models. Duplicated rows show up in the
   reference too; `collapse` finds those.
-- A change that makes the pipeline better than the reference also lowers the overlap.
 - The reference must be made from the source texts, independently of the pipeline under
   test. A reference built from the same faulty export shares the fault.
 
@@ -236,8 +241,8 @@ Two different rules can fail a run, and the output keeps them apart:
   `result_regressions` (sampled results changed beyond `--result-tolerance`),
   `result_unchecked` (a run had no `--result-sample`), `retrieval_inconclusive` (the
   labeled queries could not settle a tolerance under `--retrieval-confidence`),
-  `reference_regressions` (results moved away from the reference beyond
-  `--reference-tolerance`) and `reference_unchecked` (a run had no reference overlap).
+  `reference_regressions` (agreed top hits lost beyond `--reference-tolerance`) and
+  `reference_unchecked` (the baseline had no reference results).
 
 The defaults are calibrated on public models, so a domain whose healthy corpus sits at `warn`
 or `fail` on some finding should not be blocked by the absolute rule at all.

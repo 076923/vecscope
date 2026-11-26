@@ -79,16 +79,20 @@ the baseline, different qrels or k) in `retrieval_unchecked`, and the summary sa
 
 `reference_path` (and `reference_queries_path`) is the same rows embedded by another,
 independently good model: findings it reaches too read ok with `details.reference`, and the
-summary lists them as explained by the rows; see
+summary lists them as explained by the rows. With queries on both, a hub finding still at
+`fail` is lowered to `warn` when the reference returns at least 40% of this pipeline's top
+results for the same queries (`reference.agreement`); see
 [Short texts and narrow domains](usage.md#short-texts-and-narrow-domains-a-reference-model).
 `result_sample` keeps the exact top-k of that many sampled queries and rows with the audit in
 the server's memory (the response only counts them); a later call with that `audit_id` as
 `baseline` reports `baseline_diff.result_agreement`, and `result_tolerance` turns it into a
 check (`RESULTS CHANGED` in the summary). It measures change, not harm; see
 [Results that must not change](ci.md#results-that-must-not-change). With `reference_path` on
-both calls, the diff also says how far the sampled results moved from the reference model's
-(`result_agreement.<side>.reference`), and `reference_tolerance` (e.g. 0.02) flags a drop
-beyond it as likely harmful (`AWAY FROM THE REFERENCE` in the summary). `retrieval_confidence`
+the baseline call, the diff also says how many of the top hits this pipeline and the
+reference agreed on the new run lost (`result_agreement.<side>.reference_top_hit`), and
+`reference_tolerance` (e.g. 0.05) flags a lost share beyond it as likely harmful
+(`AGREED TOP HITS LOST` in the summary); see
+[Without labels](ci.md#without-labels-did-the-change-lose-the-top-hits-a-reference-model-agrees-on). `retrieval_confidence`
 (e.g. 0.95, with `retrieval_tolerances`) judges a labeled drop against the noise of the
 labeled queries and reports `retrieval_inconclusive` when they cannot settle it; see
 [Judging a drop against the noise of the labeled queries](ci.md#judging-a-drop-against-the-noise-of-the-labeled-queries).

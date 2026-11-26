@@ -70,16 +70,22 @@ In CI:
   pipeline that must return the same results (re-index, refactor, upgrade). It catches a lost
   id mapping that no finding sees. Never report a small changed share as "safe".
 - Without labels but with a reference model (same rows and queries embedded by a second,
-  independently good public model, made from the source texts), pass `--reference` and
-  `--reference-queries` with `--result-sample` on both runs: the diff gives
-  `result_agreement.<side>.reference` (overlap with the reference before and after, drop, z)
-  and `--reference-tolerance 0.02` (MCP `reference_tolerance`) lists a drop beyond it in
-  `reference_regressions`. Report it as "results moved away from the reference: likely
-  harmful, check with labels", and a held overlap as "no sign of harm", never as proof. It
-  does not see duplicated rows (`collapse` does) or most lost rows (zero vectors; the
-  findings do). On a preregistered unseen set it ranked harm at AUC 0.80 but flagged 44% of
-  harmless changes at 0.02 (mostly truncation and quantization), so never block a merge on
-  `reference_regressions` alone: ask for labels.
+  independently good public model, made from the source texts), audit the baseline with
+  `--reference`, `--reference-queries` and `--result-sample`; the new run needs
+  `--result-sample`. The diff gives `result_agreement.<side>.reference_top_hit`: of the
+  sampled queries whose baseline top-k held the reference's first result (a top hit both
+  models agree on), how many the new run lost. `--reference-tolerance 0.05` (MCP
+  `reference_tolerance`) lists a lost share beyond it in `reference_regressions`. Report it
+  as "lost the top hits the reference agrees on: likely harmful, check with labels", and
+  kept hits as "no sign of harm", never as proof. It misses small losses spread over lower
+  ranks, about half of the lost-row faults (zero vectors; the findings catch them) and
+  duplicated rows (`collapse` does). Designed on three held-out sets (72% to 83% of drops
+  above 0.02 flagged, 5% to 8% of harmless changes); a preregistered fourth set checks it.
+- With `--reference-queries`, a hub finding (`hubness`, `query_hubness`, `antihubs`) still
+  at `fail` reads `warn` when the reference returns at least 40% of the pipeline's top
+  results for the same queries (`reference.agreement`, `TOLERATED BY RETRIEVAL AGREEMENT`).
+  Report it as "real hubs that do not keep the pipeline from finding what the reference
+  finds", not as healthy; labeled retrieval says what they cost.
 - Pick tolerances from measured retrieval quality ("Calibrating thresholds to your domain" in
   https://076923.github.io/vecscope/quality/), not from what makes the pipeline green.
 - Two rules can fail a run and the `gate` block (JSON) or line (text) names which one did:

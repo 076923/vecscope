@@ -175,43 +175,46 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 500 \
   `change_decision`은 `needs_review`이고 바뀐 비율을 근거로 적습니다. 더 나아졌는지는 위의 라벨
   게이트가 정합니다.
 
-### 라벨 없이: 결과가 기준 모델에서 멀어졌는가
+### 라벨 없이: 기준 모델과 합의한 상위 결과를 잃었는가
 
 기준 모델이 라벨을 대신할 수 있습니다. 같은 행과 질의를 독립적으로 좋은 두 번째 공개 모델로
-임베딩해 두 실행 모두에 넘기십시오.
+임베딩하고, 기준선을 만들 때 넘깁니다.
 
 ```bash
 vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
   --reference ref.npy --reference-queries ref_q.npy --json > baseline.json
-# 변경 후
+# 변경 후: 기준 모델은 기준선에만 있으면 됩니다
 vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
-  --reference ref.npy --reference-queries ref_q.npy \
-  --baseline baseline.json --fail-on none --reference-tolerance 0.02
+  --baseline baseline.json --fail-on none --reference-tolerance 0.05
 ```
 
-- 각 실행은 표본 질의와 행마다, 그 top-k 중 기준 모델도 돌려주는 비율을 저장합니다
-  (`result_sample.reference_overlap`).
-- diff는 쪽마다 `result_agreement.<side>.reference`에 변경 전후 겹침, 짝지은 하락과 그 z를
-  줍니다.
-- `--reference-tolerance DROP`은 하락이 허용량을 넘고 표준오차 2배도 넘으면 그 쪽을
-  `reference_regressions`에 넣습니다. 질의가 있으면 질의 쪽으로 판정합니다. 기준 모델 겹침이 없는
-  실행은 `reference_unchecked`입니다. 둘 다 1로 끝납니다.
-- 허용량이 없어도 `change_decision`은 결과가 기준 모델에서 멀어졌는지(0.02 기준), 겹침을
-  유지했는지 적습니다.
+- 기준선은 표본 질의와 행마다 기준 모델의 1위 결과를 저장합니다(`result_sample.reference_first`).
+  그 결과가 파이프라인의 top-k에도 있으면 두 모델이 합의한 것이고, 이를 합의된 상위 결과라고
+  부릅니다.
+- 비교 결과에는 쪽마다 `result_agreement.<side>.reference_top_hit`가 들어갑니다. 합의된 상위
+  결과가 있던 항목 수, 그중 새 실행이 더 이상 돌려주지 않는 수, 잃은 비율과 그 z입니다. 두 실행
+  모두 기준 모델이 있으면 `result_agreement.<side>.reference`에 전후 겹침도 참고로 들어갑니다.
+- `--reference-tolerance SHARE`는 잃은 비율이 허용량을 넘고 표준오차 2배도 넘으면 그 쪽을
+  `reference_regressions`에 넣습니다. 질의가 있으면 질의 쪽으로 판정합니다. 기준 모델 없이 만든
+  기준선은 `reference_unchecked`입니다. 둘 다 1로 끝납니다.
+- 허용량이 없어도 `change_decision`은 합의된 상위 결과를 잃었는지(0.05 기준), 지켰는지 적습니다.
 
-첫 held-out 세트의 결함 주입(중복 제외)에서 이 하락의 z는 해로운 변경과 해롭지 않은 변경을
-AUC 0.875로 갈랐습니다. 바뀐 결과 비율은 0.56이었습니다. 0.02로 두면 nDCG@10을 0.02 넘게 떨어뜨린
-결함의 79%와 해롭지 않은 결함의 24%를 표시했습니다. 사전 등록한 세 번째 held-out 세트에서는
-AUC 0.80으로 갈랐고(바뀐 결과 비율은 0.47), 0.02 넘게 떨어뜨린 결함의 79%를 표시했지만 해롭지
-않은 결함도 44%를 표시했습니다. 대부분 nDCG@10 손해 없이 기준 모델에서 멀어진 차원 절단·양자화
-벡터였습니다([검증](verification.md#사전-등록한-세-번째-held-out-세트)). "해로울 가능성이 높으니
-라벨로 확인하라"로 읽고, 측정된 손해나 그 자체의 실패로 읽지 마십시오.
+목록 전체가 아니라 상위 결과를 보는 이유는 이렇습니다. 차원 절단이나 양자화 같은 해롭지 않은
+변경은 두 모델이 애초에 합의하지 않던 아래 순위를 뒤섞고, 해로운 변경은 두 모델이 모두 1위로
+꼽은 결과를 잃습니다. 이전 버전은 목록 전체 겹침의 하락으로 판정했는데, 사전 등록한 세 번째
+held-out 세트에서 해롭지 않은 결함의 44%를 표시했습니다([검증](verification.md#사전-등록한-세-번째-held-out-세트)).
+세 held-out 세트의 결함 주입(중복 제외)에서 합의된 상위 결과를 잃은 비율은 해로운 변경과
+해롭지 않은 변경을 AUC 0.91로 갈랐습니다. 목록 전체 겹침의 하락은 0.86, 바뀐 결과 비율은
+0.51이었습니다. 0.05로 두면 세트마다 nDCG@10을 0.02 넘게 떨어뜨린 결함의 72~83%와 해롭지 않은
+결함의 5~8%를 표시했습니다. 이 수치는 규칙을 설계한 데이터에서 나왔고, 임베딩 전에 동결한 네 번째
+held-out 세트로 확인합니다([검증](verification.md)). 잃었다는 신호는 "해로울 가능성이 높으니
+라벨로 확인하라"로 읽고, 측정된 손해로 읽지 마십시오.
 
-- 잃은 행은 놓칩니다. 영벡터 5%는 겹침을 0.02 정도만 낮췄지만 nDCG@10은 0.04 떨어뜨렸습니다.
-  이런 행은 진단 항목이 잡습니다.
+- 아래 순위에 흩어진 작은 손해는 놓칩니다. nDCG@10을 0.01~0.02 떨어뜨린 차원 절단·양자화
+  결함 대부분이 여기 해당합니다.
+- 잃은 행 결함(영벡터 5%)은 절반쯤 잡습니다. 이런 행은 진단 항목이 잡습니다.
 - 두 모델 모두에게 틀린 행은 보지 못합니다. 중복된 행은 기준 모델에도 나타나며, 이런 행은
   `collapse`가 찾습니다.
-- 파이프라인이 기준 모델보다 나아지는 변경도 겹침을 낮춥니다.
 - 기준 모델은 시험 대상 파이프라인과 독립적으로, 원본 텍스트에서 만들어야 합니다. 같은 잘못된
   내보내기에서 만든 기준 모델은 같은 결함을 공유합니다.
 
@@ -225,9 +228,9 @@ AUC 0.80으로 갈랐고(바뀐 결과 비율은 0.47), 0.02 넘게 떨어뜨린
   `value_regressions`, 라벨 검색 지표가 허용량 이상 떨어진 `retrieval_regressions`, 검색 품질
   허용량을 확인하지 못한 `retrieval_unchecked`, 표본 검색 결과가 `--result-tolerance` 이상 바뀐
   `result_regressions`, 어느 실행에 `--result-sample`이 없던 `result_unchecked`,
-  `--retrieval-confidence`에서 라벨 질의로 판가름 나지 않은 `retrieval_inconclusive`, 결과가 기준
-  모델에서 `--reference-tolerance` 이상 멀어진 `reference_regressions`, 어느 실행에 기준 모델
-  겹침이 없던 `reference_unchecked`입니다.
+  `--retrieval-confidence`에서 라벨 질의로 판가름 나지 않은 `retrieval_inconclusive`, 합의된 상위
+  결과를 `--reference-tolerance` 넘게 잃은 `reference_regressions`, 기준선에 기준 모델 결과가
+  없던 `reference_unchecked`입니다.
 
 기본 임곗값은 공개 모델로 보정한 값이라, 정상적인 코퍼스가 어떤 항목에서 늘 `warn`이나
 `fail`에 걸리는 도메인이라면 절대 규칙으로 막으면 안 됩니다. 이때는

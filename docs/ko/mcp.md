@@ -78,15 +78,18 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 
 `reference_path`(와 `reference_queries_path`)는 같은 행을 독립적으로 좋은 다른 모델로 임베딩한
 것입니다. 기준 모델도 걸린 항목은 `details.reference`와 함께 ok로 읽히고, 요약에 행 탓으로 설명된
-항목으로 나옵니다. [짧은 텍스트와 좁은 도메인](usage.md#짧은-텍스트와-좁은-도메인-기준-모델)을
+항목으로 나옵니다. 두 쪽 모두 질의가 있으면, 기준 모델이 같은 질의에서 이 파이프라인 상위 결과의
+40% 이상을 돌려줄 때 여전히 `fail`인 허브 항목을 `warn`으로 낮춥니다(`reference.agreement`).
+[짧은 텍스트와 좁은 도메인](usage.md#짧은-텍스트와-좁은-도메인-기준-모델)을
 참고하십시오. `result_sample`은 그만큼의 질의와 행의 정확 top-k를 서버 메모리에 감사 결과와 함께
 보관합니다(응답에는 개수만 나옵니다). 나중에 그 `audit_id`를 `baseline`으로 넘기면
 `baseline_diff.result_agreement`가 붙고, `result_tolerance`를 주면 검사가 됩니다(요약에
 `RESULTS CHANGED`). 해로움이 아니라 변화를 잽니다.
-[결과가 바뀌면 안 되는 변경](ci.md#결과가-바뀌면-안-되는-변경)을 참고하십시오. 두 호출 모두에
-`reference_path`를 주면 diff가 표본 결과가 기준 모델의 결과에서 얼마나 멀어졌는지도 알려
-줍니다(`result_agreement.<side>.reference`). `reference_tolerance`(예: 0.02)를 주면 그보다 큰
-하락을 해로울 가능성이 높다고 표시합니다(요약에 `AWAY FROM THE REFERENCE`).
+[결과가 바뀌면 안 되는 변경](ci.md#결과가-바뀌면-안-되는-변경)을 참고하십시오. 기준선 호출에
+`reference_path`를 주면 diff가 이 파이프라인과 기준 모델이 합의한 상위 결과 중 새 실행이 잃은 수도
+알려 줍니다(`result_agreement.<side>.reference_top_hit`). `reference_tolerance`(예: 0.05)를 주면
+그보다 큰 비율을 잃었을 때 해로울 가능성이 높다고 표시합니다(요약에 `AGREED TOP HITS LOST`).
+[라벨 없이](ci.md#라벨-없이-기준-모델과-합의한-상위-결과를-잃었는가)를 참고하십시오.
 `retrieval_confidence`(예: 0.95, `retrieval_tolerances`와 함께)는 라벨 하락을 라벨 질의의 잡음과
 견주어 판정하고, 판가름 나지 않으면 `retrieval_inconclusive`로 알립니다.
 [라벨 질의의 잡음을 감안해 하락 판단하기](ci.md#라벨-질의의-잡음을-감안해-하락-판단하기)를

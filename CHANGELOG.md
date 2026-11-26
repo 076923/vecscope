@@ -18,16 +18,33 @@ All notable changes to this project are documented here. The format follows
   `change_decision` is then `needs_review`. Designed on the first held-out set's faults: at
   100 labeled queries 1% of harmful changes passed (8% with the mean alone) and 14% of
   harmless ones failed (24%).
-- The overlap with a reference model's results as a label-free sign of harm: with
-  `--reference` and `--result-sample`, each run stores per sampled query and row how much of
-  its top-k the reference returns too (`result_sample.reference_overlap`); the diff gives
-  `result_agreement.<side>.reference` (overlap before and after, paired drop, z), and
-  `--reference-tolerance DROP` (MCP `reference_tolerance`) lists a drop beyond it and beyond 2
-  standard errors in `reference_regressions` (`reference_unchecked` without overlap on both
-  runs). Without a tolerance, `change_decision` says whether results moved away (at 0.02).
-  Designed on the first held-out set: duplicates left out, AUC 0.875 between harmful and
-  harmless faults, where the changed share gave 0.56. The Action lists
-  `inconclusive:<metric>` in `retrieval-regressions`.
+- The top hits a pipeline and a reference model agree on, as a label-free sign of harm: with
+  `--reference` and `--result-sample`, the baseline stores per sampled query and row the
+  reference's first result (`result_sample.reference_first`) and how much of its top-k the
+  reference returns too (`result_sample.reference_overlap`). The diff gives
+  `result_agreement.<side>.reference_top_hit` (of the items whose baseline top-k held the
+  reference's first result, how many the new run lost, the share and z; only the baseline
+  needs the reference) and, with the reference on both runs,
+  `result_agreement.<side>.reference` (overlap before and after). `--reference-tolerance SHARE`
+  (MCP `reference_tolerance`) lists a lost share beyond it and beyond 2 standard errors in
+  `reference_regressions` (`reference_unchecked` when the baseline has no reference
+  results). Without a tolerance, `change_decision` says whether the agreed top hits were lost
+  (at 0.05). The first version, preregistered on the third held-out set, gated on the drop of
+  the whole overlap and flagged 44% of harmless faults (P5b failed); the agreed top hits were
+  then designed on the three held-out sets: AUC 0.91 between harmful and harmless faults
+  (overlap drop 0.86, changed share 0.51), 72% to 83% of drops above 0.02 flagged and 5% to
+  8% of harmless faults per set. The Action lists `inconclusive:<metric>` in
+  `retrieval-regressions`.
+- Retrieval agreement for hub findings: with queries and `--reference-queries`, the audit
+  measures the share of the pipeline's top-k the reference returns for the same 200 sampled
+  queries (`reference.agreement`), and a hub finding (`hubness`, `query_hubness`,
+  `antihubs`) still at `fail` after the reference rule reads `warn` at 0.40 or more
+  (`details.reference.verdict_before_agreement`, `TOLERATED BY RETRIEVAL AGREEMENT`). Designed
+  on 490 pipelines of the three held-out sets: AUC 0.999 between good and bad pipelines, no
+  bad pipeline at `fail` above 0.31, 9 of the 12 good pipelines left at `fail` cleared.
+- A fourth held-out set (eleven public datasets, `role="fourth"`) frozen with its criteria in
+  `examples/validation/preregistration_fourth.md` before it was embedded, scored by
+  `examples/validation/fourth.py`.
 - A third held-out set (nine public datasets, `role="third"`) frozen with its criteria in
   `examples/validation/preregistration_third.md` before it was embedded, scored by
   `examples/validation/third.py`. Results (`third_summary.json`, docs/verification.md): P1 passed (the

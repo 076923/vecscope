@@ -187,8 +187,10 @@ and a clean audit does not guarantee good search.
 On short or templated texts and narrow domains, pass the same rows embedded by a second good
 public model as `--reference`: findings that model reaches too are attributed to the rows and
 read ok ([reference model](https://076923.github.io/vecscope/usage/#short-texts-and-narrow-domains-a-reference-model)).
-On a preregistered public set it cleared most flags on good pipelines but no `fail`: a
-finding still at `fail` is the model's own, and labeled queries decide what it costs.
+On a preregistered public set it cleared most flags on good pipelines but no `fail`. With
+queries, a hub finding still at `fail` is lowered to `warn` when the reference returns at
+least 40% of the pipeline's top results for the same queries; any other finding still at
+`fail` is the model's own, and labeled queries decide what it costs.
 
 Override any pair per run, or derive them from your own data with
 [`vecscope calibrate`](https://076923.github.io/vecscope/quality/#calibrating-thresholds-to-your-domain):
@@ -246,12 +248,12 @@ points. Without labels, a pipeline that must return the same results (a re-index
 refactor) can gate on the results themselves with `--result-sample 500 --result-tolerance 0`;
 that number shows change, not harm. `--retrieval-confidence 0.95` judges a labeled drop
 against the noise of the labeled queries (fail, pass or inconclusive), and with a reference
-model on both runs `--reference-tolerance 0.02` flags results that moved away from the
-reference's, a label-free sign of harm
+model on the baseline `--reference-tolerance 0.05` flags a change that lost the top hits the
+pipeline and the reference agreed on, a label-free sign of harm
 ([CI](https://076923.github.io/vecscope/ci/)). On a preregistered unseen set the noise-aware
-gate met its criteria; the reference overlap ranked harm at AUC 0.80 but also flagged 44% of
-harmless changes, so read it as "check with labels"
-([Verification](https://076923.github.io/vecscope/verification/)).
+gate met its criteria; the earlier label-free rule, the drop of the whole overlap, also
+flagged 44% of harmless changes, which is why it now looks at the agreed top hits; read either
+as "check with labels" ([Verification](https://076923.github.io/vecscope/verification/)).
 
 On GitHub the same gate is an Action:
 

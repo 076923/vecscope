@@ -292,6 +292,18 @@ none of the 6 good pipelines at `fail` came down: they were hubs the model made,
 the reference on the same rows. A finding that stays at `fail` with a reference belongs to
 the model; labeled queries say whether it costs retrieval.
 
+With queries and `--reference-queries`, the reference also measures how much of this
+pipeline's top-k it returns for the same queries (`reference.agreement.queries`, over 200
+sampled queries). A hub finding (`hubness`, `query_hubness`, `antihubs`) still at `fail`
+is lowered to `warn` when that agreement is 0.40 or more: the text output says
+`TOLERATED BY RETRIEVAL AGREEMENT`, and `details.reference.verdict_before_agreement` keeps
+`fail`. Over 490 public pipelines of the three held-out sets the agreement separated good
+from bad pipelines at AUC 0.999; no bad pipeline at `fail` reached 0.32, and 9 of the 12
+good pipelines left at `fail` on the second and third sets agreed at 0.40 or more. The hubs
+are still there, so the verdict is `warn`, not `ok`. This rule was designed on those sets; a
+fourth held-out set, frozen before it was embedded, checks it
+([Verification](verification.md)).
+
 ## Use as a library
 
 ```python
@@ -330,7 +342,7 @@ vecscope audit vectors.npy --reference ref.npy        # same rows from another g
 vecscope audit vectors.npy --result-sample 500 --json   # keep the top-k of 500 queries/rows for a label-free diff
 vecscope audit vectors.npy --result-sample 500 --baseline old.json --result-tolerance 0   # exit 1 when results changed
 vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --baseline old.json --retrieval-tolerance ndcg_at_k=0.01 --retrieval-confidence 0.95   # fail / pass / INCONCLUSIVE against the noise of the labels
-vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy --result-sample 200 --baseline old.json --reference-tolerance 0.02   # exit 1 when results moved away from the reference
+vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy --result-sample 200 --baseline old.json --reference-tolerance 0.05   # exit 1 when the top hits agreed with the reference were lost
 vecscope audit vectors.npy --near-dup 0.98             # cosine threshold for near-duplicates
 vecscope audit vectors.npy --sample 0                  # audit every row (default samples 100k)
 vecscope audit vectors.npy --sample-repeats 3          # re-audit 3 samples; report value ranges and verdict stability

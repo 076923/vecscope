@@ -280,6 +280,16 @@ bge-m3를 기준으로 쓰면 `fail`을 받은 좋은 파이프라인이 114개 
 훨씬 높은, 그 모델이 만든 허브였습니다. 기준 모델을 줘도 `fail`로 남는 항목은 그 모델의 것이고, 검색에
 손해인지는 라벨 질의가 말해 줍니다.
 
+질의와 `--reference-queries`를 주면 기준 모델은 같은 질의에서 이 파이프라인의 top-k 중 얼마를 자신도
+돌려주는지 잽니다(`reference.agreement.queries`, 표본 질의 200개). 허브 항목(`hubness`,
+`query_hubness`, `antihubs`)이 여전히 `fail`이고 이 겹침이 0.40 이상이면 `warn`으로 낮춥니다. 텍스트
+출력에 `TOLERATED BY RETRIEVAL AGREEMENT`가 붙고, `details.reference.verdict_before_agreement`에
+`fail`이 남습니다. 세 held-out 세트의 공개 파이프라인 490개에서 이 겹침은 좋은 파이프라인과 나쁜
+파이프라인을 AUC 0.999로 갈랐습니다. `fail`인 나쁜 파이프라인 중 0.32에 닿은 것은 없었고, 두 번째·세
+번째 세트에서 `fail`로 남은 좋은 파이프라인 12개 중 9개가 0.40 이상이었습니다. 허브는 그대로 있으므로
+판정은 `ok`가 아니라 `warn`입니다. 이 규칙은 그 세트들로 설계했고, 임베딩 전에 동결한 네 번째
+held-out 세트로 확인합니다([검증](verification.md)).
+
 ## 라이브러리로 사용
 
 ```python
@@ -318,7 +328,7 @@ vecscope audit vectors.npy --reference ref.npy        # 같은 행을 다른 좋
 vecscope audit vectors.npy --result-sample 500 --json   # 라벨 없는 비교용으로 질의/행 500개의 top-k 저장
 vecscope audit vectors.npy --result-sample 500 --baseline old.json --result-tolerance 0   # 결과가 바뀌면 종료 코드 1
 vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --baseline old.json --retrieval-tolerance ndcg_at_k=0.01 --retrieval-confidence 0.95   # 라벨 잡음을 감안해 fail / pass / INCONCLUSIVE
-vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy --result-sample 200 --baseline old.json --reference-tolerance 0.02   # 결과가 기준 모델에서 멀어지면 종료 코드 1
+vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy --result-sample 200 --baseline old.json --reference-tolerance 0.05   # 기준 모델과 합의한 상위 결과를 잃으면 종료 코드 1
 vecscope audit vectors.npy --near-dup 0.98             # 근접 중복으로 간주할 코사인 임곗값
 vecscope audit vectors.npy --sample 0                  # 샘플링 없이 전체 행을 감사 (기본값은 10만 행)
 vecscope audit vectors.npy --sample-repeats 3          # 표본 3개를 감사해 값의 범위와 판정 안정성을 보고
