@@ -278,7 +278,7 @@ runs `vecscope audit --json`, writes the findings table to the job summary and f
 with the CLI's exit code.
 
 ```yaml
-- uses: 076923/vecscope@v0          # or pin a release: @v0.13.0
+- uses: 076923/vecscope@v0          # or pin a release: @v0.14.0
   with:
     path: embeddings.npy
     baseline: baseline.json         # committed --json output, optional
@@ -311,4 +311,4 @@ table when both runs had labels. Upload `evidence` as an artifact to keep it, or
 the next baseline after review.
 
 `@v0` moves to every 0.x release, and a 0.x minor release may change findings or thresholds,
-so pin the full version (`@v0.13.0`) in a gate that must stay stable.
+so pin the full version (`@v0.14.0`) in a gate that must stay stable.

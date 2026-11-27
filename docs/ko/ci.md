@@ -268,7 +268,7 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
 작업을 실패시킵니다.
 
 ```yaml
-- uses: 076923/vecscope@v0          # 또는 릴리스 고정: @v0.13.0
+- uses: 076923/vecscope@v0          # 또는 릴리스 고정: @v0.14.0
   with:
     path: embeddings.npy
     baseline: baseline.json         # 커밋해 둔 --json 출력, 선택
@@ -300,4 +300,4 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
 보관하거나, 검토를 거쳐 다음 기준선으로 커밋하십시오.
 
 `@v0`은 0.x 릴리스마다 새 버전으로 옮겨지고, 0.x의 마이너 릴리스는 진단 항목이나 임곗값을 바꿀 수
-있습니다. 결과가 안정적이어야 하는 게이트에서는 전체 버전(`@v0.13.0`)으로 고정하십시오.
+있습니다. 결과가 안정적이어야 하는 게이트에서는 전체 버전(`@v0.14.0`)으로 고정하십시오.

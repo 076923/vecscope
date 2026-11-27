@@ -6,7 +6,7 @@ branding:
   color: blue
 
 # The action installs vecscope from this repository at the ref the workflow named
-# (uses: 076923/vecscope@v0.13.0 installs 0.13.0), so the action and the package
+# (uses: 076923/vecscope@v0.14.0 installs 0.14.0), so the action and the package
 # version never drift apart.
 
 inputs:
