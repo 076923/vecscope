@@ -259,7 +259,7 @@ held-out 세트에서 해롭지 않은 결함의 44%를 표시했습니다([검�
   허용량을 확인하지 못한 `retrieval_unchecked`, 표본 검색 결과가 `--result-tolerance` 이상 바뀐
   `result_regressions`, 어느 실행에 `--result-sample`이 없던 `result_unchecked`,
   `--retrieval-confidence`에서 라벨 질의로 판가름 나지 않은 `retrieval_inconclusive`, 합의된 상위
-  결과를 `--reference-tolerance` 넘게 잃은 `reference_regressions`, 기준선에 기준 모델 결과가
+  결과의 순감소가 `--reference-tolerance`를 넘은 `reference_regressions`, 기준선에 기준 모델 결과가
   없던 `reference_unchecked`입니다.
 
 기본 임곗값은 공개 모델로 보정한 값이라, 정상적인 코퍼스가 어떤 항목에서 늘 `warn`이나

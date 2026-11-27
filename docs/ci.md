@@ -275,7 +275,7 @@ Two different rules can fail a run, and the output keeps them apart:
   `result_regressions` (sampled results changed beyond `--result-tolerance`),
   `result_unchecked` (a run had no `--result-sample`), `retrieval_inconclusive` (the
   labeled queries could not settle a tolerance under `--retrieval-confidence`),
-  `reference_regressions` (agreed top hits lost beyond `--reference-tolerance`) and
+  `reference_regressions` (a net drop of agreed top hits beyond `--reference-tolerance`) and
   `reference_unchecked` (the baseline had no reference results).
 
 The defaults are calibrated on public models, so a domain whose healthy corpus sits at `warn`

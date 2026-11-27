@@ -141,8 +141,9 @@ REFERENCE_Z = 2.0
 # the design data of sets 1 to 6 (net_design.py: 595 injected faults, 1,488 model changes
 # from two baselines, 200 sampled queries) the net drop at 0.03 flagged 81% of the faults
 # costing more than 0.02 nDCG@10 (lost share: 74%) and 1 of 163 harmless ones (3), and 4.9%
-# and 0.6% of the harmless model changes from the two baselines (lost share: 35% and 46%).
-# A seventh held-out set tests it (preregistration_seventh.md).
+# and 0.6% of the harmless model changes from the two baselines (lost share: 35% and 45%).
+# On the seventh held-out set (preregistration_seventh.md, seventh_summary.json) it flagged
+# 137 of 154 such faults and 0 of 81 harmless ones, and 1 of 85 harmless model changes.
 REFERENCE_TOLERANCE = 0.03
 # below the tolerance, a net drop beyond this share (and 2 standard errors) is listed for
 # review: it never fails a gate
