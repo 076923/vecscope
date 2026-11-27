@@ -327,7 +327,8 @@ def change_decision(diff: Mapping) -> dict:
             away = reference_regressions(agreement, REFERENCE_TOLERANCE if tol is None else tol)
             review = reference_review(agreement, tol)
             shown = ", ".join(
-                f"{s} {r['lost']} of {r['agreed']} ({r['lost_share']:.1%}, z {r['z']:.1f})"
+                f"{s} {r['lost']} of {r['agreed']} lost, {r.get('gained', 0)} gained "
+                f"(net {r.get('net_drop', r['lost_share']):+.1%}, z {r.get('net_z', r['z']):.1f})"
                 for s, r in ref.items()
             )
             ref_reason = [
@@ -522,9 +523,10 @@ def diff_evidence(
 
     ``reference_tolerance`` uses the reference's first results the baseline stored
     (``audit(reference_embeddings=..., result_sample=...)``): of the sampled items whose
-    baseline top-k held the reference's first result (an agreed top hit), a side that lost a
-    share beyond the tolerance, by more than ``vecscope.results.REFERENCE_Z`` standard
-    errors, is listed in ``reference_regressions`` ("likely harmful, check with labels"), and
+    baseline top-k held the reference's first result (an agreed top hit), the agreed hits
+    the new run lost minus the reference first results it gained, over every compared item,
+    is the net drop; a side whose net drop is beyond the tolerance, by more than
+    ``vecscope.results.REFERENCE_Z`` standard errors, is listed in ``reference_regressions`` ("likely harmful, check with labels"), and
     a tolerance with nothing to compare is listed in ``reference_unchecked``.
     """
     tol = resolve_tolerances(tolerances)

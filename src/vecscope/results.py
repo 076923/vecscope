@@ -26,6 +26,12 @@ rows show up in the reference too; ``collapse`` finds them), and it misses small
 spread over the lower ranks. Read a loss as "likely harmful, check with labels", not as a
 measured loss.
 
+A new model replaces many results: even a better one loses some agreed top hits while it
+finds the reference's first result where the old model missed it. So the rules judge the
+net drop, the agreed top hits lost minus the reference first results gained, over every
+compared item (``net_drop``, ``net_z``); the lost share alone flagged a third or more of the
+model changes that improved retrieval (sixth held-out set and net_design.py).
+
 The sample is chosen by a multiplicative hash of the row number, keeping the rows with the
 smallest hashes. Rows appended later never displace a kept row from the old range, they
 only take part of the sample, so a baseline and a grown corpus still share most of it.
@@ -125,19 +131,22 @@ def _agreement(ids_a, res_a, ids_b, res_b) -> dict | None:
     }
 
 
-# a loss of agreed top hits counts only beyond this many standard errors of the per-item
-# loss, so sampling noise alone does not read as a change
+# a net drop of agreed top hits counts only beyond this many standard errors of the
+# per-item change, so sampling noise alone does not read as a change
 REFERENCE_Z = 2.0
-# the share of agreed top hits lost that a change decision reads as "moved away" when no
-# tolerance was given: on the injected faults of three held-out sets (200 sampled queries)
-# it flagged 72% to 83% of the changes that cost more than 0.02 nDCG@10 and 5% to 8% of the
-# harmless ones
-REFERENCE_TOLERANCE = 0.05
-# below the tolerance, a loss beyond this share (and 2 standard errors) is listed for review:
-# it never fails a gate. On the faults of four held-out sets it caught 80 of the 117 changes
-# costing more than 0.02 nDCG@10 that the tolerance missed, and sent 29 of 244 harmless ones
-# to review
-REFERENCE_REVIEW = 0.03
+# the net drop (agreed top hits lost minus reference first results gained, over the compared
+# items) that a change decision reads as "moved away" when no tolerance was given. Until the
+# sixth held-out set the rule was the lost share alone (0.05); it flagged model changes that
+# improved retrieval, because a new model loses some agreed hits while it finds others. On
+# the design data of sets 1 to 6 (net_design.py: 595 injected faults, 1,488 model changes
+# from two baselines, 200 sampled queries) the net drop at 0.03 flagged 81% of the faults
+# costing more than 0.02 nDCG@10 (lost share: 74%) and 1 of 163 harmless ones (3), and 4.9%
+# and 0.6% of the harmless model changes from the two baselines (lost share: 35% and 46%).
+# A seventh held-out set tests it (preregistration_seventh.md).
+REFERENCE_TOLERANCE = 0.03
+# below the tolerance, a net drop beyond this share (and 2 standard errors) is listed for
+# review: it never fails a gate
+REFERENCE_REVIEW = 0.015
 
 
 def _reference_drop(ids_a, ov_a, ids_b, ov_b) -> dict | None:
@@ -165,7 +174,8 @@ def _reference_drop(ids_a, ov_a, ids_b, ov_b) -> dict | None:
 
 def _top_hit(ids_a, res_a, first_a, ids_b, res_b) -> dict | None:
     """Of the items whose baseline top-k held the reference's first result (an agreed top
-    hit), the share whose new top-k no longer holds it."""
+    hit), the share whose new top-k no longer holds it; of the others, how many the new top-k
+    now holds (gained); and the net drop over all compared items, which the rules judge."""
     a = {i: (r, f) for i, r, f in zip(ids_a, res_a, first_a)}
     b = dict(zip(ids_b, res_b))
     shared = sorted(a.keys() & b.keys())
@@ -179,6 +189,17 @@ def _top_hit(ids_a, res_a, first_a, ids_b, res_b) -> dict | None:
         z = mean / se
     else:
         z = 0.0 if mean == 0 else 1e6
+    # the other direction: items whose baseline top-k missed the reference's first result
+    # and whose new top-k holds it. The net drop pairs both over every compared item.
+    before = np.array([float(a[i][1] in a[i][0]) for i in shared])
+    after = np.array([float(a[i][1] in b[i]) for i in shared])
+    d = before - after
+    net = float(d.mean())
+    net_se = float(d.std(ddof=1) / np.sqrt(len(d))) if len(d) > 1 else 0.0
+    if net_se > 0:
+        net_z = net / net_se
+    else:
+        net_z = 0.0 if net == 0 else float(np.copysign(1e6, net))
     return {
         "compared": len(shared),
         "agreed": len(agreed),
@@ -186,6 +207,10 @@ def _top_hit(ids_a, res_a, first_a, ids_b, res_b) -> dict | None:
         "lost_share": mean,
         "standard_error": se,
         "z": float(z),
+        "gained": int(((1 - before) * after).sum()),
+        "net_drop": net,
+        "net_standard_error": net_se,
+        "net_z": float(net_z),
     }
 
 
@@ -235,24 +260,25 @@ def result_agreement(new: dict, old: dict) -> dict:
 
 
 def reference_review(agreement: dict, tolerance: float | None) -> list[str]:
-    """Sides that lost more than ``REFERENCE_REVIEW`` of their agreed top hits, beyond
-    ``REFERENCE_Z`` standard errors, but are not over ``tolerance`` (``REFERENCE_TOLERANCE``
-    when None): small losses the tolerance lets through, to check with labels."""
+    """Sides whose net drop of agreed top hits is beyond ``REFERENCE_REVIEW`` and
+    ``REFERENCE_Z`` standard errors but not over ``tolerance`` (``REFERENCE_TOLERANCE`` when
+    None): small losses the tolerance lets through, to check with labels."""
     tol = REFERENCE_TOLERANCE if tolerance is None else tolerance
     over = set(reference_regressions(agreement, tol))
     return [s for s in reference_regressions(agreement, REFERENCE_REVIEW) if s not in over]
 
 
 def reference_regressions(agreement: dict, tolerance: float) -> list[str]:
-    """Sides that lost more than ``tolerance`` of their agreed top hits, by more than
-    ``REFERENCE_Z`` standard errors. The queries side decides when it was measured (it is the
-    one validated on injected faults); the rows side only without queries."""
+    """Sides whose net drop of agreed top hits (lost minus gained, over the compared items)
+    is beyond ``tolerance``, by more than ``REFERENCE_Z`` standard errors. The queries side
+    decides when it was measured (it is the one validated on injected faults and model
+    changes); the rows side only without queries."""
     sides = [s for s in ("queries", "rows") if "reference_top_hit" in agreement.get(s, {})]
     if "queries" in sides:
         sides = ["queries"]
     return [
         s
         for s in sides
-        if agreement[s]["reference_top_hit"]["lost_share"] > tolerance
-        and agreement[s]["reference_top_hit"]["z"] > REFERENCE_Z
+        if agreement[s]["reference_top_hit"]["net_drop"] > tolerance
+        and agreement[s]["reference_top_hit"]["net_z"] > REFERENCE_Z
     ]

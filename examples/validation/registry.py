@@ -32,6 +32,12 @@ the reference, injects the faults into two corpora over 25k documents as well, a
 model change (multilingual-e5-base replaced by each other model) against the full labels.
 sixth.py analyses it.
 
+``role="seventh"`` marks a seventh held-out set, frozen in preregistration_seventh.md before it
+was embedded, for the one rule changed after the sixth: the agreed top hits judged by their
+net drop (lost minus gained) instead of the lost share, designed on sets 1 to 6
+(net_design.py). It judges the faults and model changes from two baselines. seventh.py
+analyses it.
+
 No private or company data belongs in this file, in the cache it writes, or in the report.
 """
 
@@ -435,6 +441,17 @@ DATASETS: dict[str, Dataset] = {
         _csn("php", role="sixth"),
         _webfaq("ces", "cs", role="sixth", max_queries=1000),
         _miracl("zh", role="sixth"),
+        # seventh held-out set (preregistration_seventh.md): frozen before it was embedded
+        _xpqa("ta", "tam", role="seventh"),
+        _wiki("da", role="seventh"),
+        _wiki("no", role="seventh"),
+        _wiki("ro", role="seventh"),
+        _wiki("bg", role="seventh"),
+        _wiki("de", role="seventh"),
+        _webfaq("hrv", "hr", role="seventh", max_queries=1000),
+        _csn("javascript", role="seventh"),
+        _webfaq("slk", "sk", role="seventh", max_queries=1000),
+        _webfaq("bul", "bg", role="seventh", max_queries=1000),
     ]
 }
 

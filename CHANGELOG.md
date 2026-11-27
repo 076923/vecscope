@@ -174,6 +174,20 @@ All notable changes to this project are documented here. The format follows
   proposing no threshold on XPQA ja, where no finding separates good from bad models.
   `run.py --reaudit` audits the cached embeddings again after a change to vecscope.
 
+### Changed
+
+- The agreed top hits are judged by their net drop. `result_agreement.<side>.reference_top_hit`
+  also gives `gained` (sampled items whose new top-k holds the reference's first result that
+  the baseline's missed), `net_drop` (lost minus gained over every compared item),
+  `net_standard_error` and `net_z`. `reference_regressions` and `reference_review` judge the
+  net drop: the default tolerance is 0.03 (was a lost share of 0.05) and the review share
+  0.015 (was 0.03). The lost share alone flagged model changes that improved retrieval (5 of
+  27 on the sixth held-out set, 35% to 45% on the design data of sets 1 to 6). Designed on
+  sets 1 to 6 by `examples/validation/net_design.py` (`net_design.json`), and tested on a
+  seventh held-out set frozen with its criteria in
+  `examples/validation/preregistration_seventh.md` before it was embedded, scored by
+  `examples/validation/seventh.py`.
+
 ### Changed (documentation)
 
 - For a change of embedding model, the docs and the skill now say to decide with labeled

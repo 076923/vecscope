@@ -546,7 +546,8 @@ def _summary(ev: dict) -> str:
                 hit = r["reference_top_hit"]
                 head += (
                     f" (top hits agreed with the reference lost: {hit['lost']} of "
-                    f"{hit['agreed']}, z {hit['z']:.1f})"
+                    f"{hit['agreed']}, gained {hit['gained']}, net drop "
+                    f"{hit['net_drop']:+.1%}, z {hit['net_z']:.1f})"
                 )
         if d.get("reference_regressions"):
             head += (
@@ -676,10 +677,12 @@ def audit_embeddings(
     With `reference_path` (and `reference_queries_path`) on the baseline, it keeps the
     reference's first result for every sampled item, and the diff reports
     `result_agreement.<side>.reference_top_hit`: of the items whose baseline top-k held that
-    result (a top hit both models agree on), how many the new run lost. Losing agreed top
-    hits is likely harmful; keeping them is no sign of harm. `reference_tolerance` (e.g.
-    0.05, needs `baseline`) lists a lost share beyond it and beyond 2 standard errors in
-    `reference_regressions`. It is a proxy for labels, not a measured loss.
+    result (a top hit both models agree on), how many the new run lost, how many items it
+    gained (the reference's first result now in a top-k that missed it) and the net drop
+    over all compared items. A net loss is likely harmful; none is no sign of harm.
+    `reference_tolerance` (e.g. 0.03, needs `baseline`) lists a net drop beyond it and
+    beyond 2 standard errors in `reference_regressions`; a new model can lose some agreed
+    hits and still gain more. It is a proxy for labels, not a measured loss.
     `retrieval_confidence` (e.g. 0.95, with `retrieval_tolerances`) judges each tolerance
     against the noise of the labeled queries, paired per query: `retrieval_regressions` only
     when the drop is real and beyond the tolerance, `retrieval_inconclusive` (with

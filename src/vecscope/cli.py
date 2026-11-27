@@ -268,10 +268,10 @@ def main(argv: list[str] | None = None) -> int:
         "--reference-tolerance",
         type=float,
         metavar="SHARE",
-        help="allowed share of lost agreed top hits, e.g. 0.05: of the sampled queries whose "
-        "baseline results held the --reference model's first result, the share whose results "
-        "no longer do; a larger loss (beyond 2 standard errors) is a likely harmful change "
-        "and exits 1 (needs --baseline audited with --result-sample and --reference, and "
+        help="allowed net drop of agreed top hits, e.g. 0.03: over the sampled queries, the "
+        "share whose results lost the --reference model's first result that the baseline "
+        "held, minus the share that gained it; a larger drop (beyond 2 standard errors) is a "
+        "likely harmful change and exits 1 (needs --baseline audited with --result-sample and --reference, and "
         "--result-sample on this run)",
     )
     a.add_argument(
@@ -658,9 +658,10 @@ def gate_decision(
             "with labels): "
             + ", ".join(
                 f"{s} {agree[s]['reference_top_hit']['lost']} of "
-                f"{agree[s]['reference_top_hit']['agreed']} "
-                f"({agree[s]['reference_top_hit']['lost_share']:.1%}, "
-                f"z {agree[s]['reference_top_hit']['z']:.1f})"
+                f"{agree[s]['reference_top_hit']['agreed']} lost, "
+                f"{agree[s]['reference_top_hit']['gained']} gained "
+                f"(net {agree[s]['reference_top_hit']['net_drop']:+.1%}, "
+                f"z {agree[s]['reference_top_hit']['net_z']:.1f})"
                 for s in reference_reg
             )
         )
@@ -843,9 +844,10 @@ def _render_diff(d: dict, path: str) -> str:
             hit = r["reference_top_hit"]
             lines.append(
                 f"    top hits agreed with the reference model lost: {hit['lost']} of "
-                f"{hit['agreed']} ({hit['lost_share']:.1%}, z {hit['z']:.1f})"
+                f"{hit['agreed']} ({hit['lost_share']:.1%}), gained {hit['gained']}, "
+                f"net drop {hit['net_drop']:+.1%} (z {hit['net_z']:.1f})"
                 + (
-                    f"  AGREED TOP HITS LOST beyond {d['reference_tolerance']:g}"
+                    f"  AGREED TOP HITS LOST beyond {d['reference_tolerance']:g} net"
                     if side in d.get("reference_regressions", [])
                     else "  REVIEW: a small loss is possible, check with labels"
                     if side in d.get("reference_review", [])

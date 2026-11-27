@@ -232,16 +232,52 @@ def test_a_small_loss_of_agreed_top_hits_is_listed_for_review_not_failed():
         "query_results": res,
         "reference_first": {"queries": [r[0] for r in res]},
     }
-    # 8 of 200 agreed top hits lost: 4%, between the review share and the tolerance
-    new_res = [([-1] + r[1:]) if i < 8 else r for i, r in zip(ids, res)]
+    # 5 of 200 agreed top hits lost: a net drop of 2.5%, between the review share (0.015)
+    # and the default tolerance (0.03)
+    new_res = [([-1] + r[1:]) if i < 5 else r for i, r in zip(ids, res)]
     new = {**old, "query_results": new_res}
     del new["reference_first"]
     agreement = result_agreement(new, old)
     hit = agreement["queries"]["reference_top_hit"]
-    assert hit["lost"] == 8 and hit["z"] > 2
-    assert reference_regressions(agreement, 0.05) == []
-    assert reference_review(agreement, 0.05) == ["queries"]
+    assert hit["lost"] == 5 and hit["gained"] == 0 and hit["net_drop"] == 0.025
+    assert hit["net_z"] > 2
+    assert reference_regressions(agreement, 0.03) == []
+    assert reference_review(agreement, 0.03) == ["queries"]
     assert reference_review(agreement, None) == ["queries"]
-    # at a tolerance below the loss it is a regression, not a review
+    # at a tolerance below the drop it is a regression, not a review
     assert reference_regressions(agreement, 0.02) == ["queries"]
     assert reference_review(agreement, 0.02) == []
+
+
+def test_agreed_top_hits_gained_offset_the_lost_ones():
+    """A new model loses some agreed top hits and finds the reference's first result where
+    the baseline missed it: the net drop, not the lost share, decides."""
+    from vecscope.results import reference_regressions, reference_review, result_agreement
+
+    n = 200
+    ids = list(range(n))
+    res = [[i * 10 + j for j in range(10)] for i in ids]
+    # the reference's first result is in the baseline's top-k for the first 150 queries only
+    first = [r[0] if i < 150 else -2 for i, r in enumerate(res)]
+    old = {
+        "k": 10,
+        "rows": [],
+        "row_neighbors": [],
+        "queries": ids,
+        "n_queries": n,
+        "query_results": res,
+        "reference_first": {"queries": first},
+    }
+    # 20 agreed hits lost (13% of 150), 30 gained on the queries the baseline missed
+    new_res = [
+        [-1] + r[1:] if i < 20 else [-2] + r[1:] if i >= 170 else r for i, r in zip(ids, res)
+    ]
+    new = {**old, "query_results": new_res}
+    del new["reference_first"]
+    agreement = result_agreement(new, old)
+    hit = agreement["queries"]["reference_top_hit"]
+    assert (hit["agreed"], hit["lost"], hit["gained"]) == (150, 20, 30)
+    assert hit["lost_share"] > 0.13 and hit["z"] > 2
+    assert hit["net_drop"] == -0.05 and hit["net_z"] < 0
+    assert reference_regressions(agreement, 0.03) == []
+    assert reference_review(agreement, None) == []
