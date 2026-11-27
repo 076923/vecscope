@@ -3,8 +3,7 @@
 # 에이전트와 함께 사용
 
 `vecscope`에는 읽기 전용 도구 네 개(`audit_embeddings`, `sweep_index`, `compare_embeddings`,
-`describe_findings`)를 제공하는 MCP 서버가 들어 있습니다. MCP를 지원하는 클라이언트라면
-어디에든 등록할 수 있습니다.
+`describe_findings`)를 제공하는 MCP 서버가 들어 있습니다. 어느 MCP 클라이언트에든 등록하십시오.
 
 ```bash
 pip install vecscope
@@ -12,7 +11,7 @@ claude mcp add vecscope -- vecscope-mcp --allow-dir /data/embeddings     # Claud
 claude mcp add vecscope -- uvx vecscope mcp --allow-dir /data/embeddings # 설치하지 않고 실행
 ```
 
-`vecscope mcp`와 `vecscope-mcp`는 옵션까지 같은 서버입니다.
+`vecscope mcp`와 `vecscope-mcp`는 같은 서버입니다.
 [MCP 레지스트리(MCP Registry)](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.076923/vecscope)에
 `io.github.076923/vecscope`로 등록되어 있습니다.
 
@@ -30,7 +29,7 @@ args = ["--allow-dir", "/data/embeddings"]
 ```
 
 VS Code는 작업 공간의 `.vscode/mcp.json`을 읽으며, `mcpServers` 대신 `servers` 아래에 등록합니다.
-VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp`의 전체 경로를 쓰십시오(Windows는
+셸의 PATH를 보지 못할 수 있으므로 `vecscope-mcp`의 전체 경로를 쓰십시오(Windows는
 `where vecscope-mcp`, 그 밖의 환경은 `which vecscope-mcp`로 확인합니다).
 
 ```json
@@ -48,7 +47,7 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 항목 위의 **Start** 링크나 `MCP: List Servers`로 서버를 시작하고, Chat 창의 Agent 모드에서 도구를
 사용합니다.
 
-등록한 뒤에는 에이전트에게 다음과 같이 요청합니다.
+그다음 에이전트에게 요청합니다.
 
 ```text
 검색기를 튜닝하기 전에 data/chunks.npy 임베딩을 감사하고, 먼저 조치할 항목을 알려줘.
@@ -65,38 +64,38 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 계획의 첫 단계, 재감사라면 기준선과의 비교가 들어갑니다.
 
 변경 뒤 다시 감사할 때 그 id를 `baseline`으로 넘기십시오. 응답에 CLI의 `--baseline`과 같은
-`baseline_diff`(판정과 값의 변화, `regressions`, `improvements`, 검색 품질 변화)가 붙으므로,
-에이전트가 이전 응답을 파일로 저장할 필요가 없습니다. 서버는 최근 감사 32개를 메모리에 두며,
-저장한 응답이나 `--json` 파일도 받습니다.
+`baseline_diff`(판정과 값의 변화, `regressions`, `improvements`, 검색 품질 변화)가 붙습니다.
+서버는 최근 감사 32개를 메모리에 두며, 저장한 응답이나 `--json` 파일도 받습니다.
 
 두 감사 모두 `qrels_path`를 넘겼다면 `retrieval_tolerances`(예: `{"ndcg_at_k": 0.01}`)로 검색
 품질 변화를 검사로 바꿀 수 있습니다. 허용량보다 더 떨어진 지표는
 `baseline_diff.retrieval_regressions`에, 확인하지 못한 허용량(기준선에 라벨이 없거나 qrels나 k가
 다름)은 `retrieval_unchecked`에 오르고, 요약에는 `RETRIEVAL WORSE`나 `NOT CHECKED`가 붙습니다.
 둘 중 하나라도 있으면 그 변경은 채택하지 않습니다. [검색 품질 게이트](ci.md#검색-품질-게이트)를
-참고하십시오.
+참고하십시오. `retrieval_confidence`(예: 0.95, `retrieval_tolerances`와 함께)는 라벨 하락을 라벨
+질의의 잡음과 견주어 판정하고, 판가름 나지 않으면 `retrieval_inconclusive`로 알립니다.
+[라벨 질의의 잡음을 감안해 하락 판단하기](ci.md#라벨-질의의-잡음을-감안해-하락-판단하기)를
+참고하십시오. 질의별 값은 기준선용으로 서버 메모리에 남습니다.
 
 `reference_path`(와 `reference_queries_path`)는 같은 행을 독립적으로 좋은 다른 모델로 임베딩한
 것입니다. 기준 모델도 걸린 항목은 `details.reference`와 함께 ok로 읽히고, 요약에 행 탓으로 설명된
 항목으로 나옵니다. 두 쪽 모두 질의가 있으면, 기준 모델이 같은 질의에서 이 파이프라인 상위 결과의
 40% 이상을 돌려줄 때 여전히 `fail`인 허브 항목을 `warn`으로 낮춥니다(`reference.agreement`).
 `effective_rank`가 `fail`이고 기준 모델이 `warn`이면 `warn`으로 읽힙니다.
-[짧은 텍스트와 좁은 도메인](usage.md#짧은-텍스트와-좁은-도메인-기준-모델)을
-참고하십시오. `result_sample`은 그만큼의 질의와 행의 정확 top-k를 서버 메모리에 감사 결과와 함께
+[짧은 텍스트와 좁은 도메인](usage.md#짧은-텍스트와-좁은-도메인-기준-모델)을 참고하십시오.
+
+`result_sample`은 그만큼의 질의와 행의 정확 top-k를 서버 메모리에 감사 결과와 함께
 보관합니다(응답에는 개수만 나옵니다). 나중에 그 `audit_id`를 `baseline`으로 넘기면
 `baseline_diff.result_agreement`가 붙고, `result_tolerance`를 주면 검사가 됩니다(요약에
 `RESULTS CHANGED`). 해로움이 아니라 변화를 잽니다.
-[결과가 바뀌면 안 되는 변경](ci.md#결과가-바뀌면-안-되는-변경)을 참고하십시오. 기준선 호출에
-`reference_path`를 주면 diff가 이 파이프라인과 기준 모델이 합의한 상위 결과 중 새 실행이 잃은 수와 얻은 수도
-알려 줍니다(`result_agreement.<side>.reference_top_hit`). `reference_tolerance`(예: 0.03)를 주면
-순감소(비교한 질의에서 잃은 합의 결과 빼기 얻은 것)가 그보다 클 때 해로울 가능성이 높다고
-표시합니다(요약에 `AGREED TOP HITS LOST`). 0.015를 넘는 더 작은 순감소는 `reference_review`에 넣고 실패시키지 않습니다(요약에 작은 손실이 있을
-수 있다고 나옵니다).
-[라벨 없이](ci.md#라벨-없이-기준-모델과-합의한-상위-결과를-잃었는가)를 참고하십시오.
-`retrieval_confidence`(예: 0.95, `retrieval_tolerances`와 함께)는 라벨 하락을 라벨 질의의 잡음과
-견주어 판정하고, 판가름 나지 않으면 `retrieval_inconclusive`로 알립니다.
-[라벨 질의의 잡음을 감안해 하락 판단하기](ci.md#라벨-질의의-잡음을-감안해-하락-판단하기)를
-참고하십시오. 질의별 값은 결과 표본처럼 기준선용으로 서버 메모리에 남습니다.
+[결과가 바뀌면 안 되는 변경](ci.md#결과가-바뀌면-안-되는-변경)을 참고하십시오.
+
+기준선 호출에 `reference_path`를 주면 diff가 이 파이프라인과 기준 모델이 합의한 상위 결과 중 새
+실행이 잃은 수와 얻은 수도 알려 줍니다(`result_agreement.<side>.reference_top_hit`).
+`reference_tolerance`(예: 0.03)를 주면 순감소(비교한 질의에서 잃은 합의 결과 빼기 얻은 것)가
+그보다 클 때 해로울 가능성이 높다고 표시합니다(요약에 `AGREED TOP HITS LOST`). 0.015를 넘는 더
+작은 순감소는 `reference_review`에 넣고 실패시키지 않습니다(요약에 작은 손실이 있을 수 있다고
+나옵니다). [라벨 없이](ci.md#라벨-없이-기준-모델과-합의한-상위-결과를-잃었는가)를 참고하십시오.
 
 모든 `baseline_diff`에는 `change_decision`(`adopt`, `reject`, `needs_review`와 그 이유, `watch`
 목록)이 붙고, 기준선에 plan이 있으면 `attempts`도 붙습니다. 이 서버 세션에서 그 첫 단계에 대해
@@ -104,7 +103,7 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 참고하십시오.
 
 `verbose=false`를 주면 `ok` 항목의 세부 내용, 설명, 조치를 생략합니다. MCP를 지원하지 않는
-에이전트라면 CLI를 `--json`으로 실행해 같은 결과를 읽으면 됩니다.
+에이전트는 CLI를 `--json`으로 실행해 같은 결과를 읽으면 됩니다.
 
 [`.agents/skills/vecscope/SKILL.md`](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md)의 에이전트
 스킬에는 감사를 실행할 시점과 판정별 조치(벡터 중심화(centering) 또는 모델 교체, 중복 제거,
@@ -122,8 +121,8 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
   환경 변수 `VECSCOPE_ALLOWED_DIRS`(Unix는 `:`, Windows는 `;`로 구분)도 같은 역할을 합니다.
 - `--allow-any`(또는 `VECSCOPE_ALLOW_ANY=1`)는 제한을 풀어 서버 프로세스가 읽을 수 있는 모든
   파일에 접근하게 합니다. 자신의 컴퓨터에서만 쓰십시오.
-- 네트워크 벡터 저장소는 여기에 더해 `--allow-network`가 있어야 합니다. 읽기 전용이라고 해서
-  접속이 무해한 것은 아니므로, 서버의 네트워크 접근이 의도한 범위일 때만 켜십시오.
+- 네트워크 벡터 저장소는 `--allow-network`도 있어야 합니다. 읽기 전용이라고 접속이 무해한 것은
+  아니므로, 서버에 네트워크 접근을 줄 의도가 있을 때만 켜십시오.
 
 파일은 연 뒤에 확인한 핸들 하나로 읽습니다. 일반 파일이어야 하고, 경로가 가리키는 허용 디렉터리
 안의 파일과 같은 파일이어야 합니다. 확인과 읽기 사이에 바꿔치기한 심볼릭 링크, FIFO, 디렉터리는
@@ -148,7 +147,7 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 병렬 호출과 비용이 큰 설정에도 한도가 있습니다.
 
 - 서버는 도구 호출마다 스레드를 따로 씁니다. 감사, 스윕, 비교는 `--max-concurrent` 슬롯(기본값 1,
-  `VECSCOPE_MAX_CONCURRENT`) 하나를 차지하고, 나머지 호출은 기다립니다. 에이전트가 감사를 세 번
+  `VECSCOPE_MAX_CONCURRENT`) 하나를 차지하고 나머지 호출은 기다리므로, 에이전트가 감사를 세 번
   동시에 호출해도 메모리에는 코퍼스 하나만 올라갑니다.
 - 호출의 비용을 몇 배로 키우는 설정은 호출마다 상한이 있습니다. `k`와 `clusters`는 1,000,
   `sample_repeats`와 `timing_repeats`는 10, `n_queries`는 100,000, `latency_queries`는 10,000입니다.
@@ -163,16 +162,14 @@ vecscope-mcp: audit_embeddings path=/data/run/corpus.npy qrels_path=/data/run/qr
 ```
 
 `baseline`이 가리키는 최근 감사 기록은 락으로 보호합니다. stdio 서버는 자신을 시작한 클라이언트
-하나만 상대하므로, 에이전트를 여럿 병렬로 돌리면 각자 서버를 띄웁니다.
+하나만 상대하므로, 병렬로 도는 에이전트는 각자 서버를 띄웁니다.
 
 ## 테스트한 클라이언트
 
 진단, 변경, 재검증으로 이어지는 흐름은 MCP stdio 프로토콜 위에서 테스트하고
 (`tests/test_agent_workflow.py`), Claude Code headless 모드(`claude -p`에 위 서버 등록)로도 끝까지
-돌려 봤습니다.
-
-Claude Code는 공통 오프셋이 있는 코퍼스를 감사한 뒤 계획대로 정규화와 중심화를 하고 다시
-감사했으며, 요청받지 않은 나머지 단계는 건드리지 않고 멈췄습니다.
+돌려 봤습니다. Claude Code는 공통 오프셋이 있는 코퍼스를 감사한 뒤 계획대로 정규화와 중심화를 하고
+다시 감사했으며, 요청받지 않은 나머지 단계에서 멈췄습니다.
 
 VS Code의 GitHub Copilot(Agent 모드, 위의 `.vscode/mcp.json`)으로는 `examples/make_examples.py`가
 만드는 예시 행렬을 대상으로 직접 시험했습니다.
@@ -199,11 +196,11 @@ Cursor와 Codex는 같은 프로토콜을 쓰지만 직접 돌려 보지는 않�
 
 ## 서버가 연결되지 않을 때
 
-"vecscope-mcp not found"가 나오면 대개 설치했던 Python 환경이 새로 만들어진 경우입니다.
-환경을 다시 구성하는 호스팅 노트북이나 클러스터에서 흔히 일어납니다.
+"vecscope-mcp not found"가 나오면 대개 설치했던 Python 환경이 새로 만들어진 경우입니다. 환경을
+다시 구성하는 호스팅 노트북이나 클러스터에서 흔히 일어납니다.
 
 클라이언트가 쓰는 인터프리터에서 `pip show vecscope`로 확인하고 그 환경에 다시 설치하십시오.
-그다음 그 인터프리터를 통해 서버를 등록하면 오류 메시지가 어느 환경의 문제인지 바로 드러납니다.
+그다음 그 인터프리터를 통해 서버를 등록하면 오류 메시지가 올바른 환경을 가리킵니다.
 
 ```json
 { "mcpServers": { "vecscope": { "command": "/path/to/env/bin/python", "args": ["-m", "vecscope.mcp_server"] } } }

@@ -4,15 +4,14 @@
 
 ## Queries and clusters
 
-Pass the query embeddings too and `vecscope` checks whether queries live where the corpus
-lives.
+Pass query embeddings and `vecscope` checks whether queries live where the corpus lives.
 
 - A different model on the query side shows up as `query_gap`.
-- The same few chunks answering everything shows up as `query_hubness`, which is also what
-  an embedding model that does not cover the corpus language raises.
-- With a baseline from a run whose queries were known to be healthy, `query_shift` reports
-  how many of today's queries moved away from the corpus compared with then. This also
-  catches a partial change (some traffic on another model or on new topics).
+- The same few chunks answering everything shows up as `query_hubness`; so does an embedding
+  model that does not cover the corpus language.
+- With a baseline from a run with healthy queries, `query_shift` reports how many of today's
+  queries moved away from the corpus since then, including a partial change (some traffic on
+  another model or on new topics).
 
 ```bash
 vecscope audit corpus.npy --queries queries.npy
@@ -20,12 +19,12 @@ vecscope audit corpus.npy --queries good_queries.npy --json > baseline.json
 vecscope audit corpus.npy --queries todays_queries.npy --baseline baseline.json   # adds query_shift
 ```
 
-A missing query prefix (bge, e5) is not something these findings detect: on SciFact and
-NFCorpus it changed nDCG@10 by -0.014 to +0.007 and moved the query distances in either
-direction ([verification](https://github.com/076923/vecscope/blob/main/docs/verification.md)).
-Check the prefix in the code that embeds queries.
+These findings do not detect a missing query prefix (bge, e5): on SciFact and NFCorpus it
+changed nDCG@10 by -0.014 to +0.007 and moved query distances in either direction
+([verification](https://github.com/076923/vecscope/blob/main/docs/verification.md)). Check
+the prefix in the code that embeds queries.
 
-Add `--clusters 10` to append a per-cluster map:
+`--clusters 10` appends a per-cluster map:
 
 - size
 - tightness
@@ -45,7 +44,7 @@ It carries no verdicts; it tells the agent *where* a problem lives.
 
 ## Index sweep
 
-`vecscope sweep` builds HNSW and IVF indexes with a small parameter grid and reports, for each
+`vecscope sweep` builds HNSW and IVF indexes over a small parameter grid and reports, per
 setting on this corpus:
 
 - recall@k against exact k-NN
@@ -54,12 +53,10 @@ setting on this corpus:
 - single-query latency percentiles (p50/p95/p99)
 - the serialized index size
 
-It then recommends the fastest setting that reaches the target recall (default 0.95) and
-reports its `margin` over the target.
-
-A margin under 0.02 marks the recommendation `tight` and names the fastest setting with real
-headroom, because recall at fixed parameters falls as the corpus grows: a setting that just
-clears the target on a 50k-row sample usually misses it on the full corpus.
+It recommends the fastest setting that reaches the target recall (default 0.95) and reports
+its `margin` over the target. A margin under 0.02 marks the pick `tight` and names the fastest
+setting with real headroom: recall at fixed parameters falls as the corpus grows, so a setting
+that just clears the target on a 50k-row sample usually misses it on the full corpus.
 
 It needs the `faiss-cpu` extra.
 
@@ -81,47 +78,43 @@ vecscope sweep embeddings.npy -k 10 --target-recall 0.95
   note: index_bytes is the serialized index (vectors plus graph or lists); the process needs more while building, and a product-quantized index would be smaller
 ```
 
-Queries default to a seeded sample of the corpus; pass `--queries` to time real queries,
-and do so whenever a query log exists: the setting that is fastest at the target recall on
-corpus-drawn queries can differ from the one real traffic needs.
+Queries default to a seeded sample of the corpus. Pass `--queries` whenever a query log
+exists: the fastest setting at the target recall on corpus-drawn queries can differ from the
+one real traffic needs.
 
 - Each setting is timed three times and the median kept (`--timing-repeats`).
 - `--latency-queries` (default 200, 0 to skip) are also searched one at a time for the
   percentiles.
-- `index_bytes` is the size of the serialized index, so a setting can be judged on memory as
-  well as speed.
-- IVF's nlist follows the row count (4*sqrt(n)) unless `--nlist` fixes it. To tune nprobe for
-  an existing index, pass that index's nlist.
+- `index_bytes` is the serialized index size, for judging a setting on memory as well as speed.
+- IVF's nlist follows the row count (4*sqrt(n)) unless `--nlist` fixes it; to tune nprobe for
+  an existing index, pass its nlist.
 
-The notes at the end are part of the JSON as `caveats`. The MCP tool is `sweep_index`, with
-the same options as parameters (`n_queries`, `target_recall`, `device`, `margin`,
+The notes at the end are in the JSON as `caveats`. The MCP tool is `sweep_index`, with the
+same options as parameters (`n_queries`, `target_recall`, `device`, `margin`,
 `timing_repeats`, `latency_queries`, `nlist`).
 
-The sweep answers one question: which parameters reach the target recall on this corpus
-and these queries, and what they cost. The numbers are relative to this machine and this
-process; confirm the chosen setting in the serving environment with its own latency,
-throughput and memory measurements before fixing it.
+The numbers are relative to this machine and process. Confirm the chosen setting in the
+serving environment with its own latency, throughput and memory measurements before fixing it.
 
-With a GPU build of faiss (`pip install "vecscope[index-gpu]"`, Meta's `faiss-gpu` for Linux x86_64
-with CUDA 12.6 or later) the IVF index and the exact
-baseline run on the GPU automatically; the output header names the device. HNSW has no GPU
-implementation in faiss and stays on the CPU. Force a device with `--device cpu|gpu`.
-`index` and `index-gpu` both install the `faiss` module, so install only one of them; `stores`
-includes `index`, so on a GPU machine pick the store extras one by one
-(`"vecscope[index-gpu,qdrant]"`). On an older driver, install the community builds
-`faiss-gpu-cu12` (CUDA 12.1) or `faiss-gpu-cu11` yourself instead of `index-gpu`.
+With a GPU build of faiss (`pip install "vecscope[index-gpu]"`, Meta's `faiss-gpu` for Linux
+x86_64 with CUDA 12.6 or later), the IVF index and the exact baseline run on the GPU
+automatically and the output header names the device. HNSW has no faiss GPU implementation and
+stays on the CPU. Force a device with `--device cpu|gpu`. `index` and `index-gpu` both install
+the `faiss` module, so install only one; `stores` includes `index`, so on a GPU machine pick
+store extras one by one (`"vecscope[index-gpu,qdrant]"`). On an older driver, install the
+community builds `faiss-gpu-cu12` (CUDA 12.1) or `faiss-gpu-cu11` instead of `index-gpu`.
 
 ## Compare two embeddings
 
 When two models embedded the same items, or one model did before and after a change,
-`vecscope compare` tells how far the two spaces agree on who is near whom. It reports:
+`vecscope compare` measures how far the two spaces agree on who is near whom:
 
 - how often the nearest neighbor and the top-k lists coincide
 - the near-duplicate share in each space and in both
 - whether both spaces pick the same duplicate partner
 - the rows that disagree most
 
-It carries no verdicts. Its job is to separate item problems from model problems:
+It carries no verdicts; it separates item problems from model problems:
 
 - a 10% collapse that both spaces flag with the same partners is a property of the items
   (the same image under several ids, say)
@@ -144,35 +137,30 @@ vecscope x.y.z  compare  n=3000 dim=128/128 k=10  neighbors=recomputed/full
     1810: 1229 / 1229  0.50
 ```
 
-Read `neighbor_scope` before quoting the agreement.
-
-Above `--sample` rows (default 100k) a seeded subset is compared, and by default the
-neighbors are recomputed exactly *inside that subset*: an item whose true neighbors fell
-outside the sample is compared on substitutes, which agree more often than the real ones.
-
-On a 2,000-row synthetic pair of spaces, a 500-row sample reports a top-10 overlap of 0.75
-where the full corpus gives 0.57. Such a result is marked `neighbor_scope: sample`, and the
-explanation says so.
+Read `neighbor_scope` before quoting the agreement. Above `--sample` rows (default 100k) a
+seeded subset is compared, and by default neighbors are recomputed exactly *inside that
+subset*: an item whose true neighbors fell outside the sample is compared on substitutes,
+which agree more often than the real ones. On a 2,000-row synthetic pair of spaces, a 500-row
+sample reports a top-10 overlap of 0.75 where the full corpus gives 0.57. Such a result is
+marked `neighbor_scope: sample`, and the explanation says so.
 
 To compare full-corpus rankings on a sample of rows, pass neighbor lists computed on the full
-corpus in each space, exact or from the production index (an `(n x >= k)` id file, self ids
+corpus in each space, exact or from the production index (an `(n x >= k)` id file; self ids
 and negative fillers are dropped):
 
 ```bash
 vecscope compare clip.npy lens.npy -k 10 --neighbors-a clip_knn.npy --neighbors-b lens_knn.npy
 ```
 
-The result is then `neighbors=supplied/full`: the rows may be sampled, their neighbors are
-not, and the agreement is between the lists you supplied, exact or approximate as they were
-computed. The MCP tool is `compare_embeddings` (`neighbors_a_path`, `neighbors_b_path`).
+The result is then `neighbors=supplied/full`: rows may be sampled, their neighbors are not,
+and the agreement is between the supplied lists, exact or approximate as computed. The MCP tool is `compare_embeddings` (`neighbors_a_path`, `neighbors_b_path`).
 
 ## Read from a vector store
 
 The path can name a faiss index file or a vector database instead of an embedding file.
 
-- Rows are read in ascending id order, so two reads of unchanged contents give the same
-  matrix.
-- The evidence records the source with a fingerprint of what was read.
+- Rows are read in ascending id order, so unchanged contents give the same matrix.
+- The evidence records the source and a fingerprint of what was read.
 - Row ids in `details.sample_ids` come with `sample_source_ids`, the store's own ids.
 
 ```bash
@@ -187,8 +175,7 @@ vecscope audit "weaviate://localhost:8080/Docs?grpc_port=50051"
 ```
 
 `--ann-from-source` queries the store's own index for every stored vector and scores it as
-`--ann`, so the recall of the index in production is measured without exporting neighbor
-lists.
+`--ann`, measuring the production index's recall without exporting neighbor lists.
 
 Options go in the query string:
 
@@ -200,12 +187,12 @@ Options go in the query string:
 - `timeout=` seconds per request to a network store (default 60; a finite positive number,
   at most 3600)
 
-Reading is read-only, except that a Milvus collection that is not loaded is loaded for the
-read and released again.
+Stores are only read; a Milvus collection that is not loaded is loaded for the read and
+released again.
 
 Secrets stay out of the output:
 
-- The evidence records the URI without user info, and with every query value other than the
+- The evidence records the URI without user info, with every query value other than the
   options above replaced by `REDACTED`.
 - An error from a store client is re-raised with the API key and those values scrubbed.
 - Chroma's HTTP client takes no timeout of its own, so `timeout=` is set on its session after
@@ -216,9 +203,9 @@ and network stores only when started with `--allow-network`.
 
 ## Large corpora: incremental audits
 
-An audit of every row is quadratic in the rows. When a corpus grows by appending or has
-rows re-embedded in place, `--knn-cache` keeps the exact neighbor lists between runs and
-computes only what those rows change.
+An audit of every row is quadratic in the rows. When a corpus grows by appending or has rows
+re-embedded in place, `--knn-cache` keeps the exact neighbor lists between runs and computes
+only what those rows change.
 
 ```bash
 vecscope audit day1.npy --sample 0 --knn-cache knn.npz    # created: all rows
@@ -258,16 +245,14 @@ Creating the cache costs about what a full audit does (83 s here).
 Re-embedding 1,000 of the 100,000 rows in place recomputed 10,625 rows: 15 s to update the
 cache and 5 s to audit from it, against 95 s for a full audit, with the same verdicts. With
 10,000 rows changed an update would recompute 68,933 rows in 83 s, about as long as the full
-audit's 89 s, so the cache is rebuilt there instead. Re-run with that rule, 10,000 changed
-rows rebuilt the cache in 87 s against a full audit's 87 s.
+audit's 89 s, so the cache is rebuilt instead: 87 s, against 87 s for a full audit.
 
 ## Short texts and narrow domains: a reference model
 
-A finding measures the space, and the rows shape it as much as the model does. Short
-templated texts (product titles, FAQ answers) give every good model a low effective rank,
-many near neighbors and strong hubs, so on such a corpus a finding can fire for a pipeline
-that retrieves well. Embed the same rows (and queries) with a second, independently good
-public model and pass it as the reference:
+The rows shape the space as much as the model does. Short templated texts (product titles,
+FAQ answers) give every good model a low effective rank, many near neighbors and strong hubs,
+so a finding can fire for a pipeline that retrieves well. Embed the same rows (and queries)
+with a second, independently good public model and pass it as the reference:
 
 ```bash
 vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy
@@ -276,7 +261,7 @@ vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queri
 The reference is audited with the same settings. A finding it reaches at the same level or
 worse is attributed to the rows: it reads `ok`, the text output says `EXPLAINED BY THE ROWS`,
 and `details.reference` keeps the reference value, its verdict and the verdict without it
-(`reference.explained` lists them). The property is still there; a collapse the reference
+(`reference.explained` lists them). The property is still there: a collapse the reference
 shares still means duplicated rows that crowd results. Findings that describe the model's
 output or the index (norms, rogue dimensions, metric mismatch, ANN recall, query shift) are
 never explained this way.
@@ -286,13 +271,12 @@ product category) lowers it for every model. When it is at `fail` and the refere
 `warn`, it is lowered one step, to `warn`: the text output says
 `PARTLY EXPLAINED BY THE ROWS`, and `details.reference.verdict_without_reference` keeps
 `fail`. The row-level findings (collapse, outliers, hubs) keep the strict rule, because they
-are the ones that catch duplicated, zeroed and crowding rows.
+catch duplicated, zeroed and crowding rows.
 
 Pick a reference with published scores on your language and domain. A reference that shares
 the fault (another model that does not cover the language) explains away a real problem. A
-finding that stays at `fail` with a reference belongs to the model, such as hubs the model
-makes well past the reference on the same rows; labeled queries say whether it costs
-retrieval.
+finding still at `fail` with a reference belongs to the model, such as hubs the model makes
+well past the reference on the same rows; labeled queries say whether it costs retrieval.
 
 With queries and `--reference-queries`, the reference also measures how much of this
 pipeline's top-k it returns for the same queries (`reference.agreement.queries`, over 200
@@ -302,10 +286,9 @@ is lowered to `warn` when that agreement is 0.40 or more: the text output says
 `fail`. The hubs are still there, so the verdict is `warn`, not `ok`.
 
 On preregistered held-out data, the reference rule and the two lowering rules together
-cleared 15 of the 21 good
-pipelines at `fail` and kept all 66 bad ones at `fail`. The ones left were `collapse`,
-`ood_queries` and `query_gap`, which no rule lowers, and one hub agreeing at 0.39. Per set:
-[Verification](verification.md#the-reference-rule-and-the-two-lowering-rules).
+cleared 15 of the 21 good pipelines at `fail` and kept all 66 bad ones at `fail`. The ones
+left were `collapse`, `ood_queries` and `query_gap`, which no rule lowers, and one hub
+agreeing at 0.39. Per set: [Verification](verification.md#the-reference-rule-and-the-two-lowering-rules).
 
 ## Use as a library
 
@@ -364,12 +347,10 @@ vecscope calibrate fit_*.json --min-quality 0.45 --holdout hold_*.json --include
 ## Input formats
 
 The embedding file holds one vector per row. Every format is converted to a 2-D `float32` array
-of shape `(n, dim)` before the audit.
+of shape `(n, dim)` before the audit. Values must be finite: NaN, Inf and magnitudes above 1e16
+(whose squares overflow `float32`) are rejected with a message.
 
-Values must be finite: NaN, Inf and magnitudes above 1e16 (whose squares overflow `float32`)
-are rejected with a message.
-
-In the examples `embeddings` is that array, for instance the output of a model's `encode`:
+In the examples `embeddings` is that array, for instance a model's `encode` output:
 
 ```python
 embeddings = model.encode(texts)        # shape (n, dim), e.g. (3000, 128)
@@ -386,8 +367,7 @@ embeddings[0]                           # the vector of the first item
 | `.json` | a JSON array of objects (as above) or an array of lists | `[[0.1, -0.3, ...], [0.2, 0.5, ...]]` |
 | `.csv`, `.tsv`, `.txt` | one vector per line, numbers only, no header or id column | `0.1,-0.3,0.8,...` |
 
-How much memory a format takes to load, measured on 50,000 x 384 float32 vectors (a 73 MiB
-matrix):
+Peak memory to load 50,000 x 384 float32 vectors (a 73 MiB matrix):
 
 | Format | How it is read | Peak memory |
 | --- | --- | --- |
@@ -397,8 +377,8 @@ matrix):
 | `.parquet` | only the vector column, in batches, into one array | 0.39 GiB |
 | `.json` | the whole file parsed at once | 1.13 GiB |
 
-For large corpora use `.npy`, `.csv` or `.parquet`. `.json` is parsed whole and needs several
-times the matrix size.
+For large corpora use `.npy`, `.csv` or `.parquet`; `.json` needs several times the matrix
+size.
 
 The optional inputs:
 
@@ -410,8 +390,8 @@ The optional inputs:
 - **The `query_shift` reference**: an earlier `--json` output of an audit run with
   `--queries` (`--baseline`, or in MCP `baseline` or `query_baseline_path`).
 
-ANN ids refer to row positions, so the file must come from an index built on exactly these
-rows, and every row has to be audited. Above the `--sample` size (100k rows by default) pass
+ANN ids are row positions, so the file must come from an index built on exactly these rows,
+and every row must be audited. Above the `--sample` size (100k rows by default) pass
 `--sample 0`, or the audit refuses. Ids that point at the item itself are ignored, so an
 index that returns self first should be queried with k + 1.
 

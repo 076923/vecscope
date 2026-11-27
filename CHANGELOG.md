@@ -223,6 +223,9 @@ All notable changes to this project are documented here. The format follows
   results of rules since replaced (whole-list overlap, lost share) stay in this changelog and
   the preregistration files. The README, usage, CI, MCP and skill pages state each rule with
   its held-out evidence, and the model-change case page gives the net drop on the XPQA rows.
+- The README and documentation pages are shorter: repeated caveats, restatements of tables
+  and per-section "not covered" lists are cut, and the verification page keeps one list of
+  limitations.
 
 ## [0.13.0] - 2026-11-10
 

@@ -3,10 +3,9 @@
 **English** · [한국어](ko/case_model_change.md)
 
 A team runs product search on multilingual-e5-base and is asked whether another model would
-be better. This page replays that decision on public data, where full labels show the
-answer, and records what vecscope said about each candidate with and without labeled
-queries. The rows come from a preregistered held-out set
-([Verification](verification.md#preregistered-held-out-sets)), and
+be better. This page replays that decision on public data with full labels and records what
+vecscope said about each candidate with and without labeled queries. The rows come from a
+preregistered held-out set ([Verification](verification.md#preregistered-held-out-sets));
 `examples/validation/case_model_change.py` writes them (`case_model_change.json`). The net
 drop threshold was chosen on data that includes these rows, so the page shows the rules at
 work, not a held-out test of them; that test is in
@@ -15,9 +14,8 @@ work, not a held-out test of them; that test is in
 ## The data
 
 [XPQA](https://huggingface.co/datasets/mteb/XPQARetrieval) holds real questions about Amazon
-products and the answers that address them, short texts (median 48 to 67 characters) like
-those of a product catalog. Three
-languages, none used before by vecscope's validation:
+products and their answers: short texts (median 48 to 67 characters) like a product
+catalog's, in three languages:
 
 | set | answers (corpus) | judged queries | baseline nDCG@10 |
 |---|---|---|---|
@@ -25,10 +23,9 @@ languages, none used before by vecscope's validation:
 | Polish (pol-pol) | 1,579 | 785 | 0.480 |
 | Portuguese (por-por) | 1,622 | 800 | 0.448 |
 
-The baseline is multilingual-e5-base. The candidates are the 12 other public models of the
-validation, English-only models included, because they are a frequent mistake. The
-reference model is bge-m3, so it is not a candidate. The truth is the change of nDCG@10 on
-every judged query.
+The baseline is multilingual-e5-base. The candidates are the validation's 12 other public
+models, English-only ones included because they are a frequent mistake. bge-m3 is the
+reference, not a candidate. The truth is the change of nDCG@10 on every judged query.
 
 ## How it was run
 
@@ -54,8 +51,8 @@ vecscope audit cand_docs.npy --queries cand_queries.npy --qrels qrels.json \
   for a net drop beyond 0.03, `reference_review` above 0.015, both beyond 2 standard
   errors.)
 - `--retrieval-confidence 0.95` gives the labeled verdict. To show what a team with a small
-  labeled set would see, it was run on 200 seeded subsets of 100 labeled queries, and the
-  table gives how often it passed, was inconclusive or failed.
+  labeled set would see, it ran on 200 seeded subsets of 100 labeled queries; the table gives
+  how often it passed, was inconclusive or failed.
 
 ## Results
 
@@ -129,20 +126,19 @@ Portuguese:
   evidence that nDCG@10 held.
 - **The labeled gate almost never got the direction wrong.** With 100 labeled queries, a
   candidate that lost 0.03 or more passed in at most 1% of the subsets, and an improvement
-  failed in at most 3% (Qwen3-Embedding-0.6B on Italian, +0.012). Otherwise it failed the
-  losses, passed the improvements or said inconclusive. Small differences were often
-  inconclusive: Polish e5-large (+0.030) passed in 56% of the subsets, and the two Polish
-  losses the net drop missed failed in about half and were inconclusive in the rest, never
-  passed. The run then reports how many labeled queries would settle it
+  failed in at most 3% (Qwen3-Embedding-0.6B on Italian, +0.012). Small differences were
+  often inconclusive: Polish e5-large (+0.030) passed in 56% of the subsets, and the two
+  Polish losses the net drop missed failed in about half and were inconclusive in the rest,
+  never passed. An inconclusive run reports how many labeled queries would settle it
   (`retrieval_confidence_checks`).
 - **KURE-v1 looks perfect to the reference because it is the reference's fine-tune.** It lost
-  0.0% to 0.6% of the agreed top hits on every dataset of the set. Here it was also the best
-  candidate, but the agreed top hits did not show it; they cannot judge a model from the
+  0.0% to 0.6% of the agreed top hits on every dataset of the set. It was also the best
+  candidate, but the agreed top hits cannot show that: they cannot judge a model from the
   reference's own family.
 - **The absolute verdict is not a reason to switch.** multilingual-e5-base was at `fail` on
   all three sets (`ood_queries`, `collapse` or `query_gap`) and is still among the better
   models here; the reference model and the lowering rules did not clear those findings. The
-  diff against the baseline decides a change, not the verdict of one run.
+  baseline diff decides a change, not one run's verdict.
 
 ## What to do
 

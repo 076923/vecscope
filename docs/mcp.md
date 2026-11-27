@@ -11,8 +11,8 @@ claude mcp add vecscope -- vecscope-mcp --allow-dir /data/embeddings     # Claud
 claude mcp add vecscope -- uvx vecscope mcp --allow-dir /data/embeddings # or without installing
 ```
 
-`vecscope mcp` and `vecscope-mcp` are the same server with the same options. It is listed in
-the [MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.076923/vecscope)
+`vecscope mcp` and `vecscope-mcp` are the same server. It is listed in the
+[MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.076923/vecscope)
 as `io.github.076923/vecscope`.
 
 ```json
@@ -29,8 +29,8 @@ args = ["--allow-dir", "/data/embeddings"]
 ```
 
 VS Code reads `.vscode/mcp.json` in the workspace, under `servers` instead of `mcpServers`.
-Use the full path of `vecscope-mcp` (`where vecscope-mcp` on Windows, `which vecscope-mcp`
-elsewhere), since VS Code may not see the PATH of your shell:
+It may not see your shell's PATH, so use the full path of `vecscope-mcp`
+(`where vecscope-mcp` on Windows, `which vecscope-mcp` elsewhere):
 
 ```json
 {
@@ -67,58 +67,60 @@ baseline.
 
 Pass that id as `baseline` when re-auditing after a change. The response then carries
 `baseline_diff` (verdict and value changes, `regressions`, `improvements`, retrieval
-changes), as `--baseline` does in the CLI, without the agent saving the earlier response.
-The server keeps its last 32 audits in memory; a saved response or `--json` file works too.
+changes), as `--baseline` does in the CLI. The server keeps its last 32 audits in memory; a
+saved response or `--json` file works too.
 
 With `qrels_path` on both audits, `retrieval_tolerances` (e.g. `{"ndcg_at_k": 0.01}`) turns
 the retrieval changes into a check: a metric that dropped by more is listed in
 `baseline_diff.retrieval_regressions`, a tolerance that could not be checked (no labels on
 the baseline, different qrels or k) in `retrieval_unchecked`, and the summary says
 `RETRIEVAL WORSE` or `NOT CHECKED`. Either one means the change is not adopted; see
-[Retrieval quality as a gate](ci.md#retrieval-quality-as-a-gate).
+[Retrieval quality as a gate](ci.md#retrieval-quality-as-a-gate). `retrieval_confidence`
+(e.g. 0.95, with `retrieval_tolerances`) judges a labeled drop against the noise of the
+labeled queries and reports `retrieval_inconclusive` when they cannot settle it; see
+[Judging a drop against the noise of the labeled queries](ci.md#judging-a-drop-against-the-noise-of-the-labeled-queries).
+The per-query values stay in the server's memory for the baseline.
 
 `reference_path` (and `reference_queries_path`) is the same rows embedded by another,
-independently good model: findings it reaches too read ok with `details.reference`, and the
+independently good model. Findings it reaches too read ok with `details.reference`, and the
 summary lists them as explained by the rows. With queries on both, a hub finding still at
 `fail` is lowered to `warn` when the reference returns at least 40% of this pipeline's top
 results for the same queries (`reference.agreement`), and an `effective_rank` at `fail`
 where the reference is at `warn` reads `warn`; see
 [Short texts and narrow domains](usage.md#short-texts-and-narrow-domains-a-reference-model).
-`result_sample` keeps the exact top-k of that many sampled queries and rows with the audit in
-the server's memory (the response only counts them); a later call with that `audit_id` as
+
+`result_sample` keeps the exact top-k of that many sampled queries and rows in the server's
+memory with the audit (the response only counts them). A later call with that `audit_id` as
 `baseline` reports `baseline_diff.result_agreement`, and `result_tolerance` turns it into a
 check (`RESULTS CHANGED` in the summary). It measures change, not harm; see
-[Results that must not change](ci.md#results-that-must-not-change). With `reference_path` on
-the baseline call, the diff also says how many of the top hits this pipeline and the
-reference agreed on the new run lost and gained (`result_agreement.<side>.reference_top_hit`), and
-`reference_tolerance` (e.g. 0.03) flags a net drop (lost minus gained agreed top hits, over
-the compared queries) beyond it as likely harmful (`AGREED TOP HITS LOST` in the summary).
-A smaller net drop above 0.015 is listed in
+[Results that must not change](ci.md#results-that-must-not-change).
+
+With `reference_path` on the baseline call, the diff also says how many of the top hits this
+pipeline and the reference agreed on the new run lost and gained
+(`result_agreement.<side>.reference_top_hit`). `reference_tolerance` (e.g. 0.03) flags a net
+drop (lost minus gained agreed top hits, over the compared queries) beyond it as likely
+harmful (`AGREED TOP HITS LOST` in the summary). A smaller net drop above 0.015 is listed in
 `reference_review` and never fails (the summary says a small loss is possible); see
-[Without labels](ci.md#without-labels-did-the-change-lose-the-top-hits-a-reference-model-agrees-on). `retrieval_confidence`
-(e.g. 0.95, with `retrieval_tolerances`) judges a labeled drop against the noise of the
-labeled queries and reports `retrieval_inconclusive` when they cannot settle it; see
-[Judging a drop against the noise of the labeled queries](ci.md#judging-a-drop-against-the-noise-of-the-labeled-queries).
-The per-query values stay in the server's memory for the baseline, like the result sample.
+[Without labels](ci.md#without-labels-did-the-change-lose-the-top-hits-a-reference-model-agrees-on).
 
 Every `baseline_diff` also carries `change_decision` (`adopt`, `reject` or `needs_review`,
 with reasons and a `watch` list) and, for a baseline with a plan, `attempts`: how many changes
 for its first step were not adopted in this server session. At 3 the summary says `STOP`. See
 [Adopting a change](quality.md#adopting-a-change).
 
-`verbose=false` drops the details, explanations and actions of findings that are ok. Agents
-without MCP can run the CLI with `--json` and read the same evidence.
+`verbose=false` drops the details, explanations and actions of ok findings. Agents without
+MCP can run the CLI with `--json` and read the same evidence.
 
 The agent skill in [`.agents/skills/vecscope/SKILL.md`](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md)
 tells the agent when to run the audit and what to do about each verdict: center or swap the
-model, deduplicate, re-rank, or rebuild the index. The server also carries those
-instructions, so an agent that only has the MCP connection follows the same loop.
+model, deduplicate, re-rank, or rebuild the index. The server carries the same instructions,
+so an agent with only the MCP connection follows the same loop.
 
 ## What the server may read
 
-The tools are read-only, but they read whatever path the agent names, so the server limits
-where that can be. A path outside the allowed directories (after resolving `..` and
-symlinks) is refused before it is opened.
+The tools are read-only but read whatever path the agent names, so the server limits where
+that can be. A path outside the allowed directories (after resolving `..` and symlinks) is
+refused before it is opened.
 
 - By default, only the directory it was started in and below.
 - `--allow-dir DIR` names the directories instead, as in the setup above. It can be
@@ -126,8 +128,9 @@ symlinks) is refused before it is opened.
   `;` on Windows) does the same.
 - `--allow-any` (or `VECSCOPE_ALLOW_ANY=1`) lifts the restriction, so every file the server
   process can read is reachable. Use it only on your own machine.
-- Network vector stores need `--allow-network` on top. Read-only does not make reaching them
-  harmless, so grant it only where the server's network access is what you intend.
+- Network vector stores also need `--allow-network`. Reaching them is not harmless just
+  because it is read-only, so grant it only where you intend the server to have network
+  access.
 
 Each file is read through one handle that is checked after opening: it must be a regular
 file, and the same file the path resolves to inside the allowed directories. A symlink
@@ -153,31 +156,30 @@ One request cannot exhaust the server's memory:
 Calls in parallel, or with expensive settings, are bounded too:
 
 - The server runs each tool call in its own thread. Audits, sweeps and compares take one of
-  `--max-concurrent` slots (default 1; `VECSCOPE_MAX_CONCURRENT`), and further calls wait.
-  An agent that fires three audits at once therefore holds one corpus in memory, not three.
+  `--max-concurrent` slots (default 1; `VECSCOPE_MAX_CONCURRENT`), and further calls wait,
+  so an agent that fires three audits at once holds one corpus in memory, not three.
 - Settings that multiply a call's cost are capped per call: `k` and `clusters` at 1,000,
   `sample_repeats` and `timing_repeats` at 10, `n_queries` at 100,000 and `latency_queries`
   at 10,000. The CLI has no caps.
 
 Each audit, sweep and compare writes one line to the server's stderr, which MCP clients keep
-in their logs. It names the tool and every file or store it read (credentials redacted), the
-verdict or error, and the time taken, including any wait for a slot:
+in their logs: the tool, every file or store it read (credentials redacted), the verdict or
+error, and the time taken, including any wait for a slot:
 
 ```text
 vecscope-mcp: audit_embeddings path=/data/run/corpus.npy qrels_path=/data/run/qrels.tsv: fail in 2.1 s
 ```
 
-The recent audits that `baseline` refers to are kept behind a lock. A stdio server serves the
-one client that started it; agents that run in parallel each start their own server.
+The recent audits that `baseline` refers to are kept behind a lock. A stdio server serves only
+the client that started it; agents that run in parallel each start their own.
 
 ## Tested clients
 
 The diagnose, change and re-verify loop is tested over the MCP stdio protocol
 (`tests/test_agent_workflow.py`), and was run end to end by Claude Code in headless mode
-(`claude -p` with the server above).
-
-It audited a corpus with a shared offset, normalized, centered and re-audited as the plan
-said, and stopped at the remaining step it was not asked to fix.
+(`claude -p` with the server above). It audited a corpus with a shared offset, normalized,
+centered and re-audited as the plan said, and stopped at the remaining step it was not asked
+to fix.
 
 GitHub Copilot in VS Code (Agent mode, `.vscode/mcp.json` above) was run by hand on the
 example matrices from `examples/make_examples.py`:
@@ -189,7 +191,7 @@ example matrices from `examples/make_examples.py`:
 - A file outside `--allow-dir` was refused by the server, and the agent did not try to work
   around the refusal.
 - Copilot moves a response of this size (about 13,000 to 15,000 characters with `verbose`
-  on) to a file and reads it in parts, which costs a few extra tool calls per audit but did
+  on) to a file and reads it in parts. That costs a few extra tool calls per audit but did
   not change any answer.
 
 Cursor and Codex use the same protocol and were not run.
@@ -207,7 +209,7 @@ two cases on real SciFact embeddings, each run twice:
 ## If the server stops connecting
 
 "vecscope-mcp not found" usually means the Python environment it was installed into has
-been replaced. This happens on hosted notebooks and clusters that rebuild their environment.
+been replaced, as on hosted notebooks and clusters that rebuild their environment.
 
 Check with `pip show vecscope` in the interpreter the client uses and reinstall there. Then
 register the server through that interpreter, so the error names the right environment:

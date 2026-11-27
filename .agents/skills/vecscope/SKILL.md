@@ -52,46 +52,40 @@ In CI:
   cannot see a lost id mapping or a model that ranks worse. A tolerance listed in
   `retrieval_unchecked` (baseline without labels, different qrels or k) also exits 1: report it
   as "not checked", never as a pass.
-- A labeled gate needs enough queries: on injected public faults, 100 labeled queries caught
-  92% of harmful faults (95 to 100% of drops above 0.02; 87% and 97% on a preregistered
-  second set) and failed 24% of harmless changes
-  that stayed just under 0.01. On a small set, read a failed gate as "re-check on more
-  queries", and ask for about 100 labeled queries before gating merges on nDCG.
+- A labeled gate needs enough queries: 100 labeled queries caught 92% of injected harmful
+  faults and failed 24% of harmless changes that stayed just under 0.01. Ask for about 100
+  before gating merges on nDCG; on fewer, read a failed gate as "re-check on more queries".
 - Add `--retrieval-confidence 0.95` (MCP `retrieval_confidence`) to let the gate say so
   itself: `retrieval_regressions` only for a drop that is real and beyond the tolerance,
   `retrieval_inconclusive` (exit 1, `INCONCLUSIVE`, with `queries_needed`) when the labeled
   set cannot tell. Report inconclusive as "label about N more queries", never as a pass and
-  never as "broken"; `change_decision` is `needs_review` then, not `reject`. On a
-  preregistered unseen set at 100 queries it passed 0.4% of harmful changes (3.9% with the
-  mean alone) and failed 10.1% of harmless ones (23.7%): prefer it to the mean alone.
+  never as "broken"; `change_decision` is `needs_review` then, not `reject`. Prefer it to
+  the mean alone: on held-out data at 100 queries it passed 0.4% of harmful changes (3.9%
+  with the mean) and failed 10.1% of harmless ones (23.7%).
 - Without labels, `--result-sample 500` on the baseline and the new run adds
-  `result_agreement` (share of the sampled top-k that changed). It shows change, not harm
-  (it did not separate harmful from harmless faults), so use `--result-tolerance 0` only for a
-  pipeline that must return the same results (re-index, refactor, upgrade). It catches a lost
-  id mapping that no finding sees. Never report a small changed share as "safe".
-- Without labels but with a reference model (same rows and queries embedded by a second,
-  independently good public model, made from the source texts), audit the baseline with
-  `--reference`, `--reference-queries` and `--result-sample`; the new run needs
-  `--result-sample`. The diff gives `result_agreement.<side>.reference_top_hit`: of the
-  sampled queries whose baseline top-k held the reference's first result (a top hit both
-  models agree on), how many the new run lost; of the others, how many it gained; and the
-  net drop (lost minus gained, over every compared query) with its z.
-  `--reference-tolerance 0.03` (MCP `reference_tolerance`) lists a net drop beyond it in
-  `reference_regressions`. Report it as "lost the top hits the reference agrees on: likely
-  harmful, check with labels", and kept hits as "no sign of harm", never as proof. It misses
-  small losses spread over lower ranks (truncation, quantization), some lost-row faults
-  (zero vectors; the findings catch them) and duplicated rows (`collapse` does). On
-  preregistered held-out data it flagged 89% of fault drops above 0.02 and none of 81
-  harmless faults, so no flag is not proof of no harm.
-  For a change of embedding model it is not a verdict. It rarely flags a better model (1 of
-  85 harmless swaps on held-out data), but it missed
-  12 of 13 losses of 0.02 to 0.09 between multilingual models of similar quality. Use the
-  net drop to drop candidates that lose many agreed hits, and decide the swap with labeled
-  queries and `--retrieval-confidence 0.95` (0.07% of harmful swaps passed, 0.65% of harmless
-  ones failed, at 100 labeled queries). Never use a reference from the candidate's family
-  (e.g. a fine-tune of bge-m3 against bge-m3): it agrees by construction.
-  `reference_review` (net drop above 0.015, below the tolerance; never fails) means "a small
-  loss is possible": ask for labeled queries before adopting, do not call it a regression.
+  `result_agreement` (share of the sampled top-k that changed). It shows change, not harm,
+  so use `--result-tolerance 0` only for a pipeline that must return the same results
+  (re-index, refactor, upgrade); it catches a lost id mapping no finding sees. Never report a
+  small changed share as "safe".
+- Without labels but with a reference model (the same rows and queries embedded from the
+  source texts by a second, independently good public model): audit the baseline with
+  `--reference`, `--reference-queries` and `--result-sample`, and the new run with
+  `--result-sample`. The diff's `result_agreement.<side>.reference_top_hit` counts the agreed
+  top hits (the reference's first result in the baseline top-k) the new run lost, those it
+  gained, and the net drop with its z.
+  - `--reference-tolerance 0.03` (MCP `reference_tolerance`) lists a net drop beyond it in
+    `reference_regressions`. Report it as "lost the top hits the reference agrees on: likely
+    harmful, check with labels". On held-out data it flagged 89% of fault drops above 0.02
+    and none of 81 harmless faults.
+  - Report kept hits as "no sign of harm", never as proof: it misses small losses in lower
+    ranks (truncation, quantization) and duplicated rows (`collapse` finds those).
+  - `reference_review` (net drop above 0.015; never fails) means "a small loss is possible":
+    ask for labeled queries before adopting; do not call it a regression.
+  - For a change of embedding model it is not a verdict: it rarely flags a better model, but
+    missed 12 of 13 losses of 0.02 to 0.09 between multilingual models of similar quality.
+    Use it to drop candidates that lose many agreed hits, and decide with labeled queries and
+    `--retrieval-confidence 0.95`. Never use a reference from the candidate's family (a
+    fine-tune of bge-m3 against bge-m3): it agrees by construction.
 - With `--reference-queries`, a hub finding (`hubness`, `query_hubness`, `antihubs`) still
   at `fail` reads `warn` when the reference returns at least 40% of the pipeline's top
   results for the same queries (`reference.agreement`, `TOLERATED BY RETRIEVAL AGREEMENT`).
