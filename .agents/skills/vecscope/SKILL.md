@@ -74,23 +74,24 @@ In CI:
   `--reference`, `--reference-queries` and `--result-sample`; the new run needs
   `--result-sample`. The diff gives `result_agreement.<side>.reference_top_hit`: of the
   sampled queries whose baseline top-k held the reference's first result (a top hit both
-  models agree on), how many the new run lost. `--reference-tolerance 0.05` (MCP
-  `reference_tolerance`) lists a lost share beyond it in `reference_regressions`. Report it
-  as "lost the top hits the reference agrees on: likely harmful, check with labels", and
-  kept hits as "no sign of harm", never as proof. It misses small losses spread over lower
-  ranks, about half of the lost-row faults (zero vectors; the findings catch them) and
-  duplicated rows (`collapse` does). On three preregistered held-out sets, with two different
-  reference models, it flagged 72% to 78% of drops above 0.02 and 2% of harmless changes,
-  so no flag is not proof of no harm.
-  For a change of embedding model it is not a verdict: it counts lost agreed hits, not
-  gained ones, and a better model loses some too (on the sixth set 5 of 27 improving swaps
-  were flagged). Use the lost share to drop candidates that lose many agreed hits, and decide
-  the swap with labeled queries and `--retrieval-confidence 0.95` (0.04% of harmful swaps
-  passed, 0.07% of harmless ones failed, at 100 labeled queries). Never use a reference from
-  the candidate's family (e.g. a fine-tune of bge-m3 against bge-m3): it agrees by
-  construction.
-  `reference_review` (above 0.03, below the tolerance; never fails) means "a small loss is
-  possible": ask for labeled queries before adopting, do not call it a regression.
+  models agree on), how many the new run lost; of the others, how many it gained; and the
+  net drop (lost minus gained, over every compared query) with its z.
+  `--reference-tolerance 0.03` (MCP `reference_tolerance`) lists a net drop beyond it in
+  `reference_regressions`. Report it as "lost the top hits the reference agrees on: likely
+  harmful, check with labels", and kept hits as "no sign of harm", never as proof. It misses
+  small losses spread over lower ranks (truncation, quantization), some lost-row faults
+  (zero vectors; the findings catch them) and duplicated rows (`collapse` does). On the
+  preregistered seventh set it flagged 89% of fault drops above 0.02 and none of 81 harmless
+  faults, so no flag is not proof of no harm.
+  For a change of embedding model it is not a verdict. It rarely flags a better model (1 of
+  85 harmless swaps on the seventh set; the lost share it replaced flagged 28), but it missed
+  12 of 13 losses of 0.02 to 0.09 between multilingual models of similar quality. Use the
+  net drop to drop candidates that lose many agreed hits, and decide the swap with labeled
+  queries and `--retrieval-confidence 0.95` (0.07% of harmful swaps passed, 0.65% of harmless
+  ones failed, at 100 labeled queries). Never use a reference from the candidate's family
+  (e.g. a fine-tune of bge-m3 against bge-m3): it agrees by construction.
+  `reference_review` (net drop above 0.015, below the tolerance; never fails) means "a small
+  loss is possible": ask for labeled queries before adopting, do not call it a regression.
 - With `--reference-queries`, a hub finding (`hubness`, `query_hubness`, `antihubs`) still
   at `fail` reads `warn` when the reference returns at least 40% of the pipeline's top
   results for the same queries (`reference.agreement`, `TOLERATED BY RETRIEVAL AGREEMENT`).

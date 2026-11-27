@@ -87,10 +87,10 @@ VS Code는 셸의 PATH를 그대로 보지 못할 수 있으므로 `vecscope-mcp
 `baseline_diff.result_agreement`가 붙고, `result_tolerance`를 주면 검사가 됩니다(요약에
 `RESULTS CHANGED`). 해로움이 아니라 변화를 잽니다.
 [결과가 바뀌면 안 되는 변경](ci.md#결과가-바뀌면-안-되는-변경)을 참고하십시오. 기준선 호출에
-`reference_path`를 주면 diff가 이 파이프라인과 기준 모델이 합의한 상위 결과 중 새 실행이 잃은 수도
-알려 줍니다(`result_agreement.<side>.reference_top_hit`). `reference_tolerance`(예: 0.05)를 주면
-그보다 큰 비율을 잃었을 때 해로울 가능성이 높다고 표시합니다(요약에 `AGREED TOP HITS LOST`).
-0.03을 넘는 더 작은 손실은 `reference_review`에 넣고 실패시키지 않습니다(요약에 작은 손실이 있을
+`reference_path`를 주면 diff가 이 파이프라인과 기준 모델이 합의한 상위 결과 중 새 실행이 잃은 수와 얻은 수도
+알려 줍니다(`result_agreement.<side>.reference_top_hit`). `reference_tolerance`(예: 0.03)를 주면
+순감소(비교한 질의에서 잃은 합의 결과 빼기 얻은 것)가 그보다 클 때 해로울 가능성이 높다고
+표시합니다(요약에 `AGREED TOP HITS LOST`). 0.015를 넘는 더 작은 순감소는 `reference_review`에 넣고 실패시키지 않습니다(요약에 작은 손실이 있을
 수 있다고 나옵니다).
 [라벨 없이](ci.md#라벨-없이-기준-모델과-합의한-상위-결과를-잃었는가)를 참고하십시오.
 `retrieval_confidence`(예: 0.95, `retrieval_tolerances`와 함께)는 라벨 하락을 라벨 질의의 잡음과

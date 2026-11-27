@@ -186,13 +186,22 @@ All notable changes to this project are documented here. The format follows
   sets 1 to 6 by `examples/validation/net_design.py` (`net_design.json`), and tested on a
   seventh held-out set frozen with its criteria in
   `examples/validation/preregistration_seventh.md` before it was embedded, scored by
-  `examples/validation/seventh.py`.
+  `examples/validation/seventh.py` (`seventh_summary.json`). On the seventh set it flagged
+  137 of 154 faults costing more than 0.02 nDCG@10 and 0 of 81 harmless ones (lost share:
+  123 and 1), and 116 of 133 model changes losing more than 0.02 and 1 of 85 harmless ones
+  (lost share: 123 and 28). The multilingual-candidate criterion failed: 11 of 23 large
+  losses flagged, against 60% required; it misses losses of 0.02 to 0.09 between models of
+  similar quality (1 of 13 flagged), as the lost share did. The labeled gate, the two lowering
+  rules and determinism passed.
 
 ### Changed (documentation)
 
 - For a change of embedding model, the docs and the skill now say to decide with labeled
   queries and to read `reference_regressions` as a ranking of candidates, and not to use a
   reference from the candidate's model family.
+- The verification page reports the seventh held-out set, and the CI, MCP, usage and README
+  pages, the skill and the model-change case page describe the net drop; the case page gives
+  both rules' verdicts on the sixth set's XPQA rows.
 
 ### Changed
 

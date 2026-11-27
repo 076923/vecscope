@@ -9,7 +9,7 @@ areas:
    published tables against float64 and against a full recomputation
 2. [Thresholds and retrieval quality](#2-thresholds-and-retrieval-quality): every finding
    against nDCG@10 on labeled data, the query findings, what retrieval does when a plan
-   step is applied, the defaults on 19 held-out public datasets and five preregistered
+   step is applied, the defaults on 19 held-out public datasets and six preregistered
    held-out sets
 3. [Sampled audits](#3-sampled-audits): what a sample can and cannot stand for
 4. [ANN recall and index sweeps](#4-ann-recall-and-index-sweeps): the recall scorer and the
@@ -793,6 +793,108 @@ What this changes:
   faults (2%, interval 1% to 6%); the lowering rules kept 76 of 76 bad pipelines at `fail`
   (95% to 100%) and lost none of 309 caught faults (99% to 100%).
 
+### A seventh held-out set, preregistered
+
+The sixth set showed what was wrong with the agreed top hits on model changes: the diff
+counted the agreed top hits a new run lost, never the reference's first results it found that
+the baseline had missed. **One rule changed after the sixth set.** The diff now counts both,
+and `reference_regressions` judges the **net drop**: the mean, over every compared query, of
+"the reference's first result is in the baseline's top-k" minus "it is in the new top-k". A
+side is listed when the net drop is above `reference_tolerance` (default 0.03) and 2 standard
+errors; `reference_review` lists one above 0.015 and 2 standard errors, below the tolerance.
+
+The rule was chosen on data that is no longer blind (`examples/validation/net_design.py`,
+`net_design.json`): 595 injected faults of the fourth to sixth sets and 1,488 model changes on
+the 63 datasets of sets 1 to 6, from two baselines.
+
+| design data | flagged, drop above 0.02 | flagged, harmless |
+|---|---|---|
+| faults, lost share above 0.05 (the old rule) | 258 of 351 (74%) | 3 of 163 (1.8%) |
+| faults, net drop above 0.03 | 286 of 351 (81%) | 1 of 163 (0.6%) |
+| changes from multilingual-e5-base, old rule | 434 of 471 (92%) | 94 of 265 (35%) |
+| changes from multilingual-e5-base, net drop | 414 of 471 (88%) | 13 of 265 (4.9%) |
+| changes from MiniLM-L12, old rule | 256 of 257 (100%) | 225 of 495 (45%) |
+| changes from MiniLM-L12, net drop | 245 of 257 (95%) | 3 of 495 (0.6%) |
+
+The code, the thresholds and the criteria were then committed
+([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_seventh.md))
+before ten more public datasets were downloaded: XPQA Tamil (product questions and answers),
+Wikipedia Danish, Norwegian, Romanian, Bulgarian and German, WebFAQ Croatian, Slovak and
+Bulgarian (the last two with 31,522 and 34,734 documents), and CodeSearchNet JavaScript. The
+reference was bge-m3 (gte-multilingual-base for bge-m3 itself). The same 14 models gave 140
+pipelines, 52 good and 32 bad. Model changes were run from two baselines,
+multilingual-e5-base and paraphrase-multilingual-MiniLM-L12-v2; KURE-v1, a fine-tune of the
+reference, was left out of the criteria as preregistered. `examples/validation/seventh.py`
+scores the criteria (`seventh_summary.json`). It ran unchanged from the frozen commit, and no
+bug was found in it after the freeze. **One prediction failed.**
+
+| prediction | criterion | result | 95% interval |
+|---|---|---|---|
+| P20a net rule, faults | at least 70% of the faults costing more than 0.02 flagged, at most 10% of the harmless ones | passed: 137 of 154 (89%), 0 of 81 | 83% to 93%; 0% to 5% |
+| P20b same | at least as many large losses flagged as the old rule | passed: 137 against 123 | |
+| P21a net rule, model changes | at least 65% of the changes losing more than 0.02 flagged, at most 10% of those losing 0.01 or less | passed: 116 of 133 (87%), 1 of 85 (1.2%) | 80% to 92%; 0% to 6% |
+| P21a-multi same, multilingual candidates only | at least 60%, at most 10% | **failed: 11 of 23 (48%)**, 1 of 55 (1.8%) | 29% to 67%; 0% to 10% |
+| P21b same | at most half as many harmless changes flagged as the old rule | passed: 1 against 28 | |
+| P22a lowering rules, good | at least half of the good pipelines at `fail` with the reference end without one | passed: 6 of 6 | 61% to 100% |
+| P22b same, bad | at least 95% of the bad pipelines at `fail` stay there | passed: 28 of 28 | 88% to 100% |
+| P22c same, faults | at least 95% of the caught harmful faults still caught | passed: 128 of 128 | 97% to 100% |
+| P23a model change, labeled gate | harmful changes pass at most 3% of the time and at most half as often as with the mean | passed: 0.07% (2.1% with the mean) | |
+| P23b same | harmless changes fail at most 0.75 times as often as with the mean | passed: 0.65% (5.5% with the mean) | |
+| P24 determinism | identical JSON twice | passed: 10 of 10 | |
+
+**The faults.** On 260 faults (duplicates left out) the net rule flagged 137 of the 154 that
+cost more than 0.02 nDCG@10 and none of the 81 harmless ones; the old rule, computed from the
+same diffs, flagged 123 and 1. By fault: id mapping lost 52 of 52, zero rows 47 of 52 (old
+rule 37), query model swapped 39 of 47 (36), truncation 1 of 20 (0), quantization 1 of 8 (1).
+Truncation and quantization stay unseen, as on every set: their losses fall below the
+reference's first result. On the two corpora over 25k documents, 24 of 29 large losses were
+flagged and 0 of 7 harmless. The review tier at 0.015 listed 5 of the 17 large losses the rule
+let through, and 3 of the 81 harmless faults. The AUC of the net z between harmful and
+harmless faults was 0.93, against 0.95 for the z of the lost share: the net rule flags more at
+its threshold, but it does not rank faults better.
+
+**Model changes.** 220 changes were judged (20 with KURE-v1 left out). The net rule flagged
+87% of the large losses and 1 of the 85 harmless changes; the old rule would have flagged 92%
+and 28. From the weaker baseline (MiniLM-L12), where most swaps improve retrieval, the old rule
+flagged 22 of 66 harmless changes and the net rule none. The one harmless change flagged:
+Qwen3-Embedding-0.6B replacing multilingual-e5-base on XPQA Tamil, nDCG@10 0.353 to 0.408,
+with a net drop of 0.13 against bge-m3.
+
+The multilingual criterion failed. Of its 23 large losses, the 10 swaps to MiniLM-L12 (0.12 to
+0.29 nDCG@10) were all flagged; of the 13 others, gte-multilingual-base and
+Qwen3-Embedding-0.6B replacing multilingual-e5-base with losses of 0.02 to 0.09, the net rule
+flagged 1 (gte-multilingual-base on WebFAQ Bulgarian) and listed 2 for review. The old rule
+flagged 3 of the 13 and would have failed the criterion too (13 of 23). On the Wikipedia sets
+the baseline already held the reference's first result for 197 to 200 of the 200 sampled
+queries, and these candidates lost 1 to 6 of them: their losses are below the reference's
+first result, where the agreed top hits do not look. On the design data the share was 69%
+(77 of 112); here the mix held more small losses between models of similar quality.
+
+The labeled gate decided the changes again: with 100 labeled queries at 0.95 harmful changes
+passed 0.07% of the time and harmless ones failed 0.65% of the time, inconclusive on 9% and
+23%.
+
+**The lowering rules.** Good pipelines at `fail` went from 8 without a reference to 6 with the
+reference rule and to 0 with the two lowering rules, all 6 by the retrieval agreement. The 28
+bad pipelines at `fail` stayed there, and all 32 stayed flagged. The retrieval agreement
+separated good from bad pipelines at AUC 1.0 again.
+
+Reported without predictions:
+
+- **KURE-v1** improved nDCG@10 over both baselines on every dataset (by 0.01 to 0.43) and was
+  never flagged.
+- **Labeled gate on the faults at 0.95, with 100 labeled queries:** harmful faults passed 0.7%
+  of the time (6.1% with the mean), harmless faults failed 10.1% (20.7%).
+- **Chance rule for `query_hubness`:** every dataset had enough queries; it did not apply.
+
+What this changes:
+
+- The net drop replaces the lost share as the default rule. It holds on unseen data for
+  faults and for most model changes, with far fewer harmless swaps flagged.
+- It still misses small losses between models of similar quality, and so does the old rule.
+  For a model change, a clean `reference_regressions` is not evidence that nDCG@10 held:
+  decide with labeled queries (`--retrieval-confidence`). [CI](ci.md) and the skill say so.
+
 ## 3. Sampled audits
 
 | claim | result |
@@ -915,7 +1017,11 @@ not that every agent follows them.
   10 harmful quantizations flagged), about half of the zero-row faults and every duplicate
   fault. The review tier at 0.03 lists about half of the missed large losses for a labeled
   check (12 of 23 on the fifth set and 13 of 28 on the sixth, where its criterion failed;
-  pooled 49%, 95% interval 36% to 62%); it is not a verdict.
+  pooled 49%, 95% interval 36% to 62%); it is not a verdict. Since the seventh set the rule
+  judges the net drop (lost minus gained) above 0.03 instead of the lost share above 0.05:
+  there it flagged 89% of the large losses and 0 of 81 harmless faults, but still 1 of 20
+  harmful truncations and 1 of 8 harmful quantizations; its review tier at 0.015 listed 5 of
+  the 17 large losses it let through.
 - For a change of embedding model the agreed top hits are not a verdict. On the sixth set
   ([preregistered](#a-sixth-held-out-set-preregistered), prediction P18a failed) they flagged
   90% of the swaps losing more than 0.02 nDCG@10 but also 5 of 27 swaps that improved it: a
@@ -923,10 +1029,17 @@ not that every agent follows them.
   only the losses. The labeled gate decided the same swaps with 0.04% harmful passed and 0.07%
   harmless failed. A candidate from the reference's own family (KURE-v1 against bge-m3) lost
   no agreed top hits whatever its quality.
+  The net drop that replaced it on the seventh set
+  ([preregistered](#a-seventh-held-out-set-preregistered)) flagged 1 of 85 harmless swaps and
+  87% of the large losses, but only 1 of the 13 multilingual swaps between models of similar
+  quality that lost 0.02 to 0.09 (prediction P21a-multi failed): those losses fall below the
+  reference's first result. Decide a model change with labeled queries.
 - The retrieval agreement rule left 1 of 46 good pipelines at `fail` on the fifth set, a hub
   agreeing at 0.39 against the threshold of 0.40. The threshold was set on the first three
   sets. On the fourth set good pipelines agreed at 0.31 or more and bad ones at 0.23 or less;
-  on the fifth, 0.36 or more and 0.28 or less; on the sixth, 0.37 or more and 0.28 or less.
+  on the fifth, 0.36 or more and 0.28 or less; on the sixth, 0.37 or more and 0.28 or less;
+  on the seventh, 0.398 or more (two good pipelines just under 0.40, neither ended at `fail`) and
+  0.16 or less.
   The margin is narrow at the low end. The rule
   needs query embeddings from both models.
 - The one-step rule for `effective_rank` was designed on the first four sets. On the fifth set
@@ -998,6 +1111,14 @@ not that every agent follows them.
   `examples/validation/sixth_summary.json` (about six hours on one L4 with the embeddings).
   `case_model_change.py` writes the rows of the [case page](case_model_change.md)
   (`case_model_change.json`).
+- The net rule's design data: `python examples/validation/net_design.py` rebuilds the faults of
+  the fourth to sixth sets and the model changes of sets 1 to 6 from the cached embeddings and
+  writes `examples/validation/net_design.json`.
+- The seventh held-out set: `run.py` on the ten datasets of
+  `examples/validation/preregistration_seventh.md`, then `seventh.py`, which injects the
+  faults, runs the model changes from both baselines, scores P20 to P24 and writes
+  `examples/validation/seventh_summary.json` (about three hours on one L4 with the
+  embeddings).
 - The 19-model, nine-dataset, query-finding and intervention runs use a harness that is not
   shipped with the package. The behavior they set is pinned by tests instead:
   - `tests/test_query_findings.py` (query_gap and query_shift)

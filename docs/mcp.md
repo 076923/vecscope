@@ -90,9 +90,10 @@ the server's memory (the response only counts them); a later call with that `aud
 check (`RESULTS CHANGED` in the summary). It measures change, not harm; see
 [Results that must not change](ci.md#results-that-must-not-change). With `reference_path` on
 the baseline call, the diff also says how many of the top hits this pipeline and the
-reference agreed on the new run lost (`result_agreement.<side>.reference_top_hit`), and
-`reference_tolerance` (e.g. 0.05) flags a lost share beyond it as likely harmful
-(`AGREED TOP HITS LOST` in the summary). A smaller loss above 0.03 is listed in
+reference agreed on the new run lost and gained (`result_agreement.<side>.reference_top_hit`), and
+`reference_tolerance` (e.g. 0.03) flags a net drop (lost minus gained agreed top hits, over
+the compared queries) beyond it as likely harmful (`AGREED TOP HITS LOST` in the summary).
+A smaller net drop above 0.015 is listed in
 `reference_review` and never fails (the summary says a small loss is possible); see
 [Without labels](ci.md#without-labels-did-the-change-lose-the-top-hits-a-reference-model-agrees-on). `retrieval_confidence`
 (e.g. 0.95, with `retrieval_tolerances`) judges a labeled drop against the noise of the

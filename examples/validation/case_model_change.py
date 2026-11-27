@@ -3,8 +3,11 @@
 For each candidate that replaced multilingual-e5-base on the XPQA product-answer sets, this
 reads the cached model-change record of ``sixth.py`` and reports, next to the full-label
 nDCG@10 difference and the label-free verdict, what the labeled gate decides with 100 seeded
-labeled queries at ``retrieval_confidence=0.95`` (200 subsets). Nothing here is a
-prediction; the preregistered criteria are P18 in ``sixth_summary.json``.
+labeled queries at ``retrieval_confidence=0.95`` (200 subsets). The sixth set ran the lost
+share (above 0.05); the net drop that replaced it (above 0.03, review above 0.015, z above 2)
+is read from the records of ``net_design.py`` on the same sampled queries. Nothing here is a
+prediction; the preregistered criteria are P18 in ``sixth_summary.json`` and P21 in
+``seventh_summary.json``.
 
     python examples/validation/case_model_change.py
 Writes examples/validation/case_model_change.json.
@@ -19,6 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parents[1] / "src"))
 
 DATASETS = ("xpqa-it", "xpqa-pl", "xpqa-pt")
 
@@ -27,16 +31,23 @@ def main(argv: list[str] | None = None) -> int:
     from run import out_dir
     from third import label_gate
 
+    from vecscope.results import REFERENCE_REVIEW, REFERENCE_TOLERANCE, REFERENCE_Z
+
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--out", help="run.py cache directory")
     args = p.parse_args(argv)
     folder = out_dir(args.out) / "sixth_changes"
+    net_folder = out_dir(args.out) / "net_design"
     rows = []
     for name in DATASETS:
         for f in sorted(folder.glob(f"{name}__*.json")):
             c = json.loads(f.read_text(encoding="utf-8"))
             share = label_gate([c])["share"]["confidence"]
             kind = "harmful" if c["ndcg_drop"] > 0.01 else "harmless"
+            n = json.loads(
+                (net_folder / f"change__{name}__{c['model']}.json").read_text(encoding="utf-8")
+            )
+            net, z = n["net_drop"], n["net_z"]
             rows.append(
                 {
                     "dataset": name,
@@ -48,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
                     "lost_share": round(c["top_hit"]["queries"]["lost_share"], 3),
                     "reference_regressions": bool(c["reference_regressions"]),
                     "reference_review": bool(c["reference_review"]),
+                    "gained": n["gained"],
+                    "net_drop": round(net, 3),
+                    "net_regressions": net > REFERENCE_TOLERANCE and z > REFERENCE_Z,
+                    "net_review": REFERENCE_REVIEW < net <= REFERENCE_TOLERANCE and z > REFERENCE_Z,
                     "labeled_gate": {k: round(v, 3) for k, v in share[kind].items()},
                 }
             )
@@ -61,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
             f"{r['dataset']:<8} {r['candidate']:<30} {r['ndcg_change']:+.3f} "
             f"lost {r['lost_share']:.3f} {'FLAG' if r['reference_regressions'] else '    '} "
             f"{'REVIEW' if r['reference_review'] else '      '} "
+            f"net {r['net_drop']:+.3f} {'FLAG' if r['net_regressions'] else '    '} "
+            f"{'REVIEW' if r['net_review'] else '      '} "
             f"pass {g['pass']:.2f} inc {g['inconclusive']:.2f} fail {g['fail']:.2f}"
         )
     return 0

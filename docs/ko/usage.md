@@ -346,7 +346,7 @@ vecscope audit vectors.npy --reference ref.npy        # 같은 행을 다른 좋
 vecscope audit vectors.npy --result-sample 500 --json   # 라벨 없는 비교용으로 질의/행 500개의 top-k 저장
 vecscope audit vectors.npy --result-sample 500 --baseline old.json --result-tolerance 0   # 결과가 바뀌면 종료 코드 1
 vecscope audit vectors.npy --queries q.npy --qrels qrels.tsv --baseline old.json --retrieval-tolerance ndcg_at_k=0.01 --retrieval-confidence 0.95   # 라벨 잡음을 감안해 fail / pass / INCONCLUSIVE
-vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy --result-sample 200 --baseline old.json --reference-tolerance 0.05   # 기준 모델과 합의한 상위 결과를 잃으면 종료 코드 1
+vecscope audit vectors.npy --queries q.npy --reference ref.npy --reference-queries ref_q.npy --result-sample 200 --baseline old.json --reference-tolerance 0.03   # 기준 모델과 합의한 상위 결과의 순감소가 0.03을 넘으면 종료 코드 1
 vecscope audit vectors.npy --near-dup 0.98             # 근접 중복으로 간주할 코사인 임곗값
 vecscope audit vectors.npy --sample 0                  # 샘플링 없이 전체 행을 감사 (기본값은 10만 행)
 vecscope audit vectors.npy --sample-repeats 3          # 표본 3개를 감사해 값의 범위와 판정 안정성을 보고

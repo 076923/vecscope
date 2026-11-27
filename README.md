@@ -251,20 +251,24 @@ points. Without labels, a pipeline that must return the same results (a re-index
 refactor) can gate on the results themselves with `--result-sample 500 --result-tolerance 0`;
 that number shows change, not harm. `--retrieval-confidence 0.95` judges a labeled drop
 against the noise of the labeled queries (fail, pass or inconclusive), and with a reference
-model on the baseline `--reference-tolerance 0.05` flags a change that lost the top hits the
-pipeline and the reference agreed on, a label-free sign of harm
+model on the baseline `--reference-tolerance 0.03` flags a change whose net drop of the top
+hits the pipeline and the reference agreed on (lost minus gained) is beyond it, a label-free
+sign of harm
 ([CI](https://076923.github.io/vecscope/ci/)). On a preregistered unseen set the noise-aware
 gate met its criteria; the earlier label-free rule, the drop of the whole overlap, also
 flagged 44% of harmless changes, which is why it now looks at the agreed top hits. On a
 fourth preregistered set the agreed top hits flagged 72% of changes costing more than 0.02
 nDCG@10 and 2% of harmless ones, on a fifth, with another reference model, 78% and 2%, and
-on a sixth 74% and 2%.
-Below the tolerance, `reference_review` lists smaller losses to check with labels (half of
-the missed large losses, 6% to 7% of harmless changes); read a flag as "check with labels"
-and its absence as no proof ([Verification](https://076923.github.io/vecscope/verification/)).
-It is not a verdict on a new embedding model: a better model also loses some agreed hits,
-and on the sixth set 5 of 27 improving model swaps were flagged. Decide a model change with
-labeled queries ([Changing the embedding model](https://076923.github.io/vecscope/case_model_change/)).
+on a sixth 74% and 2%. That rule counted only the agreed hits lost, and flagged 5 of 27 model
+swaps that improved retrieval on the sixth set; it now judges the net drop, which on a seventh
+preregistered set flagged 89% of the large losses from faults and none of 81 harmless faults,
+and 87% of the large losses from model swaps and 1 of 85 harmless swaps.
+Below the tolerance, `reference_review` (above 0.015) lists smaller losses to check with
+labels; read a flag as "check with labels" and its absence as no proof
+([Verification](https://076923.github.io/vecscope/verification/)). It is not a verdict on a
+new embedding model: it missed 12 of 13 small losses between multilingual models of similar
+quality. Decide a model change with labeled queries
+([Changing the embedding model](https://076923.github.io/vecscope/case_model_change/)).
 
 On GitHub the same gate is an Action:
 
