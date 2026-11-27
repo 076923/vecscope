@@ -648,6 +648,42 @@ What this changes:
 - The faults were still injected only into corpora of at most 25k documents. The two larger
   corpora tested the verdicts on clean pipelines only.
 
+### Intervals on the preregistered counts
+
+A criterion that passes on a small count is weak evidence. `examples/validation/intervals.py`
+puts a 95% interval on each count of the fourth and fifth sets
+(`intervals_summary.json`). Counts of pipelines use the Wilson interval. Statistics of the
+injected faults resample whole pipelines, because the six faults of one pipeline share its
+corpus and queries (2,000 draws).
+
+| set | result | value | 95% interval |
+|---|---|---|---|
+| fourth | P8a AUC of the agreed top hits | 0.971 | 0.944 to 0.990 |
+| fourth | P8b large losses flagged | 83 of 116 (72%) | 65% to 79% |
+| fourth | P8b harmless flagged | 1 of 48 (2%) | 0% to 7% |
+| fourth | P9a good pipelines cleared | 6 of 8 | 41% to 93% |
+| fourth | P9b bad pipelines kept at `fail` | 38 of 38 | 91% to 100% |
+| fifth | P11a AUC of the agreed top hits | 0.928 | 0.881 to 0.965 |
+| fifth | P11b large losses flagged | 80 of 103 (78%) | 69% to 86% |
+| fifth | P11b harmless flagged | 1 of 47 (2%) | 0% to 7% |
+| fifth | P12a missed losses listed for review | 12 of 23 (52%) | 32% to 70% |
+| fifth | P12b harmless listed for review | 3 of 47 (6%) | 0% to 17% |
+| fifth | P13a good pipelines cleared | 4 of 5 | 38% to 96% |
+| fifth | P13b bad pipelines kept at `fail` | 17 of 17 | 82% to 100% |
+| fifth | P13c faults still caught | 94 of 94 | 96% to 100% |
+
+- The agreed top hits are well supported: on both sets the AUC interval stays above 0.85
+  and the harmless share stays under 15%.
+- P12a passed on its point value, but its interval reaches 32%. The fifth set does not show
+  that the review tier lists half of the missed losses.
+- The share of good pipelines cleared rests on 5 to 8 pipelines per set. It is a direction,
+  not a rate.
+- A single set cannot show 95% for the bad pipelines kept. Pooled, the two sets kept 55 of
+  55 (93% to 100%) and the faults 194 of 194 (98% to 100%).
+
+The sixth set ([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_sixth.md))
+reports these intervals with every result.
+
 ## 3. Sampled audits
 
 | claim | result |
@@ -769,7 +805,7 @@ not that every agent follows them.
   below the reference's first result (on the fifth set 3 of 18 harmful truncations and 0 of
   10 harmful quantizations flagged), about half of the zero-row faults and every duplicate
   fault. The review tier at 0.03 lists about half of the missed large losses for a labeled
-  check; it is not a verdict.
+  check (12 of 23 on the fifth set, 95% interval 32% to 70%); it is not a verdict.
 - The retrieval agreement rule left 1 of 46 good pipelines at `fail` on the fifth set, a hub
   agreeing at 0.39 against the threshold of 0.40. The threshold was set on the first three
   sets. On the fourth set good pipelines agreed at 0.31 or more and bad ones at 0.23 or less;
@@ -831,6 +867,8 @@ not that every agent follows them.
   `examples/validation/preregistration_fourth.md`, then `fourth.py`, which injects the faults,
   scores P8 to P10 and writes `examples/validation/fourth_summary.json` (about 80 minutes on
   one L4 after the embeddings).
+- The intervals: `python examples/validation/intervals.py` reads the cached fault records of
+  the fourth and fifth sets and writes `examples/validation/intervals_summary.json`.
 - The fifth held-out set: `run.py` on the eight datasets of
   `examples/validation/preregistration_fifth.md`, then `fifth.py`, which injects the faults,
   scores P11 to P14 and writes `examples/validation/fifth_summary.json` (about 80 minutes on
