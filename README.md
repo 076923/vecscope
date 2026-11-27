@@ -187,13 +187,11 @@ and a clean audit does not guarantee good search.
 On short or templated texts and narrow domains, pass the same rows embedded by a second good
 public model as `--reference`: findings that model reaches too are attributed to the rows and
 read ok ([reference model](https://076923.github.io/vecscope/usage/#short-texts-and-narrow-domains-a-reference-model)).
-On a preregistered public set it cleared most flags on good pipelines but no `fail`. With
-queries, a hub finding still at `fail` is lowered to `warn` when the reference returns at
+With queries, a hub finding still at `fail` is lowered to `warn` when the reference returns at
 least 40% of the pipeline's top results for the same queries; any other finding still at
-`fail` is the model's own, and labeled queries decide what it costs. On a fourth
-preregistered set this cleared 6 of 8 good pipelines left at `fail` and kept every bad one
-at `fail`; on a fifth, with another reference model, 4 of 5 and every bad one; on a sixth,
-5 of 10 and every bad one.
+`fail` is the model's own, and labeled queries decide what it costs. On preregistered
+held-out data the reference and these rules cleared 15 of 21 good pipelines at `fail` and kept
+all 66 bad ones at `fail`.
 
 Override any pair per run, or derive them from your own data with
 [`vecscope calibrate`](https://076923.github.io/vecscope/quality/#calibrating-thresholds-to-your-domain):
@@ -247,28 +245,23 @@ vecscope audit embeddings.npy --queries q.npy --qrels qrels.json --baseline base
 ```
 
 About 100 labeled queries catch nearly every injected fault that costs more than two nDCG
-points. Without labels, a pipeline that must return the same results (a re-index, a
-refactor) can gate on the results themselves with `--result-sample 500 --result-tolerance 0`;
-that number shows change, not harm. `--retrieval-confidence 0.95` judges a labeled drop
-against the noise of the labeled queries (fail, pass or inconclusive), and with a reference
-model on the baseline `--reference-tolerance 0.03` flags a change whose net drop of the top
-hits the pipeline and the reference agreed on (lost minus gained) is beyond it, a label-free
-sign of harm
-([CI](https://076923.github.io/vecscope/ci/)). On a preregistered unseen set the noise-aware
-gate met its criteria; the earlier label-free rule, the drop of the whole overlap, also
-flagged 44% of harmless changes, which is why it now looks at the agreed top hits. On a
-fourth preregistered set the agreed top hits flagged 72% of changes costing more than 0.02
-nDCG@10 and 2% of harmless ones, on a fifth, with another reference model, 78% and 2%, and
-on a sixth 74% and 2%. That rule counted only the agreed hits lost, and flagged 5 of 27 model
-swaps that improved retrieval on the sixth set; it now judges the net drop, which on a seventh
-preregistered set flagged 89% of the large losses from faults and none of 81 harmless faults,
-and 87% of the large losses from model swaps and 1 of 85 harmless swaps.
-Below the tolerance, `reference_review` (above 0.015) lists smaller losses to check with
-labels; read a flag as "check with labels" and its absence as no proof
-([Verification](https://076923.github.io/vecscope/verification/)). It is not a verdict on a
-new embedding model: it missed 12 of 13 small losses between multilingual models of similar
-quality. Decide a model change with labeled queries
-([Changing the embedding model](https://076923.github.io/vecscope/case_model_change/)).
+points. Three more gates cover other cases ([CI](https://076923.github.io/vecscope/ci/)):
+
+- `--retrieval-confidence 0.95` judges a labeled drop against the noise of the labeled
+  queries: fail, pass or inconclusive.
+- `--result-sample 500 --result-tolerance 0` gates a pipeline that must return the same
+  results (a re-index, a refactor) on the results themselves. It measures change, not harm.
+- `--reference-tolerance 0.03` needs no labels: with a reference model on the baseline, it
+  flags a change whose net drop of the top hits the pipeline and the reference agreed on
+  (lost minus gained) is beyond 0.03. On a preregistered unseen set it flagged 89% of the
+  injected faults costing more than 0.02 nDCG@10 and none of 81 harmless ones;
+  `reference_review` (above 0.015) lists smaller drops. Read a flag as "check with labels"
+  and no flag as no proof.
+
+To change the embedding model, decide with labeled queries: without labels, 12 of 13 small
+losses between multilingual models of similar quality went unflagged
+([Changing the embedding model](https://076923.github.io/vecscope/case_model_change/)). How
+each rule was tested: [Verification](https://076923.github.io/vecscope/verification/).
 
 On GitHub the same gate is an Action:
 

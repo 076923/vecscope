@@ -5,14 +5,12 @@
 A team runs product search on multilingual-e5-base and is asked whether another model would
 be better. This page replays that decision on public data, where full labels show the
 answer, and records what vecscope said about each candidate with and without labeled
-queries. The rows come from the preregistered sixth held-out set
-([Verification](verification.md#a-sixth-held-out-set-preregistered), prediction P18), and
-`examples/validation/case_model_change.py` writes them (`case_model_change.json`). The sixth
-set ran the label-free rule of that time, the lost share of agreed top hits above 0.05. That
-rule was then replaced by the net drop (lost minus gained, above 0.03), which the tables also
-give from the same sampled queries. The sixth set was part of the data the net drop was
-designed on, so its column here is not a held-out test; the held-out test is the seventh set
-([Verification](verification.md#a-seventh-held-out-set-preregistered), prediction P21).
+queries. The rows come from a preregistered held-out set
+([Verification](verification.md#preregistered-held-out-sets)), and
+`examples/validation/case_model_change.py` writes them (`case_model_change.json`). The net
+drop threshold was chosen on data that includes these rows, so the page shows the rules at
+work, not a held-out test of them; that test is in
+[Verification](verification.md#agreed-top-hits).
 
 ## The data
 
@@ -63,54 +61,54 @@ vecscope audit cand_docs.npy --queries cand_queries.npy --qrels qrels.json \
 
 Italian:
 
-| candidate | languages | nDCG@10 change | agreed top hits lost | net drop | net rule (now) | lost-share rule (sixth set) | labeled gate pass / inconclusive / fail |
-|---|---|---|---|---|---|---|---|
-| KURE-v1 | multilingual | +0.063 | 0.0% | -0.095 | — | — | 96% / 4% / 0% |
-| multilingual-e5-large | multilingual | +0.040 | 2.2% | -0.020 | — | — | 78% / 22% / 0% |
-| Qwen3-Embedding-0.6B | multilingual | +0.012 | 5.0% | -0.010 | — | review | 28% / 69% / 3% |
-| gte-multilingual-base | multilingual | -0.011 | 6.6% | +0.025 | — | flagged | 4% / 88% / 8% |
-| bge-base-en-v1.5 | English | -0.067 | 15.5% | +0.105 | `reference_regressions` | flagged | 0% / 33% / 67% |
-| gte-base | English | -0.073 | 15.5% | +0.120 | `reference_regressions` | flagged | 0% / 26% / 74% |
-| bge-small-en-v1.5 | English | -0.101 | 20.4% | +0.145 | `reference_regressions` | flagged | 0% / 5% / 95% |
-| e5-base-v2 | English | -0.125 | 18.8% | +0.150 | `reference_regressions` | flagged | 0% / 1% / 99% |
-| all-MiniLM-L6-v2 | English | -0.157 | 30.4% | +0.250 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| all-mpnet-base-v2 | English | -0.162 | 26.5% | +0.220 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| paraphrase-multilingual-MiniLM-L12-v2 | multilingual | -0.187 | 22.7% | +0.180 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| glove.6B.300d | English | -0.470 | 70.7% | +0.630 | `reference_regressions` | flagged | 0% / 0% / 100% |
+| candidate | languages | nDCG@10 change | agreed top hits lost | net drop | label-free | labeled gate pass / inconclusive / fail |
+|---|---|---|---|---|---|---|
+| KURE-v1 | multilingual | +0.063 | 0.0% | -0.095 | — | 96% / 4% / 0% |
+| multilingual-e5-large | multilingual | +0.040 | 2.2% | -0.020 | — | 78% / 22% / 0% |
+| Qwen3-Embedding-0.6B | multilingual | +0.012 | 5.0% | -0.010 | — | 28% / 69% / 3% |
+| gte-multilingual-base | multilingual | -0.011 | 6.6% | +0.025 | — | 4% / 88% / 8% |
+| bge-base-en-v1.5 | English | -0.067 | 15.5% | +0.105 | `reference_regressions` | 0% / 33% / 67% |
+| gte-base | English | -0.073 | 15.5% | +0.120 | `reference_regressions` | 0% / 26% / 74% |
+| bge-small-en-v1.5 | English | -0.101 | 20.4% | +0.145 | `reference_regressions` | 0% / 5% / 95% |
+| e5-base-v2 | English | -0.125 | 18.8% | +0.150 | `reference_regressions` | 0% / 1% / 99% |
+| all-MiniLM-L6-v2 | English | -0.157 | 30.4% | +0.250 | `reference_regressions` | 0% / 0% / 100% |
+| all-mpnet-base-v2 | English | -0.162 | 26.5% | +0.220 | `reference_regressions` | 0% / 0% / 100% |
+| paraphrase-multilingual-MiniLM-L12-v2 | multilingual | -0.187 | 22.7% | +0.180 | `reference_regressions` | 0% / 0% / 100% |
+| glove.6B.300d | English | -0.470 | 70.7% | +0.630 | `reference_regressions` | 0% / 0% / 100% |
 
 Polish:
 
-| candidate | languages | nDCG@10 change | agreed top hits lost | net drop | net rule (now) | lost-share rule (sixth set) | labeled gate pass / inconclusive / fail |
-|---|---|---|---|---|---|---|---|
-| KURE-v1 | multilingual | +0.038 | 0.0% | -0.195 | — | — | 58% / 42% / 0% |
-| multilingual-e5-large | multilingual | +0.030 | 6.4% | -0.010 | — | flagged | 56% / 44% / 0% |
-| Qwen3-Embedding-0.6B | multilingual | -0.043 | 17.8% | +0.045 | — | flagged | 0% / 48% / 52% |
-| gte-multilingual-base | multilingual | -0.047 | 15.3% | +0.025 | — | flagged | 0% / 50% / 50% |
-| e5-base-v2 | English | -0.132 | 31.8% | +0.185 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| gte-base | English | -0.141 | 34.4% | +0.200 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| bge-base-en-v1.5 | English | -0.170 | 38.2% | +0.220 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| bge-small-en-v1.5 | English | -0.177 | 38.2% | +0.260 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| paraphrase-multilingual-MiniLM-L12-v2 | multilingual | -0.196 | 34.4% | +0.215 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| all-mpnet-base-v2 | English | -0.244 | 46.5% | +0.325 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| all-MiniLM-L6-v2 | English | -0.257 | 46.5% | +0.330 | `reference_regressions` | flagged | 0% / 0% / 100% |
-| glove.6B.300d | English | -0.387 | 79.0% | +0.595 | `reference_regressions` | flagged | 0% / 0% / 100% |
+| candidate | languages | nDCG@10 change | agreed top hits lost | net drop | label-free | labeled gate pass / inconclusive / fail |
+|---|---|---|---|---|---|---|
+| KURE-v1 | multilingual | +0.038 | 0.0% | -0.195 | — | 58% / 42% / 0% |
+| multilingual-e5-large | multilingual | +0.030 | 6.4% | -0.010 | — | 56% / 44% / 0% |
+| Qwen3-Embedding-0.6B | multilingual | -0.043 | 17.8% | +0.045 | — | 0% / 48% / 52% |
+| gte-multilingual-base | multilingual | -0.047 | 15.3% | +0.025 | — | 0% / 50% / 50% |
+| e5-base-v2 | English | -0.132 | 31.8% | +0.185 | `reference_regressions` | 0% / 0% / 100% |
+| gte-base | English | -0.141 | 34.4% | +0.200 | `reference_regressions` | 0% / 0% / 100% |
+| bge-base-en-v1.5 | English | -0.170 | 38.2% | +0.220 | `reference_regressions` | 0% / 0% / 100% |
+| bge-small-en-v1.5 | English | -0.177 | 38.2% | +0.260 | `reference_regressions` | 0% / 0% / 100% |
+| paraphrase-multilingual-MiniLM-L12-v2 | multilingual | -0.196 | 34.4% | +0.215 | `reference_regressions` | 0% / 0% / 100% |
+| all-mpnet-base-v2 | English | -0.244 | 46.5% | +0.325 | `reference_regressions` | 0% / 0% / 100% |
+| all-MiniLM-L6-v2 | English | -0.257 | 46.5% | +0.330 | `reference_regressions` | 0% / 0% / 100% |
+| glove.6B.300d | English | -0.387 | 79.0% | +0.595 | `reference_regressions` | 0% / 0% / 100% |
 
 Portuguese:
 
-| candidate | languages | nDCG@10 change | agreed top hits lost | net drop | net rule (now) | lost-share rule (sixth set) | labeled gate pass / inconclusive / fail |
-|---|---|---|---|---|---|---|---|
-| KURE-v1 | multilingual | +0.048 | 0.6% | -0.200 | — | — | 78% / 22% / 0% |
-| Qwen3-Embedding-0.6B | multilingual | +0.034 | 6.4% | -0.075 | — | flagged | 45% / 55% / 0% |
-| gte-multilingual-base | multilingual | +0.027 | 5.7% | -0.040 | — | flagged | 40% / 60% / 0% |
-| multilingual-e5-large | multilingual | -0.037 | 12.7% | +0.070 | `reference_regressions` | flagged | 1% / 50% / 49% |
-| gte-base | English | -0.062 | 22.9% | +0.100 | `reference_regressions` | flagged | 0% / 42% / 58% |
-| e5-base-v2 | English | -0.070 | 17.8% | +0.095 | `reference_regressions` | flagged | 0% / 18% / 82% |
-| bge-small-en-v1.5 | English | -0.074 | 26.1% | +0.120 | `reference_regressions` | flagged | 0% / 28% / 72% |
-| bge-base-en-v1.5 | English | -0.076 | 26.1% | +0.135 | `reference_regressions` | flagged | 0% / 23% / 77% |
-| all-mpnet-base-v2 | English | -0.113 | 30.6% | +0.150 | `reference_regressions` | flagged | 0% / 2% / 98% |
-| paraphrase-multilingual-MiniLM-L12-v2 | multilingual | -0.125 | 24.2% | +0.120 | `reference_regressions` | flagged | 0% / 2% / 98% |
-| all-MiniLM-L6-v2 | English | -0.128 | 29.9% | +0.170 | `reference_regressions` | flagged | 0% / 2% / 98% |
-| glove.6B.300d | English | -0.322 | 74.5% | +0.575 | `reference_regressions` | flagged | 0% / 0% / 100% |
+| candidate | languages | nDCG@10 change | agreed top hits lost | net drop | label-free | labeled gate pass / inconclusive / fail |
+|---|---|---|---|---|---|---|
+| KURE-v1 | multilingual | +0.048 | 0.6% | -0.200 | — | 78% / 22% / 0% |
+| Qwen3-Embedding-0.6B | multilingual | +0.034 | 6.4% | -0.075 | — | 45% / 55% / 0% |
+| gte-multilingual-base | multilingual | +0.027 | 5.7% | -0.040 | — | 40% / 60% / 0% |
+| multilingual-e5-large | multilingual | -0.037 | 12.7% | +0.070 | `reference_regressions` | 1% / 50% / 49% |
+| gte-base | English | -0.062 | 22.9% | +0.100 | `reference_regressions` | 0% / 42% / 58% |
+| e5-base-v2 | English | -0.070 | 17.8% | +0.095 | `reference_regressions` | 0% / 18% / 82% |
+| bge-small-en-v1.5 | English | -0.074 | 26.1% | +0.120 | `reference_regressions` | 0% / 28% / 72% |
+| bge-base-en-v1.5 | English | -0.076 | 26.1% | +0.135 | `reference_regressions` | 0% / 23% / 77% |
+| all-mpnet-base-v2 | English | -0.113 | 30.6% | +0.150 | `reference_regressions` | 0% / 2% / 98% |
+| paraphrase-multilingual-MiniLM-L12-v2 | multilingual | -0.125 | 24.2% | +0.120 | `reference_regressions` | 0% / 2% / 98% |
+| all-MiniLM-L6-v2 | English | -0.128 | 29.9% | +0.170 | `reference_regressions` | 0% / 2% / 98% |
+| glove.6B.300d | English | -0.322 | 74.5% | +0.575 | `reference_regressions` | 0% / 0% / 100% |
 
 ## What it shows
 
@@ -118,19 +116,17 @@ Portuguese:
   0.63 for the English-only models, 0.12 to 0.22 for paraphrase-multilingual-MiniLM-L12-v2,
   below zero for every improvement. Every candidate that lost 0.06 nDCG@10 or more was
   flagged.
-- **The net drop flags no improvement here; the lost share flagged three of seven.**
-  multilingual-e5-large on Polish (+0.030), Qwen3-Embedding-0.6B and gte-multilingual-base on
-  Portuguese (+0.034, +0.027) lost 5.7% to 6.4% of the agreed top hits, just over 0.05, but
-  found more of the reference's first results elsewhere (net drop -0.010 to -0.075). The old
-  rule counted only what was lost; across the nine datasets of the sixth set it flagged 5 of
-  27 improvements, and the preregistered criterion failed.
-- **The net drop misses small losses between multilingual models.** Of the three
-  multilingual candidates that lost 0.037 to 0.047, it flagged one (multilingual-e5-large on
-  Portuguese, net drop 0.070); Qwen3-Embedding-0.6B and gte-multilingual-base on Polish (net
-  drop 0.045 and 0.025, within 2 standard errors) were neither flagged nor listed for review.
-  The lost share had flagged all three. The seventh set showed the same pattern on unseen
-  data: 1 of 13 such losses flagged. A clean label-free result is not evidence that nDCG@10
-  held.
+- **It flags no improvement here.** Every candidate that improved nDCG@10 had a net drop
+  below zero, even those that lost 5.7% to 6.4% of the agreed top hits
+  (multilingual-e5-large on Polish, Qwen3-Embedding-0.6B and gte-multilingual-base on
+  Portuguese): a new model loses some of the old model's agreed hits and finds more of the
+  reference's first results elsewhere.
+- **It misses small losses between multilingual models.** Of the three multilingual
+  candidates that lost 0.037 to 0.047, it flagged one (multilingual-e5-large on Portuguese,
+  net drop 0.070); Qwen3-Embedding-0.6B and gte-multilingual-base on Polish (net drop 0.045
+  and 0.025, within 2 standard errors) were neither flagged nor listed for review. Held-out
+  data shows the same: 1 of 13 such losses flagged. A clean label-free result is not
+  evidence that nDCG@10 held.
 - **The labeled gate almost never got the direction wrong.** With 100 labeled queries, a
   candidate that lost 0.03 or more passed in at most 1% of the subsets, and an improvement
   failed in at most 3% (Qwen3-Embedding-0.6B on Italian, +0.012). Otherwise it failed the

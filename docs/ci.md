@@ -116,10 +116,10 @@ set:
 | 200 | 95% | 99% | 100% | 17% |
 | 400 | 97% | 100% | 100% | 10% |
 
-The 400 row covers the pipelines with at least 400 labeled queries. On a second set of public
-data preregistered before it was embedded, 100 labeled queries caught 87% of 95 harmful faults
+The 400 row covers the pipelines with at least 400 labeled queries. On preregistered held-out public
+data, 100 labeled queries caught 87% of 95 harmful faults
 (97% of drops above 0.02) and failed 26% of 25 harmless changes
-([Verification](verification.md#a-second-held-out-set-preregistered)). About 100 labeled
+([Verification](verification.md#the-labeled-gate-against-noise)). About 100 labeled
 queries catch nearly every fault that costs more than two nDCG points.
 Drops between 0.01 and 0.02 need several hundred. The false alarms are changes whose
 full-set drop stayed just under 0.01; a small set cannot tell them from a real 0.01 drop, so
@@ -146,10 +146,9 @@ On the first held-out set's injected faults with 100 labeled queries, this rule 
 harmful changes pass, where the mean alone let 8% through. It failed 14% of harmless
 changes, where the mean alone failed 24%. The rest were inconclusive: 17% of harmful and
 62% of harmless changes. Most harmless faults there cost just under 0.01, so 100 labels
-cannot settle them. The rule was designed on that set and confirmed on the third held-out
-set, frozen before it was embedded: 0.4% of harmful changes passed (3.9% with the mean
-alone), 10.1% of harmless ones failed (23.7%), and 12% of harmful and 68% of harmless
-changes were inconclusive ([Verification](verification.md#a-third-held-out-set-preregistered)).
+cannot settle them. On preregistered held-out data 0.4% of harmful changes passed (3.9%
+with the mean alone), 10.1% of harmless ones failed (23.7%), and 12% of harmful and 68% of
+harmless changes were inconclusive ([Verification](verification.md#the-labeled-gate-against-noise)).
 A baseline written
 before this version has no per-query values, and its tolerances fall back to the mean.
 
@@ -202,66 +201,47 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
   an agreed top hit (`agreed`), how many of those the new run no longer returns (`lost`), how
   many items without one the new run now has (`gained`), and the **net drop**: the mean over
   every compared item of "in the baseline's top-k" minus "in the new top-k", with its z
-  (`net_drop`, `net_z`). The lost share and its z are kept for information. With the
-  reference on both runs, `result_agreement.<side>.reference` also gives the overlap with the
+  (`net_drop`, `net_z`), and the lost share with its z. With the reference on both runs, `result_agreement.<side>.reference` also gives the overlap with the
   reference before and after.
 - `--reference-tolerance SHARE` lists a side in `reference_regressions` when the net drop is
   beyond the tolerance and beyond 2 standard errors. The queries side decides when there are
   queries. A baseline without the reference is `reference_unchecked`. Both exit 1.
 - Below the tolerance, a net drop above 0.015 and 2 standard errors is listed in
   `reference_review` (text: `REVIEW: a small loss is possible, check with labels`). It never
-  fails the gate; `change_decision` says a small loss is possible. On the preregistered
-  seventh set it listed 5 of the 17 faults costing more than 0.02 nDCG@10 that 0.03 let
-  through, and 3 of 81 harmless ones
-  ([Verification](verification.md#a-seventh-held-out-set-preregistered)).
+  fails the gate; `change_decision` says a small loss is possible.
 - Without a tolerance, `change_decision` still says whether the agreed top hits were lost (a
   net drop above 0.03), lost a little (above 0.015) or kept.
 
-Why the top hits and not the whole list: a harmless change such as truncated or quantized
-vectors reshuffles the lower ranks, where the two models never agreed, and a harmful one
-loses the results both models put first. An earlier version gated on the drop of the whole
-overlap; on the preregistered third held-out set it flagged 44% of the harmless faults
-([Verification](verification.md#a-third-held-out-set-preregistered)).
+Why the top hits: a harmless change such as truncated or quantized vectors reshuffles the
+lower ranks, where the two models never agreed, and a harmful one loses the results both
+models put first. Why the net drop: a fault only takes results away, but a new model loses
+some agreed top hits while it finds others the old model missed, so the losses alone would
+flag better models too. On a preregistered held-out set
+([Verification](verification.md#agreed-top-hits)):
 
-Why the net drop and not the lost share: until the seventh set the rule was a lost share above
-0.05. A fault only takes results away, but a new model loses some agreed top hits while it
-finds others the old model missed, and the lost share counted only the losses. On the sixth
-set it flagged 5 of 27 model swaps that improved nDCG@10
-([Verification](verification.md#a-sixth-held-out-set-preregistered)), and on all the earlier
-data 35% to 45% of the harmless swaps. The net drop was chosen on that data and tested on a
-seventh set, frozen before it was embedded
-([Verification](verification.md#a-seventh-held-out-set-preregistered)):
-
-| seventh set | flagged, drop above 0.02 | flagged, harmless |
+| | flagged, drop above 0.02 nDCG@10 | flagged, harmless |
 |---|---|---|
-| injected faults, net drop above 0.03 | 137 of 154 (89%) | 0 of 81 |
-| injected faults, lost share above 0.05 | 123 of 154 (80%) | 1 of 81 |
-| model swaps, net drop above 0.03 | 116 of 133 (87%) | 1 of 85 |
-| model swaps, lost share above 0.05 | 123 of 133 (92%) | 28 of 85 |
+| injected faults | 137 of 154 (89%) | 0 of 81 |
+| model swaps | 116 of 133 (87%) | 1 of 85 |
 
-On the fourth to sixth sets the lost share had separated harmful from harmless faults at AUC
-0.93 to 0.97 and flagged 72% to 78% of the faults costing more than 0.02 and about 2% of the
-harmless ones. Read a net drop as "likely harmful, check with labels", not as a measured
-loss:
+`reference_review` listed 5 of the 17 large fault losses the tolerance let through, and 3 of
+the 81 harmless faults. Read a net drop as "likely harmful, check with labels", not as a
+measured loss:
 
-- It misses small losses spread over the lower ranks: on the seventh set it flagged 1 of 20
-  harmful truncations and 1 of 8 harmful quantizations. `reference_review` lists some of
-  them for review.
-- It caught 47 of 52 lost-row faults (5% zero vectors) on the seventh set, where the lost
-  share caught 37; the findings catch those too.
+- It misses small losses spread over the lower ranks: it flagged 1 of 20 harmful truncations
+  and 1 of 8 harmful quantizations.
+- It caught 47 of 52 lost-row faults (5% zero vectors); the findings catch those too.
 - It cannot see rows that are wrong for both models. Duplicated rows show up in the
   reference too; `collapse` finds those.
 - The reference must be made from the source texts, independently of the pipeline under
   test. A reference built from the same faulty export shares the fault.
-- It is not a verdict on a new embedding model. The net drop rarely flags a swap that
-  improves retrieval (1 of 85 harmless swaps on the seventh set), but it misses small losses
-  between models of similar quality: of 13 multilingual swaps losing 0.02 to 0.09 nDCG@10 it
-  flagged 1 ([Verification](verification.md#a-seventh-held-out-set-preregistered)). Use it to
-  drop candidates that lose many agreed hits, and decide with `--retrieval-confidence` (on the
-  seventh set 0.07% of the harmful swaps passed and 0.65% of the harmless ones failed with 100
-  labeled queries). A candidate from the reference's own family (a fine-tune of it) agrees
-  with it by construction and cannot be judged this way. A worked example:
-  [Changing the embedding model](case_model_change.md).
+- It is not a verdict on a new embedding model. It rarely flags a swap that improves
+  retrieval, but it misses small losses between models of similar quality: of 13
+  multilingual swaps losing 0.02 to 0.09 nDCG@10 it flagged 1. Use it to drop candidates that
+  lose many agreed hits, and decide with `--retrieval-confidence` (0.07% of the harmful swaps
+  passed and 0.65% of the harmless ones failed with 100 labeled queries). A candidate from
+  the reference's own family (a fine-tune of it) agrees with it by construction and cannot
+  be judged this way. A worked example: [Changing the embedding model](case_model_change.md).
 
 ## Which rule failed the run
 

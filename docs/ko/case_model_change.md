@@ -4,13 +4,10 @@
 
 multilingual-e5-base로 상품 검색을 운영하는 팀이 다른 모델이 더 나은지 판단해야 한다고 합시다. 이
 페이지는 전체 라벨로 정답을 알 수 있는 공개 데이터에서 그 결정을 재현하고, 라벨 질의가 있을 때와 없을
-때 vecscope가 후보마다 무엇이라고 했는지 기록합니다. 행은 사전 등록한 여섯 번째 held-out 세트
-([검증](verification.md#사전-등록한-여섯-번째-held-out-세트), 예측 P18)에서 나왔고
-`examples/validation/case_model_change.py`가 씁니다(`case_model_change.json`). 여섯 번째 세트는 당시의
-라벨 없는 규칙인 잃은 합의 상위 결과 비율 0.05 초과로 돌렸습니다. 그 뒤 이 규칙은 순감소(잃은 것 빼기
-얻은 것) 0.03 초과로 바뀌었고, 표에는 같은 표본 질의에서 잰 순감소도 함께 적었습니다. 여섯 번째 세트는
-순감소를 설계한 데이터에 들어가므로 이 열은 held-out 시험이 아닙니다. held-out 시험은 일곱 번째
-세트입니다([검증](verification.md#사전-등록한-일곱-번째-held-out-세트), 예측 P21).
+때 vecscope가 후보마다 무엇이라고 했는지 기록합니다. 행은 사전 등록한 held-out 세트([검증](verification.md#사전-등록한-held-out-세트))에서 나왔고
+`examples/validation/case_model_change.py`가 씁니다(`case_model_change.json`). 순감소 임곗값은 이 행을
+포함한 데이터로 골랐으므로, 이 페이지는 규칙이 작동하는 모습을 보여 줄 뿐 held-out 시험이 아닙니다.
+그 시험은 [검증](verification.md#합의한-상위-결과)에 있습니다.
 
 ## 데이터
 
@@ -57,70 +54,69 @@ vecscope audit cand_docs.npy --queries cand_queries.npy --qrels qrels.json \
 
 이탈리아어:
 
-| 후보 | 언어 | nDCG@10 변화 | 잃은 합의 상위 결과 | 순감소 | 순감소 규칙(현재) | 잃은 비율 규칙(여섯 번째 세트) | 라벨 게이트 통과 / 판단 불가 / 실패 |
-|---|---|---|---|---|---|---|---|
-| KURE-v1 | 다국어 | +0.063 | 0.0% | -0.095 | — | — | 96% / 4% / 0% |
-| multilingual-e5-large | 다국어 | +0.040 | 2.2% | -0.020 | — | — | 78% / 22% / 0% |
-| Qwen3-Embedding-0.6B | 다국어 | +0.012 | 5.0% | -0.010 | — | 검토 | 28% / 69% / 3% |
-| gte-multilingual-base | 다국어 | -0.011 | 6.6% | +0.025 | — | 표시 | 4% / 88% / 8% |
-| bge-base-en-v1.5 | 영어 | -0.067 | 15.5% | +0.105 | `reference_regressions` | 표시 | 0% / 33% / 67% |
-| gte-base | 영어 | -0.073 | 15.5% | +0.120 | `reference_regressions` | 표시 | 0% / 26% / 74% |
-| bge-small-en-v1.5 | 영어 | -0.101 | 20.4% | +0.145 | `reference_regressions` | 표시 | 0% / 5% / 95% |
-| e5-base-v2 | 영어 | -0.125 | 18.8% | +0.150 | `reference_regressions` | 표시 | 0% / 1% / 99% |
-| all-MiniLM-L6-v2 | 영어 | -0.157 | 30.4% | +0.250 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| all-mpnet-base-v2 | 영어 | -0.162 | 26.5% | +0.220 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| paraphrase-multilingual-MiniLM-L12-v2 | 다국어 | -0.187 | 22.7% | +0.180 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| glove.6B.300d | 영어 | -0.470 | 70.7% | +0.630 | `reference_regressions` | 표시 | 0% / 0% / 100% |
+| 후보 | 언어 | nDCG@10 변화 | 잃은 합의 상위 결과 | 순감소 | 라벨 없는 판정 | 라벨 게이트 통과 / 판단 불가 / 실패 |
+|---|---|---|---|---|---|---|
+| KURE-v1 | 다국어 | +0.063 | 0.0% | -0.095 | — | 96% / 4% / 0% |
+| multilingual-e5-large | 다국어 | +0.040 | 2.2% | -0.020 | — | 78% / 22% / 0% |
+| Qwen3-Embedding-0.6B | 다국어 | +0.012 | 5.0% | -0.010 | — | 28% / 69% / 3% |
+| gte-multilingual-base | 다국어 | -0.011 | 6.6% | +0.025 | — | 4% / 88% / 8% |
+| bge-base-en-v1.5 | 영어 | -0.067 | 15.5% | +0.105 | `reference_regressions` | 0% / 33% / 67% |
+| gte-base | 영어 | -0.073 | 15.5% | +0.120 | `reference_regressions` | 0% / 26% / 74% |
+| bge-small-en-v1.5 | 영어 | -0.101 | 20.4% | +0.145 | `reference_regressions` | 0% / 5% / 95% |
+| e5-base-v2 | 영어 | -0.125 | 18.8% | +0.150 | `reference_regressions` | 0% / 1% / 99% |
+| all-MiniLM-L6-v2 | 영어 | -0.157 | 30.4% | +0.250 | `reference_regressions` | 0% / 0% / 100% |
+| all-mpnet-base-v2 | 영어 | -0.162 | 26.5% | +0.220 | `reference_regressions` | 0% / 0% / 100% |
+| paraphrase-multilingual-MiniLM-L12-v2 | 다국어 | -0.187 | 22.7% | +0.180 | `reference_regressions` | 0% / 0% / 100% |
+| glove.6B.300d | 영어 | -0.470 | 70.7% | +0.630 | `reference_regressions` | 0% / 0% / 100% |
 
 폴란드어:
 
-| 후보 | 언어 | nDCG@10 변화 | 잃은 합의 상위 결과 | 순감소 | 순감소 규칙(현재) | 잃은 비율 규칙(여섯 번째 세트) | 라벨 게이트 통과 / 판단 불가 / 실패 |
-|---|---|---|---|---|---|---|---|
-| KURE-v1 | 다국어 | +0.038 | 0.0% | -0.195 | — | — | 58% / 42% / 0% |
-| multilingual-e5-large | 다국어 | +0.030 | 6.4% | -0.010 | — | 표시 | 56% / 44% / 0% |
-| Qwen3-Embedding-0.6B | 다국어 | -0.043 | 17.8% | +0.045 | — | 표시 | 0% / 48% / 52% |
-| gte-multilingual-base | 다국어 | -0.047 | 15.3% | +0.025 | — | 표시 | 0% / 50% / 50% |
-| e5-base-v2 | 영어 | -0.132 | 31.8% | +0.185 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| gte-base | 영어 | -0.141 | 34.4% | +0.200 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| bge-base-en-v1.5 | 영어 | -0.170 | 38.2% | +0.220 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| bge-small-en-v1.5 | 영어 | -0.177 | 38.2% | +0.260 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| paraphrase-multilingual-MiniLM-L12-v2 | 다국어 | -0.196 | 34.4% | +0.215 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| all-mpnet-base-v2 | 영어 | -0.244 | 46.5% | +0.325 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| all-MiniLM-L6-v2 | 영어 | -0.257 | 46.5% | +0.330 | `reference_regressions` | 표시 | 0% / 0% / 100% |
-| glove.6B.300d | 영어 | -0.387 | 79.0% | +0.595 | `reference_regressions` | 표시 | 0% / 0% / 100% |
+| 후보 | 언어 | nDCG@10 변화 | 잃은 합의 상위 결과 | 순감소 | 라벨 없는 판정 | 라벨 게이트 통과 / 판단 불가 / 실패 |
+|---|---|---|---|---|---|---|
+| KURE-v1 | 다국어 | +0.038 | 0.0% | -0.195 | — | 58% / 42% / 0% |
+| multilingual-e5-large | 다국어 | +0.030 | 6.4% | -0.010 | — | 56% / 44% / 0% |
+| Qwen3-Embedding-0.6B | 다국어 | -0.043 | 17.8% | +0.045 | — | 0% / 48% / 52% |
+| gte-multilingual-base | 다국어 | -0.047 | 15.3% | +0.025 | — | 0% / 50% / 50% |
+| e5-base-v2 | 영어 | -0.132 | 31.8% | +0.185 | `reference_regressions` | 0% / 0% / 100% |
+| gte-base | 영어 | -0.141 | 34.4% | +0.200 | `reference_regressions` | 0% / 0% / 100% |
+| bge-base-en-v1.5 | 영어 | -0.170 | 38.2% | +0.220 | `reference_regressions` | 0% / 0% / 100% |
+| bge-small-en-v1.5 | 영어 | -0.177 | 38.2% | +0.260 | `reference_regressions` | 0% / 0% / 100% |
+| paraphrase-multilingual-MiniLM-L12-v2 | 다국어 | -0.196 | 34.4% | +0.215 | `reference_regressions` | 0% / 0% / 100% |
+| all-mpnet-base-v2 | 영어 | -0.244 | 46.5% | +0.325 | `reference_regressions` | 0% / 0% / 100% |
+| all-MiniLM-L6-v2 | 영어 | -0.257 | 46.5% | +0.330 | `reference_regressions` | 0% / 0% / 100% |
+| glove.6B.300d | 영어 | -0.387 | 79.0% | +0.595 | `reference_regressions` | 0% / 0% / 100% |
 
 포르투갈어:
 
-| 후보 | 언어 | nDCG@10 변화 | 잃은 합의 상위 결과 | 순감소 | 순감소 규칙(현재) | 잃은 비율 규칙(여섯 번째 세트) | 라벨 게이트 통과 / 판단 불가 / 실패 |
-|---|---|---|---|---|---|---|---|
-| KURE-v1 | 다국어 | +0.048 | 0.6% | -0.200 | — | — | 78% / 22% / 0% |
-| Qwen3-Embedding-0.6B | 다국어 | +0.034 | 6.4% | -0.075 | — | 표시 | 45% / 55% / 0% |
-| gte-multilingual-base | 다국어 | +0.027 | 5.7% | -0.040 | — | 표시 | 40% / 60% / 0% |
-| multilingual-e5-large | 다국어 | -0.037 | 12.7% | +0.070 | `reference_regressions` | 표시 | 1% / 50% / 49% |
-| gte-base | 영어 | -0.062 | 22.9% | +0.100 | `reference_regressions` | 표시 | 0% / 42% / 58% |
-| e5-base-v2 | 영어 | -0.070 | 17.8% | +0.095 | `reference_regressions` | 표시 | 0% / 18% / 82% |
-| bge-small-en-v1.5 | 영어 | -0.074 | 26.1% | +0.120 | `reference_regressions` | 표시 | 0% / 28% / 72% |
-| bge-base-en-v1.5 | 영어 | -0.076 | 26.1% | +0.135 | `reference_regressions` | 표시 | 0% / 23% / 77% |
-| all-mpnet-base-v2 | 영어 | -0.113 | 30.6% | +0.150 | `reference_regressions` | 표시 | 0% / 2% / 98% |
-| paraphrase-multilingual-MiniLM-L12-v2 | 다국어 | -0.125 | 24.2% | +0.120 | `reference_regressions` | 표시 | 0% / 2% / 98% |
-| all-MiniLM-L6-v2 | 영어 | -0.128 | 29.9% | +0.170 | `reference_regressions` | 표시 | 0% / 2% / 98% |
-| glove.6B.300d | 영어 | -0.322 | 74.5% | +0.575 | `reference_regressions` | 표시 | 0% / 0% / 100% |
+| 후보 | 언어 | nDCG@10 변화 | 잃은 합의 상위 결과 | 순감소 | 라벨 없는 판정 | 라벨 게이트 통과 / 판단 불가 / 실패 |
+|---|---|---|---|---|---|---|
+| KURE-v1 | 다국어 | +0.048 | 0.6% | -0.200 | — | 78% / 22% / 0% |
+| Qwen3-Embedding-0.6B | 다국어 | +0.034 | 6.4% | -0.075 | — | 45% / 55% / 0% |
+| gte-multilingual-base | 다국어 | +0.027 | 5.7% | -0.040 | — | 40% / 60% / 0% |
+| multilingual-e5-large | 다국어 | -0.037 | 12.7% | +0.070 | `reference_regressions` | 1% / 50% / 49% |
+| gte-base | 영어 | -0.062 | 22.9% | +0.100 | `reference_regressions` | 0% / 42% / 58% |
+| e5-base-v2 | 영어 | -0.070 | 17.8% | +0.095 | `reference_regressions` | 0% / 18% / 82% |
+| bge-small-en-v1.5 | 영어 | -0.074 | 26.1% | +0.120 | `reference_regressions` | 0% / 28% / 72% |
+| bge-base-en-v1.5 | 영어 | -0.076 | 26.1% | +0.135 | `reference_regressions` | 0% / 23% / 77% |
+| all-mpnet-base-v2 | 영어 | -0.113 | 30.6% | +0.150 | `reference_regressions` | 0% / 2% / 98% |
+| paraphrase-multilingual-MiniLM-L12-v2 | 다국어 | -0.125 | 24.2% | +0.120 | `reference_regressions` | 0% / 2% / 98% |
+| all-MiniLM-L6-v2 | 영어 | -0.128 | 29.9% | +0.170 | `reference_regressions` | 0% / 2% / 98% |
+| glove.6B.300d | 영어 | -0.322 | 74.5% | +0.575 | `reference_regressions` | 0% / 0% / 100% |
 
 ## 보여 주는 것
 
 - **라벨 없는 신호는 후보의 순위를 매깁니다.** 순감소는 손실과 함께 커졌습니다. 영어 전용 모델은
   0.095~0.63, paraphrase-multilingual-MiniLM-L12-v2는 0.12~0.22였고, 개선한 후보는 모두 0 아래였습니다.
   nDCG@10을 0.06 이상 잃은 후보는 모두 표시했습니다.
-- **순감소는 여기서 개선을 하나도 표시하지 않았고, 잃은 비율은 7건 중 3건을 표시했습니다.** 폴란드어의
-  multilingual-e5-large(+0.030), 포르투갈어의 Qwen3-Embedding-0.6B와 gte-multilingual-base(+0.034,
-  +0.027)는 합의 상위 결과를 5.7~6.4% 잃어 0.05를 조금 넘었지만, 다른 곳에서 기준 모델의 첫 결과를 더
-  찾았습니다(순감소 -0.010~-0.075). 이전 규칙은 잃은 것만 세어 여섯 번째 세트 9개 데이터세트에서 개선
-  27건 중 5건을 표시했고, 사전 등록한 기준은 실패했습니다.
-- **순감소는 다국어 모델 사이의 작은 손실을 놓칩니다.** 0.037~0.047을 잃은 다국어 후보 3개 중 1개(포르투갈어
+- **여기서 개선은 하나도 표시하지 않았습니다.** nDCG@10이 좋아진 후보는 모두 순감소가 0 아래였고,
+  합의 상위 결과를 5.7~6.4% 잃은 후보(폴란드어 multilingual-e5-large, 포르투갈어
+  Qwen3-Embedding-0.6B와 gte-multilingual-base)도 마찬가지였습니다. 새 모델은 예전 모델의 합의 결과
+  일부를 잃으면서 다른 곳에서 기준 모델의 첫 결과를 더 찾습니다.
+- **다국어 모델 사이의 작은 손실은 놓칩니다.** 0.037~0.047을 잃은 다국어 후보 3개 중 1개(포르투갈어
   multilingual-e5-large, 순감소 0.070)만 표시했습니다. 폴란드어의 Qwen3-Embedding-0.6B와
   gte-multilingual-base(순감소 0.045, 0.025, 표준오차 2배 이내)는 표시도 검토 대상도 아니었습니다.
-  잃은 비율은 셋 다 표시했습니다. 일곱 번째 세트도 처음 보는 데이터에서 같은 양상을 보였습니다(그런 손실
-  13건 중 1건 표시). 라벨 없는 결과가 깨끗하다고 nDCG@10이 유지됐다는 증거는 아닙니다.
+  held-out 데이터도 같아서, 그런 손실 13건 중 1건만 표시했습니다. 라벨 없는 결과가 깨끗하다고
+  nDCG@10이 유지됐다는 증거는 아닙니다.
 - **라벨 게이트는 방향을 거의 틀리지 않았습니다.** 라벨 질의 100개로, 0.03 이상 잃은 후보는 부분집합의
   1% 이하에서만 통과했고, 개선은 3% 이하에서만 실패했습니다(이탈리아어 Qwen3-Embedding-0.6B,
   +0.012). 나머지는 손실을 실패시키거나 개선을 통과시키거나 판단 불가라고 했습니다. 작은 차이는 판단

@@ -80,11 +80,11 @@ In CI:
   `reference_regressions`. Report it as "lost the top hits the reference agrees on: likely
   harmful, check with labels", and kept hits as "no sign of harm", never as proof. It misses
   small losses spread over lower ranks (truncation, quantization), some lost-row faults
-  (zero vectors; the findings catch them) and duplicated rows (`collapse` does). On the
-  preregistered seventh set it flagged 89% of fault drops above 0.02 and none of 81 harmless
-  faults, so no flag is not proof of no harm.
+  (zero vectors; the findings catch them) and duplicated rows (`collapse` does). On
+  preregistered held-out data it flagged 89% of fault drops above 0.02 and none of 81
+  harmless faults, so no flag is not proof of no harm.
   For a change of embedding model it is not a verdict. It rarely flags a better model (1 of
-  85 harmless swaps on the seventh set; the lost share it replaced flagged 28), but it missed
+  85 harmless swaps on held-out data), but it missed
   12 of 13 losses of 0.02 to 0.09 between multilingual models of similar quality. Use the
   net drop to drop candidates that lose many agreed hits, and decide the swap with labeled
   queries and `--retrieval-confidence 0.95` (0.07% of harmful swaps passed, 0.65% of harmless
@@ -199,9 +199,9 @@ Inputs: one vector per row in `.npy/.npz/.parquet/.jsonl/.json/.csv`.
     property of the data (a shared collapse still means duplicated rows to remove), not as a
     model fault. Never pick a reference that may share the fault (an English-only model on
     another language), and never pick one to make the audit pass.
-    A finding still at `fail` with the reference is the model's own (on a preregistered
-    second set the reference cleared most `warn` flags of good pipelines but none of their
-    `fail`s): report it as such and let labeled retrieval decide whether it costs anything.
+    A finding still at `fail` with the reference and its lowering rules is the model's own
+    (on held-out data they cleared 15 of 21 good pipelines at `fail` and no bad one): report
+    it as such and let labeled retrieval decide whether it costs anything.
   - `query_gap` is a distance ratio that short queries against long passages keep at 1 to 2.5
     for good pipelines, so read it as "same space or not", never as a quality score.
   - `ood_queries` is deprecated: report `query_gap` instead.

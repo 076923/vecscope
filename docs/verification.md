@@ -238,23 +238,22 @@ and TREC-COVID (171k abstracts). A pipeline is good at 90% or more of the best n
 dataset and bad at 50% or less. The tables per language, document length, corpus size and
 domain are in [held-out validation](validation.md); the harness is `examples/validation/`.
 
-The first run found a defect in `query_hubness`, not a threshold to move. With few queries
-over a large corpus most items appear in no top-k list, so the k-occurrence skewness is high
+`query_hubness` is judged against chance. With few queries over a large corpus most items
+appear in no top-k list, so the k-occurrence skewness is high
 even when no item is a hub: if every query drew its k results at random, an item's count would
 be Binomial(queries, k/n) with skewness (1 - 2p) / sqrt(queries p (1 - p)), p = k/n. Random
 data with no structure gives exactly that (4.86 at 300 queries over 70k items, 18.36 at 50
-over 170k), so 15 of 15 good pipelines over 50k documents read `warn` or `fail` from chance
-alone. The finding now reports that value (`details.null_skewness`) and gives no verdict
-level that chance reaches (`details.not_judged`, with the queries that would judge it). The
-rule follows from the null model, not from these datasets; the thresholds are unchanged, and
-on the data they were fitted on chance stays near 1.1 to 1.3, below warn_at 4. The numbers
-below are from the re-run with that change.
+over 170k); judged without it, 15 of 15 good pipelines over 50k documents here would read
+`warn` or `fail` from chance alone. The finding reports that value (`details.null_skewness`)
+and gives no verdict level that chance reaches (`details.not_judged`, with the queries that
+would judge it). The rule follows from the null model; on the data the thresholds were
+fitted on, chance stays near 1.1 to 1.3, below warn_at 4.
 
 | claim | result |
 |---|---|
-| bad pipelines | 54 of 67 end at `fail` (the default `--fail-on fail` blocks them) and 66 have a finding that is not `ok`. The one without: an English-only e5 on French MIRACL (nDCG@10 0.26 against 0.59), which the first run flagged only through `query_hubness` 4.57, below the 4.69 chance gives at its 343 queries |
+| bad pipelines | 54 of 67 end at `fail` (the default `--fail-on fail` blocks them) and 66 have a finding that is not `ok`. The one without: an English-only e5 on French MIRACL (nDCG@10 0.26 against 0.59), whose `query_hubness` 4.57 is below the 4.69 chance gives at its 343 queries |
 | good pipelines | 26 of 114 end at `fail` and 26 have every finding `ok`; on documents of 200 characters or more 4 of 54 end at `fail`, on shorter ones 22 of 60 |
-| `query_hubness` | not ok on 9 good pipelines (24 in the first run) and on none of the 15 over 50k documents; not judged at warn on 49 pipelines; it still correlates negatively with nDCG@10 on all 19 datasets (Spearman -0.42 to -0.90, and -0.09 on legal summarization) |
+| `query_hubness` | not ok on 9 good pipelines (24 judged without chance) and on none of the 15 over 50k documents; not judged at warn on 49 pipelines; it still correlates negatively with nDCG@10 on all 19 datasets (Spearman -0.42 to -0.90, and -0.09 on legal summarization) |
 | findings that misfire on short text | `effective_rank` (47% of good pipelines) and `collapse` (42%); `effective_rank` is not a small-sample bias (1,000 rows of a MIRACL corpus give 0.152, all 71k rows 0.175), short texts occupy fewer directions. `query_gap`, `anisotropy` and `effective_rank` change sign against nDCG@10 from one dataset to the next |
 | `collapse` on duplicated text | CoSQA's documents are 70% duplicate texts, and `collapse` says so on every model; the report counts that as correct |
 | calibrating a domain the defaults misfire on | on XPQA ja, `vecscope calibrate` over the 14 models (fitted on half the queries, checked on the other half) proposes no threshold: `query_hubness` and `distance_concentration` move with quality (Spearman -0.70 and 0.70, Holm p 0.045) but the good and bad models overlap, and `collapse`, `effective_rank` and `hubness`, which flag every good model there, do not move with quality |
@@ -299,601 +298,122 @@ Not covered: the thresholds and the query findings were fitted on SciFact, NFCor
 ko-strategyqa; the held-out run above measured them and did not refit. Production query logs
 and private corpora were not measured.
 
-### A second held-out set, preregistered
+### Preregistered held-out sets
 
-Four changes were designed after reading the first held-out set: the chance rule for
-`query_hubness`, the reference model (`--reference`), the label-free result change
-(`--result-sample`) and the labeled-query budget. That set cannot confirm them. So the code,
-the thresholds and four pass criteria were committed
-([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration.md))
-before seven more public datasets were downloaded. The datasets are:
+Six more sets of public data test the rules on data no rule was designed on. For each set the
+code, the thresholds and pass criteria were committed before its datasets were downloaded
+(the `preregistration*.md` files in `examples/validation/`), the set was run once with the
+same 14 public models, and every result is reported whether it passed or failed. A rule is
+credited only with the sets run after it was frozen.
 
-- WebFAQ Korean, Thai and Vietnamese (102k to 124k FAQ answers in two of them)
-- JaGovFaqs
-- GerDaLIR (German legal)
-- CQADupStack webmasters
-- TurHistQuad (Turkish)
-
-They were run once with the same 14 models: 98 pipelines, 36 good and 41 bad. Nothing was
-tuned on them, and `examples/validation/confirm.py` scores the criteria
-(`confirm_summary.json`). One criterion failed.
-
-| prediction | criterion | result |
-|---|---|---|
-| P1 `query_hubness` against chance | good pipelines flagged with the rule no more than with the thresholds alone, and at least 90% of the bad ones at `fail` kept | **passed, with nothing to test**: 9 and 9 good flagged, 20 of 20 bad kept. Every dataset here has 1,000 or more queries, so chance stayed at 0.3 to 3.2, below warn 4, and the rule changed no verdict |
-| P2a reference model, good | good pipelines at `fail` with the reference at most 75% of those without | **failed**: 6 and 6 |
-| P2b reference model, bad | bad pipelines at `fail` with the reference at least 95% of those without | passed: 34 and 34 of 41; all 41 still flagged |
-| P3 labeled-query budget | with 100 labeled queries, at least 85% of harmful faults caught and 90% of those dropping more than 0.02 | passed: 87% and 97% |
-| P4 result change | every injected fault changes the sampled top-k, an identical re-run changes none | passed: 120 of 120 faults, 4 of 4 re-runs at 0 |
-
-Why P2a failed. The reference did take most flags off good pipelines: flagged went from 34 to
-14 of 36, and all-ok from 2 to 22. It explained hubness on 23 good pipelines and collapse on
-10. It did not take any good pipeline off `fail`. The six that stay are each well past their
-reference on the same rows, so by the rule the rows do not explain them:
-
-| dataset | model | finding | value | reference value (bge-m3, or multilingual-e5-base for bge-m3) |
+| set | datasets | reference model | pipelines (good / bad) | scored by |
 |---|---|---|---|---|
-| WebFAQ ko | multilingual-e5-large | query_hubness / hubness | 70.0 / 12.2 | 3.7 / 2.8 |
-| WebFAQ ko | multilingual-e5-base | query_hubness / hubness | 26.4 / 4.7 | 3.7 / 2.8 |
-| WebFAQ th | multilingual-e5-large | query_hubness | 48.5 | 3.8 |
-| WebFAQ th | multilingual-e5-base | query_hubness | 11.1 | 3.8 |
-| WebFAQ th | bge-m3 | hubness | 4.1 | 2.8 |
-| WebFAQ vi | Qwen3-Embedding-0.6B | hubness | 6.2 | 2.9 |
+| 2 | WebFAQ Korean, Thai and Vietnamese, JaGovFaqs, GerDaLIR, CQADupStack webmasters, TurHistQuad | bge-m3 | 98 (36 / 41) | `confirm.py` |
+| 3 | MIRACL Korean and Thai, SCIDOCS, WebFAQ Indonesian, ArguAna, StackOverflowQA, Wikipedia Bengali and Czech, AutoRAG | bge-m3 | 126 (47 / 40) | `third.py` |
+| 4 | CQADupStack Android, FeedbackQA, HunSum2, Wikipedia Italian and Persian, WebFAQ Malay, Hebrew, Greek and Hungarian, RuBQ, LitSearch | bge-m3 | 154 (59 / 40) | `fourth.py` |
+| 5 | CQADupStack Mathematica, Wikipedia Portuguese and Finnish, WebFAQ Estonian, Serbian and Romanian, CodeSearchNet Ruby, MIRACL Spanish | gte-multilingual-base | 112 (46 / 20) | `fifth.py` |
+| 6 | XPQA Italian, Polish and Portuguese, Wikipedia Dutch and Swedish, WebFAQ Lithuanian and Czech, CodeSearchNet PHP, MIRACL Chinese | bge-m3 | 126 (47 / 24) | `sixth.py` |
+| 7 | XPQA Tamil, Wikipedia Danish, Norwegian, Romanian, Bulgarian and German, WebFAQ Croatian, Slovak and Bulgarian, CodeSearchNet JavaScript | bge-m3 | 140 (52 / 32) | `seventh.py` |
 
-These are real hubs that a good nDCG@10 tolerates: an e5 model on Korean FAQs puts a few
-answers in a large share of the top-10 lists and still ranks the right answer first often
-enough. The reference rule is meant to clear what the rows cause, not what one model does
-on them. So it fixes most of the short-text noise (`warn` flags), and it does not fix the
-`fail` level on the multilingual-e5 family. On the first set too, the good pipelines left at
-`fail` were mostly that family.
+The reference model of bge-m3 itself is gte-multilingual-base, and the reverse on set 5. Each
+script writes its `*_summary.json` next to it. On every set the six faults of the first held-out
+set (above) were injected into good pipelines, on corpora of up to 25k documents and on sets 6
+and 7 also on larger ones (up to 81k). A model change replaces a baseline model (multilingual-e5-base, and on set 7
+also paraphrase-multilingual-MiniLM-L12-v2) by each other model except the reference;
+harmful means exact nDCG@10 fell by more than 0.01. Intervals are 95% Wilson intervals.
 
-P3, read with its limits. The table, on 120 faults of 20 good pipelines over the four corpora
-with at most 25k documents:
+#### Agreed top hits
 
-| labeled queries | harmful caught (95) | drop 0.02 to 0.05 (43) | drop above 0.05 (24) | harmless failed (25) |
-|---|---|---|---|---|
-| 25 | 75% | 77% | 98% | 34% |
-| 50 | 82% | 87% | 99% | 30% |
-| 100 | 87% | 95% | 100% | 26% |
-| 200 | 91% | 99% | 100% | 18% |
-| 400 | 95% | 100% | 100% | 11% |
-
-It is a few points below the first set at 25 to 100 queries: 28 of the 95 harmful faults here
-cost between 0.01 and 0.02, and 100 queries catch 65% of those. Only 25 harmless runs were
-there, so the false-alarm share is rough.
-
-P4 confirms that every one of the six faults moves the sampled results, the lost id mapping
-included, and that the comparison is exact. It does not say whether a change is harmful: on
-the first set's 594 faults the changed share separated harmful from harmless at AUC 0.58.
-
-What this changes:
-
-- The reference model clears short-text `warn` flags. It is not a reason to trust `fail` on a
-  good-scoring pipeline: a finding that stays at `fail` with the reference is the model's
-  own, and only labeled retrieval says whether it costs anything.
-- 100 labeled queries are enough to gate drops above two nDCG points on corpora like these.
-  Smaller drops need several hundred.
-- The chance rule for `query_hubness` was not tested here, because every dataset had enough
-  queries. The first set and the random-data checks are still its only evidence.
-
-### A third held-out set, preregistered
-
-The second set left the chance rule for `query_hubness` untested. Two changes were designed
-after it, on the first set's faults: the overlap with a reference model's results as a
-label-free sign of harm (`--reference-tolerance`), and the labeled gate judged against the
-noise of its queries (`--retrieval-confidence`). The code, the thresholds and the criteria
-were committed
-([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_third.md))
-before nine more public datasets were downloaded:
-
-- four with few queries over 25k to 117k documents, so chance alone puts `query_hubness`
-  above warn: MIRACL Korean and Thai, SCIDOCS, WebFAQ Indonesian
-- five with at most 25k documents for the injected faults: ArguAna, StackOverflowQA,
-  Wikipedia Bengali and Czech, AutoRAG (Korean)
-
-They were run once with the same 14 models: 126 pipelines, 47 good and 40 bad.
-`examples/validation/third.py` scores the criteria (`third_summary.json`). No bug was found
-in the script after the freeze. One criterion failed.
-
-| prediction | criterion | result |
-|---|---|---|
-| P1a `query_hubness` against chance, good | good pipelines flagged with the rule at most half of those flagged by the thresholds alone | passed: 21 of 21 flagged by the thresholds alone, 0 with the rule (chance skewness 4.5 to 8.2) |
-| P1b same, bad | at least 90% of the bad pipelines at `fail` by the thresholds alone kept at `fail` | passed: 17 of 17 |
-| P5a reference overlap, separation | z of the paired drop separates harmful from harmless faults at AUC 0.80 or more, and 0.10 above the changed share | passed, at the edge: 0.802; the changed share gave 0.468 |
-| P5b reference overlap at 0.02 | at least 70% of the faults costing more than 0.02 flagged, at most 35% of the harmless ones | **failed**: 64 of 81 (79%) flagged, but also 18 of 41 harmless (44%) |
-| P6a labeled gate at 0.95, harmful | harmful faults pass at most 3% of the time and at most half as often as with the mean alone | passed: 0.4%, against 3.9% with the mean |
-| P6b same, harmless | harmless faults fail at most 0.75 times as often as with the mean alone | passed: 10.1%, against 23.7% |
-| P7 determinism | the audit with reference, result sample and qrels gives identical JSON twice | passed: 5 of 5 |
-
-The faults were the six of `faults.py` on 26 good pipelines (156 runs; 130 without the
-duplicates; 89 of those harmful, 41 harmless). P6 drew 200 subsets of 100 labeled queries
-per fault.
-
-Why P5b failed. The overlap tracks distance from the reference, and some changes move away
-from it without costing labeled retrieval:
-
-| fault | runs | nDCG@10 drop above 0.01 | flagged at 0.02 | harmless flagged |
-|---|---|---|---|---|
-| query model swapped | 26 | 23 | 23 | 0 of 3 |
-| id mapping lost (10% of rows) | 26 | 26 | 26 | none harmless |
-| truncated to half the dimensions | 26 | 11 | 22 | 11 of 15 |
-| quantized to 4 bits | 26 | 5 | 10 | 6 of 21 |
-| 5% zero rows | 26 | 24 | 8 | 1 of 2 |
-| 20% duplicated rows | 26 | 26 | 0 | none harmless |
-
-- Truncation and quantization: most of the false alarms. On the Wikipedia and AutoRAG
-  corpora they pull the results 0.02 to 0.11 away from the reference while nDCG@10 falls by
-  less than 0.01. A reference shares only part of the top-k with any model, and moving
-  within the rest does not always cost relevant results.
-- Zero rows: missed 17 of 24 times. Losing 5% of the rows lowered the overlap by a median of
-  0.018, under the tolerance, while it cost a median 0.036 nDCG@10 because the lost rows
-  include relevant documents. The findings catch zero rows: on the first set the baseline
-  diff caught all 84 harmful ones.
-- Duplicates: unseen, as predicted. The reference embeds the duplicated rows too.
-
-P6 confirms the labeled gate judged against noise. With 100 labeled queries, harmful
-faults failed 87.5% of the time, were inconclusive 12.0% and passed 0.4%. Harmless faults
-failed 10.1%, were inconclusive 68.1% and passed 21.8%. Most harmless faults cost just
-under 0.01, and 100 labels cannot settle them; the gate says so instead of guessing.
-
-P1 confirms the chance rule where it applies: on four corpora with 60 to 213 queries, every
-good pipeline that the thresholds put on `query_hubness` was cleared, and no bad pipeline at
-`fail` was.
-
-The reference rule for findings, reported without a prediction, behaved as on the second
-set. Good pipelines flagged went from 32 to 15 of 47. The same 6 stayed at `fail`: e5 models
-on StackOverflowQA and WebFAQ Indonesian, and KURE-v1 and Qwen3 on WebFAQ Indonesian, all
-on `hubness`. Of the bad pipelines, 39 of 40 stayed at `fail` and all 40 were still flagged.
-
-What this changes:
-
-- `--retrieval-confidence 0.95` is the recommended labeled gate: on unseen data it let
-  harmful changes through at a tenth of the mean rule's rate and failed harmless ones less
-  than half as often. Read inconclusive as "label more queries".
-- The reference overlap orders changes by likely harm (AUC 0.80), but at 0.02 it also flags
-  close to half of the harmless changes on these corpora, and it misses lost rows. Treat
-  `reference_regressions` as "check with labels before merging", not as a failure on its
-  own.
-- The chance rule for `query_hubness` held on its first test: on small query sets, trust it
-  over the thresholds alone.
-
-### A fourth held-out set, preregistered
-
-The third set left two problems. The overlap drop flagged 44% of the harmless faults (P5b
-failed), and a hub that a good model makes stayed at `fail` with the reference rule (6 good
-pipelines on the second set and 6 on the third). Two changes were designed on the first three
-sets:
-
-- **Agreed top hits:** the share of the agreed top hits that the new run lost
-  (`reference_top_hit`, flagged above 0.05 and 2 standard errors). An agreed top hit is the
-  reference's first result, counted only when it is also in the baseline top-10.
-- **Retrieval agreement:** a hub finding still at `fail` is lowered to `warn` when the
-  reference returns at least 40% of the pipeline's top-10 for the same queries.
-
-The code, the thresholds and the criteria were committed
-([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_fourth.md))
-before eleven more public datasets were downloaded:
-
-- six with at most 25k documents, used for the injected faults:
-  - CQADupStack Android
-  - FeedbackQA
-  - HunSum2 (Hungarian)
-  - Wikipedia Italian and Persian
-  - WebFAQ Malay
-- five larger sets:
-  - WebFAQ Hebrew, Greek and Hungarian
-  - RuBQ (Russian)
-  - LitSearch
-
-They were run once with the same 14 models: 154 pipelines, 59 good and 40 bad.
-`examples/validation/fourth.py` scores the criteria (`fourth_summary.json`). It ran unchanged
-from the frozen commit, and no bug was found in it after the freeze. Every criterion passed.
-
-| prediction | criterion | result |
-|---|---|---|
-| P8a agreed top hits, separation | z of the lost share separates harmful from harmless faults at AUC 0.85 or more | passed: 0.971 (overlap drop 0.807, changed share 0.433) |
-| P8b same at 0.05 | at least 65% of the faults costing more than 0.02 flagged, at most 15% of the harmless ones | passed: 83 of 116 (72%), and 1 of 48 harmless (2%) |
-| P8c against the overlap drop | harmless faults flagged at most half as often as by the overlap drop at 0.02 | passed: 1 of 48, against 21 of 48 (44%) |
-| P9a agreement, good | at least half of the good pipelines at `fail` with the reference end without a `fail` | passed: 6 of 8 |
-| P9b same, bad | at least 95% of the bad pipelines at `fail` with the reference stay at `fail` | passed: 38 of 38 |
-| P9c same, faults | at least 95% of the harmful faults the findings caught are still caught | passed: 100 of 100 |
-| P10 determinism | the audit with reference, result sample and qrels gives identical JSON twice | passed: 6 of 6 |
-
-The faults were the six of `faults.py` on 37 good pipelines (222 runs; 185 without the
-duplicates, of which 137 were harmful and 48 harmless). By fault, at 0.05:
-
-| fault | runs | nDCG@10 drop above 0.01 | harmful flagged | harmless flagged |
-|---|---|---|---|---|
-| query model swapped | 37 | 32 | 28 | 0 of 5 |
-| id mapping lost (10% of rows) | 37 | 37 | 37 | none harmless |
-| truncated to half the dimensions | 37 | 20 | 5 | 1 of 17 |
-| quantized to 4 bits | 37 | 11 | 2 | 0 of 26 |
-| 5% zero rows | 37 | 37 | 16 | none harmless |
-| 20% duplicated rows | 37 | 37 | 0 | none harmless |
-
-- The rule now almost never flags a harmless change: truncation and quantization moved the
-  results away from the reference without losing the agreed top hits.
-- The cost is recall of small losses. The overlap drop flagged 97 of the 116 faults costing
-  more than 0.02, and the agreed top hits flagged 83. Truncations and quantizations that cost
-  nDCG@10 mostly lose relevant results below the agreed first hit, and the rule does not see
-  them.
-- Zero rows: still caught only 16 of 37 times. The findings catch them.
-- Duplicates: unseen, as predicted.
-
-Good pipelines at `fail` went from 14 without a reference to 8 with the reference rule, and
-to 2 with the agreement rule. Neither of the 2 left is a hub: both are `effective_rank` on
-LitSearch (Qwen3 and bge-base-en-v1.5, agreement 0.35 and 0.32). Good pipelines flagged went
-from 46 to 18 of 59. Bad pipelines stayed at `fail` 38 of 40 times, the same as without a
-reference, and all 40 were still flagged. Across the 99 good and bad pipelines, the agreement
-separated good from bad at AUC 1.0. Good pipelines agreed 0.31 to 0.83 with the reference;
-bad pipelines agreed at most 0.23.
-
-Reported without predictions:
-
-- **Chance rule for `query_hubness`:** it applied only to LitSearch. It cleared the 4 good
-  pipelines that the thresholds alone flagged; no bad pipeline was at `fail` there.
-- **Labeled gate at 0.95, with 100 labeled queries:**
-  - harmful faults, duplicates included: 0.8% passed, against 7.0% with the mean alone
-  - harmless faults: 13.1% failed, against 24.3% with the mean alone
-
-What this changes:
-
-- `reference_regressions` at 0.05 is a usable label-free gate on unseen data: in this test
-  it flagged 72% of the large losses and 2% of the harmless changes. Do not read its silence
-  as "no harm", because it misses lost rows, duplicates and small losses below the first
-  hit. Keep the findings and, where possible, labeled queries.
-- With a reference and queries, hub findings that a good model makes no longer fail the
-  audit. A finding of any other kind keeps its verdict.
-
-### A fifth held-out set, preregistered
-
-The fourth set left three limits:
-
-- The agreed top hits at 0.05 missed small losses below the reference's first result.
-- Two good pipelines stayed at `fail` on `effective_rank` (LitSearch), where the reference
-  was at `warn`.
-- Every set used one reference model, bge-m3, and faults were injected only into corpora of
-  at most 25k documents.
-
-Two changes were designed on the first four sets:
-
-- **Review tier:** a lost share of agreed top hits above 0.03 and 2 standard errors, below
-  the 0.05 tolerance, is listed in `reference_review`. It never fails a gate.
-- **One step for `effective_rank`:** an `effective_rank` at `fail` where the reference is at
-  `warn` is lowered to `warn`, not to `ok`. The row-level findings keep the strict rule.
-
-The code, the thresholds and the criteria were committed
-([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_fifth.md))
-before eight more public datasets were downloaded:
-
-- six with at most 25k documents, used for the injected faults:
-  - CQADupStack Mathematica
-  - Wikipedia Portuguese and Finnish
-  - WebFAQ Estonian and Serbian
-  - CodeSearchNet Ruby
-- two larger corpora:
-  - WebFAQ Romanian (59,892 documents)
-  - MIRACL Spanish (146,750 documents)
-
-The reference model was changed to **gte-multilingual-base** (bge-m3 for
-gte-multilingual-base itself); every earlier set used bge-m3. The sets were run once with the
-same 14 models: 112 pipelines, 46 good and 20 bad. `examples/validation/fifth.py` scores the
-criteria (`fifth_summary.json`). It ran unchanged from the frozen commit, and no bug was found
-in it after the freeze. Every criterion passed.
-
-| prediction | criterion | result |
-|---|---|---|
-| P11a agreed top hits, another reference | z of the lost share separates harmful from harmless faults at AUC 0.85 or more | passed: 0.928 (overlap drop 0.867, changed share 0.459) |
-| P11b same at 0.05 | at least 65% of the faults costing more than 0.02 flagged, at most 15% of the harmless ones | passed: 80 of 103 (78%), and 1 of 47 harmless (2%) |
-| P12a review tier, missed losses | at least half of the faults above 0.02 that 0.05 did not flag are listed for review | passed: 12 of 23 (52%) |
-| P12b review tier, harmless | at most 25% of the harmless faults listed for review | passed: 3 of 47 (6%) |
-| P13a lowering rules, good | at least half of the good pipelines at `fail` with the reference end without a `fail` | passed: 4 of 5 |
-| P13b same, bad | at least 95% of the bad pipelines at `fail` with the reference stay at `fail` | passed: 17 of 17 |
-| P13c same, faults | at least 95% of the harmful faults the findings caught are still caught | passed: 94 of 94 |
-| P14 determinism | the audit with reference, result sample and qrels gives identical JSON twice | passed: 6 of 6 |
-
-The faults were the six of `faults.py` on 35 good pipelines (210 runs; 175 without the
-duplicates, of which 128 were harmful and 47 harmless). By fault, at 0.05:
-
-| fault | runs | nDCG@10 drop above 0.01 | harmful flagged | harmless flagged |
-|---|---|---|---|---|
-| query model swapped | 35 | 30 | 28 | 0 of 5 |
-| id mapping lost (10% of rows) | 35 | 35 | 35 | none harmless |
-| truncated to half the dimensions | 35 | 18 | 3 | 1 of 17 |
-| quantized to 4 bits | 35 | 10 | 0 | 0 of 25 |
-| 5% zero rows | 35 | 35 | 20 | none harmless |
-| 20% duplicated rows | 35 | 35 | 0 | none harmless |
-
-- With another reference model, the agreed top hits held: 2% of the harmless faults flagged,
-  as on the fourth set. The overlap drop at 0.02 flagged 13 of 47.
-- With the review tier, 92 of the 103 faults costing more than 0.02 were flagged or listed
-  for review, and 3 harmless faults were listed. P12a passed by one fault (12 of 23, against
-  11.5 needed).
-- Truncation and quantization are still the weak spot: 3 of 18 and 0 of 10 harmful runs
-  flagged at 0.05. The review tier lists some of them, and labeled queries remain the way to
-  measure them.
-
-Good pipelines at `fail` went from 5 without a reference to 5 with the reference rule and to
-1 with the two lowering rules. The one left is a hub, multilingual-e5-large on WebFAQ
-Estonian, agreeing at 0.39 with the reference against the threshold of 0.40. Good pipelines
-flagged went from 28 to 14 of 46. Bad pipelines stayed at `fail` 17 of 20 times, the same as
-without a reference. With the reference, 19 of the 20 were flagged: the reference rule
-explained the only flag (a hubness `warn`) of gte-base on MIRACL Spanish, a bad pipeline
-(0.46 of the best). Across the 66 good and bad pipelines, the agreement
-separated good from bad at AUC 1.0: good pipelines agreed 0.36 to 0.60 with the reference,
-bad ones at most 0.28.
-
-Reported without predictions:
-
-- **Each lowering rule apart:**
-  - The agreement rule lowered hub findings on 4 good pipelines and no bad one.
-  - The one-step rule lowered `effective_rank` on 3 bad pipelines and no good one. All 3
-    kept another `fail`.
-- **Larger corpora:** on WebFAQ Romanian and MIRACL Spanish, no good pipeline was at `fail`
-  with or without the reference. The 3 bad pipelines on each were at `fail` in all three
-  counts.
-- **Chance rule for `query_hubness`:** no dataset had few enough queries for it to apply.
-- **Labeled gate at 0.95, with 100 labeled queries:**
-  - harmful faults, duplicates included: 1.0% passed, against 8.4% with the mean alone
-  - harmless faults: 10.4% failed, against 21.7% with the mean alone
-
-What this changes:
-
-- The agreed top hits do not depend on bge-m3: with gte-multilingual-base as the reference,
-  they flagged 78% of the large losses and 2% of the harmless changes.
-- Read `reference_review` as "check with labels". On this set it listed half of the large
-  losses that 0.05 missed, and 6% of the harmless changes.
-- The one-step rule did not lower a good pipeline on this set. On the first four sets it
-  lowered 10. It cost no bad pipeline its `fail` here.
-- The faults were still injected only into corpora of at most 25k documents. The two larger
-  corpora tested the verdicts on clean pipelines only.
-
-### Intervals on the preregistered counts
-
-A criterion that passes on a small count is weak evidence. `examples/validation/intervals.py`
-puts a 95% interval on each count of the fourth and fifth sets
-(`intervals_summary.json`). Counts of pipelines use the Wilson interval. Statistics of the
-injected faults resample whole pipelines, because the six faults of one pipeline share its
-corpus and queries (2,000 draws).
-
-| set | result | value | 95% interval |
-|---|---|---|---|
-| fourth | P8a AUC of the agreed top hits | 0.971 | 0.944 to 0.990 |
-| fourth | P8b large losses flagged | 83 of 116 (72%) | 65% to 79% |
-| fourth | P8b harmless flagged | 1 of 48 (2%) | 0% to 7% |
-| fourth | P9a good pipelines cleared | 6 of 8 | 41% to 93% |
-| fourth | P9b bad pipelines kept at `fail` | 38 of 38 | 91% to 100% |
-| fifth | P11a AUC of the agreed top hits | 0.928 | 0.881 to 0.965 |
-| fifth | P11b large losses flagged | 80 of 103 (78%) | 69% to 86% |
-| fifth | P11b harmless flagged | 1 of 47 (2%) | 0% to 7% |
-| fifth | P12a missed losses listed for review | 12 of 23 (52%) | 32% to 70% |
-| fifth | P12b harmless listed for review | 3 of 47 (6%) | 0% to 17% |
-| fifth | P13a good pipelines cleared | 4 of 5 | 38% to 96% |
-| fifth | P13b bad pipelines kept at `fail` | 17 of 17 | 82% to 100% |
-| fifth | P13c faults still caught | 94 of 94 | 96% to 100% |
-
-- The agreed top hits are well supported: on both sets the AUC interval stays above 0.85
-  and the harmless share stays under 15%.
-- P12a passed on its point value, but its interval reaches 32%. The fifth set does not show
-  that the review tier lists half of the missed losses.
-- The share of good pipelines cleared rests on 5 to 8 pipelines per set. It is a direction,
-  not a rate.
-- A single set cannot show 95% for the bad pipelines kept. Pooled, the two sets kept 55 of
-  55 (93% to 100%) and the faults 194 of 194 (98% to 100%).
-
-The sixth set ([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_sixth.md))
-reports these intervals with every result.
-
-### A sixth held-out set, preregistered
-
-The fifth set passed every prediction, but left three questions: several criteria passed on
-small counts (see the intervals above), every fault went into a corpus of at most 25k
-documents, and the most common change a team makes, replacing the embedding model, was never
-judged against labels. **No rule changed after the fifth set.** The code, the criteria and a
-new prediction on model changes were committed
-([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_sixth.md))
-before nine more public datasets were downloaded:
-
-- seven with at most 25k documents: XPQA Italian, Polish and Portuguese (product questions
-  and answers), Wikipedia Dutch and Swedish, WebFAQ Lithuanian, CodeSearchNet PHP
-- two larger corpora, this time with faults injected too: WebFAQ Czech (72,308 documents)
-  and MIRACL Chinese (81,309 documents)
-
-The reference model went back to bge-m3 (gte-multilingual-base for bge-m3 itself), so the
-rules have now been tested with both reference models. The same 14 models gave 126
-pipelines, 47 good and 24 bad. `examples/validation/sixth.py` scores the criteria
-(`sixth_summary.json`). It ran unchanged from the frozen commit, and no bug was found in it
-after the freeze. **Two predictions failed.**
+`--reference-tolerance 0.03` flags a net drop of the agreed top hits beyond 0.03 and 2
+standard errors, and `reference_review` lists one above 0.015 ([CI](ci.md)). Tested on set
+7 (duplicate faults left out, KURE-v1 left out of the model changes because it is a fine-tune
+of the reference):
 
 | prediction | criterion | result | 95% interval |
 |---|---|---|---|
-| P15a agreed top hits, corpora up to 25k | AUC 0.85 or more between harmful and harmless faults | passed: 0.932 | 0.894 to 0.964 |
-| P15b same at 0.05 | at least 65% of the faults costing more than 0.02 flagged, at most 15% of the harmless ones | passed: 81 of 109 (74%), 1 of 61 (2%) | 67% to 81%; 0% to 6% |
-| P15c review tier, missed losses | at least half of the missed faults above 0.02 listed for review | **failed: 13 of 28 (46%)** | 26% to 64% |
-| P15d review tier, harmless | at most 25% of the harmless faults listed | passed: 4 of 61 (7%) | 0% to 14% |
-| P16 the same on the two larger corpora | P15's four criteria | not testable: 7 harmless faults (10 needed) | |
-| P17a lowering rules, good | at least half of the good pipelines at `fail` with the reference end without one | passed: 5 of 10 | 24% to 76% |
-| P17b same, bad | at least 95% of the bad pipelines at `fail` stay there | passed: 21 of 21 | 85% to 100% |
-| P17c same, faults | at least 95% of the caught harmful faults still caught | passed: 115 of 115 (21 of 21 on the larger corpora) | 97% to 100% |
-| P18a model change, agreed top hits | at least 65% of the changes losing more than 0.02 flagged, at most 15% of those losing 0.01 or less | **failed: 72 of 80 (90%), but 5 of 27 (19%)** | 81% to 95%; 8% to 37% |
-| P18a-multi same, multilingual candidates only | the same | **failed: 15 of 21 (71%), but 5 of 23 (22%)** | 50% to 86%; 10% to 42% |
-| P18b model change, labeled gate | harmful changes pass at most 3% of the time and at most half as often as with the mean | passed: 0.04% (1.8% with the mean) | |
-| P18c same | harmless changes fail at most 0.75 times as often as with the mean | passed: 0.07% (2.0% with the mean) | |
-| P19 determinism | identical JSON twice | passed: 9 of 9 | |
+| P20a faults | at least 70% of the faults costing more than 0.02 flagged, at most 10% of the harmless ones | passed: 137 of 154 (89%), 0 of 81 | 83% to 93%; 0% to 5% |
+| P21a model changes | at least 65% of the changes losing more than 0.02 flagged, at most 10% of those losing 0.01 or less | passed: 116 of 133 (87%), 1 of 85 | 80% to 92%; 0% to 6% |
+| P21a-multi same, multilingual candidates | at least 60%, at most 10% | **failed: 11 of 23 (48%)**, 1 of 55 | 29% to 67%; 0% to 10% |
 
-**The faults.** On the seven smaller corpora (39 good pipelines, 195 faults without the
-duplicates) the agreed top hits held for the third time: AUC 0.93, 74% of the large losses
-and 2% of the harmless faults flagged. By fault, at 0.05: query model swapped 27 of 32
-harmful flagged, id mapping lost 39 of 39, zero rows 10 of 39, truncation 2 of 14,
-quantization 3 of 10, duplicates 0 of 39. The review tier missed its criterion: it listed 13
-of the 28 large losses 0.05 let through. Pooled with the fifth set, 25 of 51 (49%, interval
-36% to 62%): the review tier lists about half of the missed losses, not demonstrably more.
+- **By fault:** id mapping lost 52 of 52 flagged, 5% zero rows 47 of 52, queries from another
+  model 39 of 47, truncation 1 of 20, quantization 1 of 8. Truncation and quantization lose
+  results below the reference's first result, where the signal does not look.
+- **Larger corpora:** on WebFAQ Slovak and Bulgarian (31,522 and 34,734 documents), 24 of
+  29 large losses flagged (65% to 92%) and 0 of 7 harmless.
+- **Review tier:** it listed 5 of the 17 large losses the rule let through (13% to 53%) and 3
+  of the 81 harmless faults (1% to 10%).
+- **Separation:** the net z separates harmful from harmless faults at AUC 0.93.
+- **Model changes:** the ten swaps to MiniLM-L12 among the multilingual losses (0.12 to 0.29
+  nDCG@10) were all flagged. Of the 13 others, gte-multilingual-base and
+  Qwen3-Embedding-0.6B replacing multilingual-e5-base with losses of 0.02 to 0.09, one was
+  flagged and two listed for review. On the Wikipedia sets the baseline held the reference's
+  first result for 197 to 200 of the 200 sampled queries, and these candidates lost 1 to 6:
+  their losses fall below the reference's first result. The one harmless change flagged was
+  Qwen3-Embedding-0.6B on XPQA Tamil (nDCG@10 0.353 to 0.408, net drop 0.13). KURE-v1 improved
+  on every dataset and was never flagged.
 
-On the two larger corpora (8 good pipelines, 40 faults without the duplicates) only 7
-faults were harmless, too few for the criteria. Reported as measured: AUC 0.84 (interval
-0.77 to 0.93), 14 of 23 large losses flagged (61%), 0 of 7 harmless; the review tier listed 5
-of the 9 missed. The findings and the agreed top hits together still caught every harmful
-fault they caught before the lowering rules (21 of 21). Truncation (0 of 6 harmful flagged)
-and quantization (0 of 5) went unseen there, as on the small corpora.
+#### The labeled gate against noise
 
-**The lowering rules.** Good pipelines at `fail` went from 11 without a reference to 10 with
-the reference rule and to 5 with the two lowering rules. Bad pipelines at `fail` went from 23
-of 24 without a reference to 21 with the reference rule, and the lowering rules kept all 21;
-all 24 stayed flagged. Each rule lowered findings on 4 good pipelines and no bad
-one: the one-step rule for `effective_rank` cleared a good pipeline for the first time on a
-preregistered set. The 5 good pipelines left are multilingual-e5-base and -large on the three
-XPQA sets, at `fail` on `collapse`, `ood_queries` or `query_gap`, findings the rules do not
-lower. The retrieval agreement separated good from bad pipelines at AUC 1.0 again: good 0.37
-or more, bad 0.28 or less. On the two larger corpora no good pipeline ended at `fail`, and the
-12 bad ones stayed at `fail`.
+`--retrieval-confidence 0.95` with 100 seeded labeled queries (200 subsets per change),
+against the same tolerance judged on the mean alone:
 
-**A model change.** On each dataset multilingual-e5-base was the baseline, and each of the
-other 12 models except the reference replaced it: 108 changes, 80 losing more than 0.02
-nDCG@10 and 27 losing 0.01 or less, all of them improvements. The agreed top hits flagged 90% of
-the large losses, but also 5 of the 27 harmless changes, above the 15% allowed. All 5 were
-improvements of 0.03 to 0.08 nDCG@10 (gte-multilingual-base on CodeSearchNet PHP and XPQA
-Portuguese, Qwen3-Embedding-0.6B on MIRACL Chinese and XPQA Portuguese, multilingual-e5-large
-on XPQA Polish), with 5.5% to 7.3% of the agreed top hits lost.
+| set | changes | harmful passed (mean alone) | harmless failed (mean alone) | prediction |
+|---|---|---|---|---|
+| 3 | injected faults | 0.4% (3.9%) | 10.1% (23.7%) | P6, passed |
+| 6 | injected faults | 0.9% (7.7%) | 10.8% (22.2%) | none |
+| 7 | injected faults | 0.7% (6.1%) | 10.1% (20.7%) | none |
+| 6 | model changes | 0.04% (1.8%) | 0.07% (2.0%) | P18b and c, passed |
+| 7 | model changes | 0.07% (2.1%) | 0.65% (5.5%) | P23, passed |
 
-Why: the diff counts the agreed top hits the new run loses, not the ones it gains. A fault
-only takes results away. A new model replaces many results, and even a better model drops
-some of the hits the old model and the reference agreed on, while it finds others the old
-model missed. Faults never showed this, because they never improve retrieval. The
-criterion was carried over from the faults and not fitted on model changes; it failed, and it
-is reported as failed.
+Where 100 labeled queries could not settle a model change the gate said inconclusive: 8% and
+9% of the harmful changes, 27% and 23% of the harmless ones. On set 2, a gate on the mean
+alone with 100 labeled queries caught 87% of the harmful faults and 97% of those dropping
+more than 0.02 (P3, passed).
 
-The labeled gate decided the model changes almost without error: with 100 labeled queries at
-0.95, harmful changes passed 0.04% of the time and harmless ones failed 0.07% of the time.
-Where the labeled queries could not settle a change it said inconclusive (8% of the harmful
-changes, 27% of the harmless ones).
+#### The reference rule and the two lowering rules
 
-One more effect: KURE-v1, a fine-tune of the reference bge-m3, lost 0% to 0.6% of the agreed
-top hits on every dataset, whatever its nDCG@10 did. A candidate from the reference's own
-family agrees with the reference by construction, so the agreed top hits cannot judge it.
+With `--reference`, a finding the reference reaches too reads `ok`; a hub finding still at
+`fail` reads `warn` at a retrieval agreement of 0.40 or more, and `effective_rank` at `fail`
+reads `warn` when the reference is at `warn` ([Usage](usage.md)). Good and bad pipelines at
+`fail` with the reference alone, and what the two lowering rules did:
 
-Reported without predictions:
+| set | good at `fail` cleared | bad at `fail` kept | caught harmful faults still caught | prediction |
+|---|---|---|---|---|
+| 4 (retrieval agreement only) | 6 of 8 | 38 of 38 | 100 of 100 | P9, passed |
+| 5 | 4 of 5 | 17 of 17 | 94 of 94 | P13, passed |
+| 6 | 5 of 10 | 21 of 21 | 115 of 115 | P17, passed |
+| 7 | 6 of 6 | 28 of 28 | 128 of 128 | P22, passed |
+| 5 to 7 | 15 of 21 (50% to 86%) | 66 of 66 (94% to 100%) | 337 of 337 (99% to 100%) | |
 
-- **Chance rule for `query_hubness`:** it applied on MIRACL Chinese (393 queries), cleared
-  the `query_hubness` flag on 4 good pipelines and left the 7 bad ones at `fail`.
-- **Labeled gate on the faults at 0.95, with 100 labeled queries:** harmful faults passed
-  0.9% of the time (7.7% with the mean), harmless faults failed 10.8% (22.2%).
-- **The case page:** the rows of the three XPQA sets are in
-  [Changing the embedding model](case_model_change.md).
+- The good pipelines left at `fail` were a hub agreeing at 0.39 (set 5) and
+  multilingual-e5-base and -large on the three XPQA sets at `fail` on `collapse`,
+  `ood_queries` or `query_gap`, which no rule lowers (set 6).
+- The retrieval agreement of good pipelines was at least 0.31, 0.36, 0.37 and 0.398 on sets 4
+  to 7, that of bad ones at most 0.23, 0.28, 0.28 and 0.16.
+- The reference rule alone does not clear a hub the model makes: on set 2 it left all 6 good
+  pipelines at `fail` (P2a, failed), and kept all 34 bad pipelines at `fail` (P2b, passed).
+  The retrieval agreement clears those hubs.
 
-What this changes:
+#### Other rules
 
-- For a model change, `reference_regressions` is a ranking of candidates, not a verdict: on
-  this set it flagged nearly every large loss but also a fifth of the harmless swaps, all of
-  them improvements. Decide a model change with labeled queries (`--retrieval-confidence`).
-  [CI](ci.md) and the skill say so.
-- Do not use a reference from the candidate's model family.
-- The review tier lists about half of the missed losses (pooled 25 of 51); read it as "check
-  with labels", and do not expect it to catch most of them.
-- Pooled over the fourth to sixth sets, the agreed top hits at 0.05 flagged 3 of 156 harmless
-  faults (2%, interval 1% to 6%); the lowering rules kept 76 of 76 bad pipelines at `fail`
-  (95% to 100%) and lost none of 309 caught faults (99% to 100%).
+- **`query_hubness` against chance:** on set 3, whose four larger corpora have 60 to 213
+  queries (chance skewness 4.5 to 8.2), the 21 good pipelines the thresholds alone flagged
+  were not flagged with the rule, and the 17 bad ones stayed at `fail` (P1, passed). On set 6
+  it applied on MIRACL Chinese, cleared the flag on 4 good pipelines and kept the 7 bad ones
+  at `fail`. Sets 2 and 7 had enough queries everywhere for chance to change no verdict.
+- **Result change:** on set 2 every one of 120 injected faults changed the sampled top-k, and
+  4 of 4 identical re-runs changed nothing (P4, passed).
+- **Determinism:** the same audit run twice gave identical JSON on 36 of 36 pipelines of sets
+  3 to 7 (P7, P10, P14, P19, P24, passed; 90% to 100%).
 
-### A seventh held-out set, preregistered
+What this means in practice:
 
-The sixth set showed what was wrong with the agreed top hits on model changes: the diff
-counted the agreed top hits a new run lost, never the reference's first results it found that
-the baseline had missed. **One rule changed after the sixth set.** The diff now counts both,
-and `reference_regressions` judges the **net drop**: the mean, over every compared query, of
-"the reference's first result is in the baseline's top-k" minus "it is in the new top-k". A
-side is listed when the net drop is above `reference_tolerance` (default 0.03) and 2 standard
-errors; `reference_review` lists one above 0.015 and 2 standard errors, below the tolerance.
-
-The rule was chosen on data that is no longer blind (`examples/validation/net_design.py`,
-`net_design.json`): 595 injected faults of the fourth to sixth sets and 1,488 model changes on
-the 63 datasets of sets 1 to 6, from two baselines.
-
-| design data | flagged, drop above 0.02 | flagged, harmless |
-|---|---|---|
-| faults, lost share above 0.05 (the old rule) | 258 of 351 (74%) | 3 of 163 (1.8%) |
-| faults, net drop above 0.03 | 286 of 351 (81%) | 1 of 163 (0.6%) |
-| changes from multilingual-e5-base, old rule | 434 of 471 (92%) | 94 of 265 (35%) |
-| changes from multilingual-e5-base, net drop | 414 of 471 (88%) | 13 of 265 (4.9%) |
-| changes from MiniLM-L12, old rule | 256 of 257 (100%) | 225 of 495 (45%) |
-| changes from MiniLM-L12, net drop | 245 of 257 (95%) | 3 of 495 (0.6%) |
-
-The code, the thresholds and the criteria were then committed
-([preregistration](https://github.com/076923/vecscope/blob/main/examples/validation/preregistration_seventh.md))
-before ten more public datasets were downloaded: XPQA Tamil (product questions and answers),
-Wikipedia Danish, Norwegian, Romanian, Bulgarian and German, WebFAQ Croatian, Slovak and
-Bulgarian (the last two with 31,522 and 34,734 documents), and CodeSearchNet JavaScript. The
-reference was bge-m3 (gte-multilingual-base for bge-m3 itself). The same 14 models gave 140
-pipelines, 52 good and 32 bad. Model changes were run from two baselines,
-multilingual-e5-base and paraphrase-multilingual-MiniLM-L12-v2; KURE-v1, a fine-tune of the
-reference, was left out of the criteria as preregistered. `examples/validation/seventh.py`
-scores the criteria (`seventh_summary.json`). It ran unchanged from the frozen commit, and no
-bug was found in it after the freeze. **One prediction failed.**
-
-| prediction | criterion | result | 95% interval |
-|---|---|---|---|
-| P20a net rule, faults | at least 70% of the faults costing more than 0.02 flagged, at most 10% of the harmless ones | passed: 137 of 154 (89%), 0 of 81 | 83% to 93%; 0% to 5% |
-| P20b same | at least as many large losses flagged as the old rule | passed: 137 against 123 | |
-| P21a net rule, model changes | at least 65% of the changes losing more than 0.02 flagged, at most 10% of those losing 0.01 or less | passed: 116 of 133 (87%), 1 of 85 (1.2%) | 80% to 92%; 0% to 6% |
-| P21a-multi same, multilingual candidates only | at least 60%, at most 10% | **failed: 11 of 23 (48%)**, 1 of 55 (1.8%) | 29% to 67%; 0% to 10% |
-| P21b same | at most half as many harmless changes flagged as the old rule | passed: 1 against 28 | |
-| P22a lowering rules, good | at least half of the good pipelines at `fail` with the reference end without one | passed: 6 of 6 | 61% to 100% |
-| P22b same, bad | at least 95% of the bad pipelines at `fail` stay there | passed: 28 of 28 | 88% to 100% |
-| P22c same, faults | at least 95% of the caught harmful faults still caught | passed: 128 of 128 | 97% to 100% |
-| P23a model change, labeled gate | harmful changes pass at most 3% of the time and at most half as often as with the mean | passed: 0.07% (2.1% with the mean) | |
-| P23b same | harmless changes fail at most 0.75 times as often as with the mean | passed: 0.65% (5.5% with the mean) | |
-| P24 determinism | identical JSON twice | passed: 10 of 10 | |
-
-**The faults.** On 260 faults (duplicates left out) the net rule flagged 137 of the 154 that
-cost more than 0.02 nDCG@10 and none of the 81 harmless ones; the old rule, computed from the
-same diffs, flagged 123 and 1. By fault: id mapping lost 52 of 52, zero rows 47 of 52 (old
-rule 37), query model swapped 39 of 47 (36), truncation 1 of 20 (0), quantization 1 of 8 (1).
-Truncation and quantization stay unseen, as on every set: their losses fall below the
-reference's first result. On the two corpora over 25k documents, 24 of 29 large losses were
-flagged and 0 of 7 harmless. The review tier at 0.015 listed 5 of the 17 large losses the rule
-let through, and 3 of the 81 harmless faults. The AUC of the net z between harmful and
-harmless faults was 0.93, against 0.95 for the z of the lost share: the net rule flags more at
-its threshold, but it does not rank faults better.
-
-**Model changes.** 220 changes were judged (20 with KURE-v1 left out). The net rule flagged
-87% of the large losses and 1 of the 85 harmless changes; the old rule would have flagged 92%
-and 28. From the weaker baseline (MiniLM-L12), where most swaps improve retrieval, the old rule
-flagged 22 of 66 harmless changes and the net rule none. The one harmless change flagged:
-Qwen3-Embedding-0.6B replacing multilingual-e5-base on XPQA Tamil, nDCG@10 0.353 to 0.408,
-with a net drop of 0.13 against bge-m3.
-
-The multilingual criterion failed. Of its 23 large losses, the 10 swaps to MiniLM-L12 (0.12 to
-0.29 nDCG@10) were all flagged; of the 13 others, gte-multilingual-base and
-Qwen3-Embedding-0.6B replacing multilingual-e5-base with losses of 0.02 to 0.09, the net rule
-flagged 1 (gte-multilingual-base on WebFAQ Bulgarian) and listed 2 for review. The old rule
-flagged 3 of the 13 and would have failed the criterion too (13 of 23). On the Wikipedia sets
-the baseline already held the reference's first result for 197 to 200 of the 200 sampled
-queries, and these candidates lost 1 to 6 of them: their losses are below the reference's
-first result, where the agreed top hits do not look. On the design data the share was 69%
-(77 of 112); here the mix held more small losses between models of similar quality.
-
-The labeled gate decided the changes again: with 100 labeled queries at 0.95 harmful changes
-passed 0.07% of the time and harmless ones failed 0.65% of the time, inconclusive on 9% and
-23%.
-
-**The lowering rules.** Good pipelines at `fail` went from 8 without a reference to 6 with the
-reference rule and to 0 with the two lowering rules, all 6 by the retrieval agreement. The 28
-bad pipelines at `fail` stayed there, and all 32 stayed flagged. The retrieval agreement
-separated good from bad pipelines at AUC 1.0 again.
-
-Reported without predictions:
-
-- **KURE-v1** improved nDCG@10 over both baselines on every dataset (by 0.01 to 0.43) and was
-  never flagged.
-- **Labeled gate on the faults at 0.95, with 100 labeled queries:** harmful faults passed 0.7%
-  of the time (6.1% with the mean), harmless faults failed 10.1% (20.7%).
-- **Chance rule for `query_hubness`:** every dataset had enough queries; it did not apply.
-
-What this changes:
-
-- The net drop replaces the lost share as the default rule. It holds on unseen data for
-  faults and for most model changes, with far fewer harmless swaps flagged.
-- It still misses small losses between models of similar quality, and so does the old rule.
-  For a model change, a clean `reference_regressions` is not evidence that nDCG@10 held:
-  decide with labeled queries (`--retrieval-confidence`). [CI](ci.md) and the skill say so.
+- The label-free signal flags most large losses from faults and rarely a harmless change,
+  but not the small losses between models of similar quality, and not truncation or
+  quantization. A flag means "check with labels"; no flag is not proof.
+- Decide a change of embedding model with labeled queries and `--retrieval-confidence`. Do
+  not use a reference from the candidate's model family.
+- With a reference, most good pipelines at `fail` come down and no bad one has.
 
 ## 3. Sampled audits
 
@@ -996,63 +516,29 @@ not that every agent follows them.
   good pipelines end at `fail`, mostly on text under 200 characters, and one of 67 bad
   pipelines has no flag: gate on the baseline diff and retrieval tolerances, not on the
   absolute verdict. Production query logs and private corpora were not measured.
-- The `query_hubness` change was prompted by the held-out results; it follows from a null
-  model and was checked on random data, but those datasets are no longer blind for that
-  finding. The preregistered second set had enough queries everywhere to leave it untested;
-  the third set tested it on four corpora with 60 to 213 queries and it passed.
-- On the second set ([preregistered](#a-second-held-out-set-preregistered)) the reference model
-  cut flagged good pipelines from 34 to 14 of 36 but left all 6 good pipelines at `fail`
-  (prediction P2a failed): hubs one model makes on rows a reference handles are not
-  explained away. That set is no longer blind for the reference rule either.
+- The chance rule for `query_hubness` follows from a null model and was checked on random
+  data; the first held-out set, where it was found, is not blind for it. On the preregistered
+  sets it was tested on four corpora with 60 to 213 queries (set 3) and one with 393 (set 6).
 - The label-free result change detects change, not harm (AUC 0.58 between harmful and
   harmless faults); gate on it only where results must not change.
-- The agreed top hits are a sign of harm, not a measure of it. The whole-list overlap
-  flagged 44% of the harmless faults on the third set
-  ([preregistered](#a-third-held-out-set-preregistered), prediction P5b failed). The agreed
-  top hits replaced it, and on the fourth set
-  ([preregistered](#a-fourth-held-out-set-preregistered)) flagged 2% of the harmless faults
-  and 72% of those costing more than 0.02; on the fifth set, with another reference model,
-  2% and 78% ([preregistered](#a-fifth-held-out-set-preregistered)). They miss small losses
-  below the reference's first result (on the fifth set 3 of 18 harmful truncations and 0 of
-  10 harmful quantizations flagged), about half of the zero-row faults and every duplicate
-  fault. The review tier at 0.03 lists about half of the missed large losses for a labeled
-  check (12 of 23 on the fifth set and 13 of 28 on the sixth, where its criterion failed;
-  pooled 49%, 95% interval 36% to 62%); it is not a verdict. Since the seventh set the rule
-  judges the net drop (lost minus gained) above 0.03 instead of the lost share above 0.05:
-  there it flagged 89% of the large losses and 0 of 81 harmless faults, but still 1 of 20
-  harmful truncations and 1 of 8 harmful quantizations; its review tier at 0.015 listed 5 of
-  the 17 large losses it let through.
-- For a change of embedding model the agreed top hits are not a verdict. On the sixth set
-  ([preregistered](#a-sixth-held-out-set-preregistered), prediction P18a failed) they flagged
-  90% of the swaps losing more than 0.02 nDCG@10 but also 5 of 27 swaps that improved it: a
-  new model loses some agreed top hits even when it finds more elsewhere, and the diff counts
-  only the losses. The labeled gate decided the same swaps with 0.04% harmful passed and 0.07%
-  harmless failed. A candidate from the reference's own family (KURE-v1 against bge-m3) lost
-  no agreed top hits whatever its quality.
-  The net drop that replaced it on the seventh set
-  ([preregistered](#a-seventh-held-out-set-preregistered)) flagged 1 of 85 harmless swaps and
-  87% of the large losses, but only 1 of the 13 multilingual swaps between models of similar
-  quality that lost 0.02 to 0.09 (prediction P21a-multi failed): those losses fall below the
-  reference's first result. Decide a model change with labeled queries.
-- The retrieval agreement rule left 1 of 46 good pipelines at `fail` on the fifth set, a hub
-  agreeing at 0.39 against the threshold of 0.40. The threshold was set on the first three
-  sets. On the fourth set good pipelines agreed at 0.31 or more and bad ones at 0.23 or less;
-  on the fifth, 0.36 or more and 0.28 or less; on the sixth, 0.37 or more and 0.28 or less;
-  on the seventh, 0.398 or more (two good pipelines just under 0.40, neither ended at `fail`) and
-  0.16 or less.
-  The margin is narrow at the low end. The rule
-  needs query embeddings from both models.
-- The one-step rule for `effective_rank` was designed on the first four sets. On the fifth set
-  it lowered no good pipeline and 3 bad ones, all of which kept another `fail`; on the sixth it
-  lowered 4 good pipelines and no bad one.
-- The labeled gate judged against noise passed its test with 100 labeled queries; with
-  fewer, most changes are inconclusive, and it assumes the labeled queries are a random
-  sample of the traffic.
+- The agreed top hits are a sign of harm, not a measure of it, and the net drop at 0.03 was
+  tested on one preregistered set (set 7). They miss losses below the reference's first
+  result (1 of 20 harmful truncations and 1 of 8 harmful quantizations flagged) and
+  duplicated rows, which show up in the reference too. The review tier lists about a third
+  of the large losses the rule lets through; it is not a verdict.
+- For a change of embedding model the agreed top hits are not a verdict: they missed 12 of
+  13 losses of 0.02 to 0.09 between multilingual models of similar quality (P21a-multi
+  failed). A candidate from the reference's own family agrees with it by construction.
+- The retrieval agreement threshold, 0.40, has a narrow margin at the low end: good pipelines
+  agreed at 0.31 or more and one good hub stayed at `fail` at 0.39. The rule needs query
+  embeddings from both models. The one-step rule for `effective_rank` lowered 4 good
+  pipelines and 3 bad ones on sets 5 to 7, and the bad ones kept another `fail`.
+- The labeled gate against noise was tested with 100 labeled queries; with fewer, most
+  changes are inconclusive, and it assumes the labeled queries are a random sample of the
+  traffic.
 - The injected faults are six kinds applied one at a time; mixed faults were not injected.
-  Faults went into corpora over 25k documents only on the sixth set (72k and 81k documents),
-  where 7 harmless faults were too few to test the criteria; the fifth set checked the
-  verdicts on clean pipelines over 60k and 147k documents. A lost id mapping moves no
-  finding and is caught only with labeled queries.
+  The largest corpora with faults have 72k and 81k documents. A lost id mapping moves no
+  finding and is caught only with labeled queries or the agreed top hits.
 - `query_gap` compares queries with the corpus they search, so it cannot be compared before
   and after a transform applied to the corpus alone: centering the corpus took it from 5.51 to
   `ok` while nDCG@10 fell ([agent case](agent_case.md)). Compare retrieval on labeled queries
@@ -1086,39 +572,14 @@ not that every agent follows them.
   several hours on one L4, resumable; `run.py --reaudit` audits the cached embeddings again
   after a change to vecscope), and
   `python examples/validation/calibrate_case.py --dataset xpqa-ja` the calibration case.
-- The second held-out set: `run.py` on the seven datasets of
-  `examples/validation/preregistration.md`, then `faults.py --role confirm`,
-  `label_budget.py --role confirm` and `confirm.py`, which writes
-  `examples/validation/confirm_summary.json`. `label_budget.py` without `--role` gives the
-  budget on the first set.
-- The third held-out set: `run.py` on the nine datasets of
-  `examples/validation/preregistration_third.md`, then `third.py`, which injects the faults,
-  scores P1 and P5 to P7 and writes `examples/validation/third_summary.json` (about two hours
-  on one L4 after the embeddings).
-- The fourth held-out set: `run.py` on the eleven datasets of
-  `examples/validation/preregistration_fourth.md`, then `fourth.py`, which injects the faults,
-  scores P8 to P10 and writes `examples/validation/fourth_summary.json` (about 80 minutes on
-  one L4 after the embeddings).
-- The intervals: `python examples/validation/intervals.py` reads the cached fault records of
-  the fourth and fifth sets and writes `examples/validation/intervals_summary.json`.
-- The fifth held-out set: `run.py` on the eight datasets of
-  `examples/validation/preregistration_fifth.md`, then `fifth.py`, which injects the faults,
-  scores P11 to P14 and writes `examples/validation/fifth_summary.json` (about 80 minutes on
-  one L4 after the embeddings).
-- The sixth held-out set: `run.py` on the nine datasets of
-  `examples/validation/preregistration_sixth.md`, then `sixth.py`, which injects the faults
-  (the two larger corpora included), runs the model changes, scores P15 to P19 and writes
-  `examples/validation/sixth_summary.json` (about six hours on one L4 with the embeddings).
-  `case_model_change.py` writes the rows of the [case page](case_model_change.md)
-  (`case_model_change.json`).
-- The net rule's design data: `python examples/validation/net_design.py` rebuilds the faults of
-  the fourth to sixth sets and the model changes of sets 1 to 6 from the cached embeddings and
-  writes `examples/validation/net_design.json`.
-- The seventh held-out set: `run.py` on the ten datasets of
-  `examples/validation/preregistration_seventh.md`, then `seventh.py`, which injects the
-  faults, runs the model changes from both baselines, scores P20 to P24 and writes
-  `examples/validation/seventh_summary.json` (about three hours on one L4 with the
-  embeddings).
+- A preregistered set: `run.py --datasets` on the datasets of its `preregistration*.md`,
+  then its script (`confirm.py` after `faults.py --role confirm` and
+  `label_budget.py --role confirm` for set 2; `third.py` to `seventh.py` for sets 3 to 7),
+  which injects the faults, runs the model changes and writes its `*_summary.json`. Set 7
+  takes about three hours on one L4 with the embeddings.
+- `python examples/validation/net_design.py` writes the data the net drop threshold was
+  chosen on (`net_design.json`), and `case_model_change.py` the rows of the
+  [case page](case_model_change.md) (`case_model_change.json`).
 - The 19-model, nine-dataset, query-finding and intervention runs use a harness that is not
   shipped with the package. The behavior they set is pinned by tests instead:
   - `tests/test_query_findings.py` (query_gap and query_shift)

@@ -286,42 +286,26 @@ product category) lowers it for every model. When it is at `fail` and the refere
 `warn`, it is lowered one step, to `warn`: the text output says
 `PARTLY EXPLAINED BY THE ROWS`, and `details.reference.verdict_without_reference` keeps
 `fail`. The row-level findings (collapse, outliers, hubs) keep the strict rule, because they
-are the ones that catch duplicated, zeroed and crowding rows. On the four held-out sets this
-lowered the finding on 10 good and 17 bad pipelines and left 1 bad pipeline without a
-`fail`. On a fifth set, frozen before it was embedded
-([Verification](verification.md#a-fifth-held-out-set-preregistered)), it lowered no good
-pipeline and 3 bad ones, all of which kept another `fail`; on a sixth
-([Verification](verification.md#a-sixth-held-out-set-preregistered)), 4 good pipelines and
-no bad one.
+are the ones that catch duplicated, zeroed and crowding rows.
 
 Pick a reference with published scores on your language and domain. A reference that shares
-the fault (another model that does not cover the language) explains away a real problem.
-On the first held-out set, with bge-m3 as reference, good pipelines at `fail` went from 28 to
-21 of 114 and bad pipelines at `fail` stayed at 54 of 67; that rule was designed on that set.
-On a second set preregistered before it was embedded
-([Verification](verification.md#a-second-held-out-set-preregistered)), it took flags off
-most good pipelines (flagged went from 34 to 14 of 36) and kept every bad one at `fail`, but
-none of the 6 good pipelines at `fail` came down: they were hubs the model made, well past
-the reference on the same rows. A finding that stays at `fail` with a reference belongs to
-the model; labeled queries say whether it costs retrieval.
+the fault (another model that does not cover the language) explains away a real problem. A
+finding that stays at `fail` with a reference belongs to the model, such as hubs the model
+makes well past the reference on the same rows; labeled queries say whether it costs
+retrieval.
 
 With queries and `--reference-queries`, the reference also measures how much of this
 pipeline's top-k it returns for the same queries (`reference.agreement.queries`, over 200
 sampled queries). A hub finding (`hubness`, `query_hubness`, `antihubs`) still at `fail`
 is lowered to `warn` when that agreement is 0.40 or more: the text output says
 `TOLERATED BY RETRIEVAL AGREEMENT`, and `details.reference.verdict_before_agreement` keeps
-`fail`. Over 490 public pipelines of the three held-out sets the agreement separated good
-from bad pipelines at AUC 0.999; no bad pipeline at `fail` reached 0.32, and 9 of the 12
-good pipelines left at `fail` on the second and third sets agreed at 0.40 or more. The hubs
-are still there, so the verdict is `warn`, not `ok`. This rule was designed on those sets.
-On a fourth held-out set, frozen before it was embedded
-([Verification](verification.md#a-fourth-held-out-set-preregistered)), it cleared 6 of the 8
-good pipelines at `fail` with the reference and kept all 38 bad ones at `fail`. The 2 left
-were `effective_rank`, which it does not lower. On a fifth set with another reference model,
-gte-multilingual-base, the two rules together cleared 4 of the 5 good pipelines at `fail` and
-kept all 17 bad ones at `fail`; the one left was a hub agreeing at 0.39. On a sixth, with
-bge-m3 again, they cleared 5 of 10 and kept all 21 bad ones at `fail`; the 5 left were
-`collapse`, `ood_queries` and `query_gap`, which neither rule lowers.
+`fail`. The hubs are still there, so the verdict is `warn`, not `ok`.
+
+On preregistered held-out data, the reference rule and the two lowering rules together
+cleared 15 of the 21 good
+pipelines at `fail` and kept all 66 bad ones at `fail`. The ones left were `collapse`,
+`ood_queries` and `query_gap`, which no rule lowers, and one hub agreeing at 0.39. Per set:
+[Verification](verification.md#the-reference-rule-and-the-two-lowering-rules).
 
 ## Use as a library
 

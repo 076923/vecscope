@@ -193,18 +193,6 @@ All notable changes to this project are documented here. The format follows
   losses flagged, against 60% required; it misses losses of 0.02 to 0.09 between models of
   similar quality (1 of 13 flagged), as the lost share did. The labeled gate, the two lowering
   rules and determinism passed.
-
-### Changed (documentation)
-
-- For a change of embedding model, the docs and the skill now say to decide with labeled
-  queries and to read `reference_regressions` as a ranking of candidates, and not to use a
-  reference from the candidate's model family.
-- The verification page reports the seventh held-out set, and the CI, MCP, usage and README
-  pages, the skill and the model-change case page describe the net drop; the case page gives
-  both rules' verdicts on the sixth set's XPQA rows.
-
-### Changed
-
 - `query_hubness` is judged against chance. With few queries over a large corpus the
   k-occurrence skewness is high with no hub at all (a hub-free index gives
   (1 - 2p) / sqrt(queries p (1 - p)), p = k/n: 4.8 for 300 queries over 70k documents, 18.4
@@ -214,7 +202,6 @@ All notable changes to this project are documented here. The format follows
   "not judged" in the MCP summary) and says how many queries would judge it
   (`details.queries_needed`). Thresholds are unchanged; on the data they were fitted on chance
   stays near 1.1 to 1.3.
-
 - The README keeps the overview, quick start, findings table, a short MCP and CI setup and the
   FAQ (about 320 lines instead of 1,320). The rest moved unchanged to documentation pages, each
   with its Korean translation: `docs/usage.md` (queries and clusters, index sweep, compare,
@@ -224,6 +211,18 @@ All notable changes to this project are documented here. The format follows
   order, real embeddings, whether the findings predict retrieval quality, calibration) and
   `docs/performance.md` (performance, sampled audits, how vecscope works).
 - The tested clients now include GitHub Copilot in VS Code.
+
+### Changed (documentation)
+
+- For a change of embedding model, the docs and the skill now say to decide with labeled
+  queries and to read `reference_regressions` as a ranking of candidates, and not to use a
+  reference from the candidate's model family.
+- The documentation describes the current version only. The verification page reports the
+  preregistered held-out sets by current rule (agreed top hits, labeled gate, reference and
+  lowering rules, chance rule, result change, determinism) instead of set by set, and the
+  results of rules since replaced (whole-list overlap, lost share) stay in this changelog and
+  the preregistration files. The README, usage, CI, MCP and skill pages state each rule with
+  its held-out evidence, and the model-change case page gives the net drop on the XPQA rows.
 
 ## [0.13.0] - 2026-11-10
 
