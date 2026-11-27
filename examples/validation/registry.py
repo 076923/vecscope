@@ -26,6 +26,12 @@ agreed top hits, lowering an effective_rank at fail one step where the reference
 and the rules of the fourth set with another reference model (gte-multilingual-base) and a
 larger corpus. fifth.py analyses it.
 
+``role="sixth"`` marks a sixth held-out set, frozen in preregistration_sixth.md before it was
+embedded. No rule changed after the fifth set: it replicates the shipped rules with bge-m3 as
+the reference, injects the faults into two corpora over 25k documents as well, and judges a
+model change (multilingual-e5-base replaced by each other model) against the full labels.
+sixth.py analyses it.
+
 No private or company data belongs in this file, in the cache it writes, or in the report.
 """
 
@@ -51,7 +57,7 @@ class Dataset:
     note: str = ""
 
 
-def _xpqa(lang: str, code: str) -> Dataset:
+def _xpqa(lang: str, code: str, role: str = "heldout") -> Dataset:
     pair = f"{code}-{code}"
     return Dataset(
         name=f"xpqa-{lang}",
@@ -63,6 +69,7 @@ def _xpqa(lang: str, code: str) -> Dataset:
         corpus=(f"{pair}-corpus", "test"),
         queries=(f"{pair}-queries", "test"),
         qrels=(f"{pair}-qrels", "test"),
+        role=role,
         note="short product answers (XPQA, Amazon), monolingual pair",
     )
 
@@ -416,6 +423,18 @@ DATASETS: dict[str, Dataset] = {
         _csn("ruby", role="fifth"),
         _webfaq("ron", "ro", role="fifth", max_queries=1000),
         _miracl("es", role="fifth"),
+        # sixth held-out set (role="sixth"), frozen in preregistration_sixth.md. Nothing changed
+        # after the fifth set; the faults go into every corpus here, including the two over 25k
+        # documents (webfaq-ces, miracl-zh).
+        _xpqa("it", "ita", role="sixth"),
+        _xpqa("pl", "pol", role="sixth"),
+        _xpqa("pt", "por", role="sixth"),
+        _wiki("nl", role="sixth"),
+        _wiki("sv", role="sixth"),
+        _webfaq("lit", "lt", role="sixth", max_queries=1000),
+        _csn("php", role="sixth"),
+        _webfaq("ces", "cs", role="sixth", max_queries=1000),
+        _miracl("zh", role="sixth"),
     ]
 }
 

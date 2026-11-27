@@ -52,6 +52,14 @@ All notable changes to this project are documented here. The format follows
   `warn`, it reads `warn` (`PARTLY EXPLAINED BY THE ROWS`, listed in `reference.explained`).
   The row-level findings keep the strict rule. Designed on the four held-out sets: lowered
   on 10 good and 17 bad pipelines, 1 bad pipeline left without a `fail`.
+- `examples/validation/intervals.py`: 95% intervals for the counts of the preregistered sets
+  (Wilson for pipelines, a pipeline bootstrap for the injected faults), written to
+  `intervals_summary.json` for the fourth and fifth sets.
+- A sixth held-out set (nine public datasets, `role="sixth"`, bge-m3 as the reference,
+  faults injected into two corpora over 25k documents too, and a model change judged against
+  the full labels), frozen with its criteria in `examples/validation/preregistration_sixth.md`
+  before it was embedded, scored by `examples/validation/sixth.py`. No rule changed after the
+  fifth set.
 - A fifth held-out set (eight public datasets, `role="fifth"`, gte-multilingual-base as the
   reference, two larger corpora) frozen with its criteria in
   `examples/validation/preregistration_fifth.md` before it was embedded, scored by

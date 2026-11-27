@@ -1,0 +1,153 @@
+{
+ "method": "Wilson 95% for counts; pipeline bootstrap 95%, 2000 draws",
+ "fourth": {
+  "faults": {
+   "pipelines": 37,
+   "auc_top_hit_z": {
+    "value": 0.9708029197080292,
+    "interval": [
+     0.9436,
+     0.99
+    ]
+   },
+   "flagged_of_drop_over_002": {
+    "value": 0.7155172413793104,
+    "n": 116,
+    "interval": [
+     0.6532,
+     0.7876
+    ],
+    "wilson": [
+     0.6275,
+     0.7897
+    ]
+   },
+   "flagged_of_harmless": {
+    "value": 0.020833333333333332,
+    "n": 48,
+    "interval": [
+     0.0,
+     0.0682
+    ],
+    "wilson": [
+     0.0037,
+     0.109
+    ]
+   }
+  },
+  "good_cleared": {
+   "k": 6,
+   "n": 8,
+   "share": 0.75,
+   "wilson": [
+    0.4093,
+    0.9285
+   ]
+  },
+  "bad_kept": {
+   "k": 38,
+   "n": 38,
+   "share": 1.0,
+   "wilson": [
+    0.9082,
+    1.0
+   ]
+  },
+  "faults_still_caught": {
+   "k": 100,
+   "n": 100,
+   "share": 1.0,
+   "wilson": [
+    0.963,
+    1.0
+   ]
+  }
+ },
+ "fifth": {
+  "faults": {
+   "pipelines": 35,
+   "auc_top_hit_z": {
+    "value": 0.9277759308510638,
+    "interval": [
+     0.8806,
+     0.9645
+    ]
+   },
+   "flagged_of_drop_over_002": {
+    "value": 0.7766990291262136,
+    "n": 103,
+    "interval": [
+     0.6923,
+     0.8598
+    ],
+    "wilson": [
+     0.6872,
+     0.8463
+    ]
+   },
+   "flagged_of_harmless": {
+    "value": 0.02127659574468085,
+    "n": 47,
+    "interval": [
+     0.0,
+     0.0698
+    ],
+    "wilson": [
+     0.0038,
+     0.1111
+    ]
+   },
+   "reviewed_of_missed": {
+    "value": 0.5217391304347826,
+    "n": 23,
+    "interval": [
+     0.3214,
+     0.7
+    ],
+    "wilson": [
+     0.3296,
+     0.7076
+    ]
+   },
+   "harmless_reviewed": {
+    "value": 0.06382978723404255,
+    "n": 47,
+    "interval": [
+     0.0,
+     0.1739
+    ],
+    "wilson": [
+     0.0219,
+     0.1716
+    ]
+   }
+  },
+  "good_cleared": {
+   "k": 4,
+   "n": 5,
+   "share": 0.8,
+   "wilson": [
+    0.3755,
+    0.9638
+   ]
+  },
+  "bad_kept": {
+   "k": 17,
+   "n": 17,
+   "share": 1.0,
+   "wilson": [
+    0.8157,
+    1.0
+   ]
+  },
+  "faults_still_caught": {
+   "k": 94,
+   "n": 94,
+   "share": 1.0,
+   "wilson": [
+    0.9607,
+    1.0
+   ]
+  }
+ }
+}
