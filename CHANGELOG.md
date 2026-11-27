@@ -58,8 +58,20 @@ All notable changes to this project are documented here. The format follows
 - A sixth held-out set (nine public datasets, `role="sixth"`, bge-m3 as the reference,
   faults injected into two corpora over 25k documents too, and a model change judged against
   the full labels), frozen with its criteria in `examples/validation/preregistration_sixth.md`
-  before it was embedded, scored by `examples/validation/sixth.py`. No rule changed after the
-  fifth set.
+  before it was embedded, scored by `examples/validation/sixth.py` (`sixth_summary.json`). No
+  rule changed after the fifth set. Two predictions failed: P15c (the review tier listed 13 of
+  the 28 missed drops above 0.02, half needed) and P18a (on 108 model changes the agreed top
+  hits flagged 72 of 80 drops above 0.02 but also 5 of 27 improvements: the diff counts only
+  lost hits, and a new model loses some while finding more). P15a/b (AUC 0.932; 81 of 109
+  and 1 of 61 harmless), P15d, P17 (5 of 10 good pipelines cleared, 21 of 21 bad and 115 of
+  115 caught faults kept), P18b/c (labeled gate on model changes: 0.04% of harmful passed,
+  0.07% of harmless failed) and P19 passed; P16 (faults in the 72k and 81k corpora) was not
+  testable with 7 harmless faults.
+- `examples/validation/case_model_change.py` and the page
+  [Changing the embedding model](https://076923.github.io/vecscope/case_model_change/): the
+  sixth set's model changes on the XPQA product-answer sets, with the label-free verdict and
+  the labeled gate at 100 labeled queries for each candidate.
+
 - A fifth held-out set (eight public datasets, `role="fifth"`, gte-multilingual-base as the
   reference, two larger corpora) frozen with its criteria in
   `examples/validation/preregistration_fifth.md` before it was embedded, scored by
@@ -161,6 +173,12 @@ All notable changes to this project are documented here. The format follows
   `--retrieval-tolerance`. `examples/validation/calibrate_case.py` shows `vecscope calibrate`
   proposing no threshold on XPQA ja, where no finding separates good from bad models.
   `run.py --reaudit` audits the cached embeddings again after a change to vecscope.
+
+### Changed (documentation)
+
+- For a change of embedding model, the docs and the skill now say to decide with labeled
+  queries and to read `reference_regressions` as a ranking of candidates, and not to use a
+  reference from the candidate's model family.
 
 ### Changed
 

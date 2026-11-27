@@ -212,7 +212,8 @@ vecscope audit embeddings.npy --queries queries.npy --result-sample 200 \
   through, and 29 of 244 harmless changes. On a fifth set, frozen before it was embedded and
   run with another reference model
   ([Verification](verification.md#a-fifth-held-out-set-preregistered)), it listed 12 of the
-  23 such changes and 3 of 47 harmless ones.
+  23 such changes and 3 of 47 harmless ones; on a sixth, 13 of 28 and 4 of 61, below the half
+  it was expected to list.
 - Without a tolerance, `change_decision` still says whether the agreed top hits were lost (at
   0.05), lost a little (above 0.03) or kept.
 
@@ -231,7 +232,10 @@ AUC 0.97 and flagged 72% of the faults costing more than 0.02 and 1 of 48 harmle
 (2%), where the whole-overlap drop flagged 21 of 48. On a fifth, with gte-multilingual-base
 instead of bge-m3 as the reference
 ([Verification](verification.md#a-fifth-held-out-set-preregistered)), it separated them at
-AUC 0.93 and flagged 78% of the faults costing more than 0.02 and 1 of 47 harmless ones. Read a loss as "likely harmful,
+AUC 0.93 and flagged 78% of the faults costing more than 0.02 and 1 of 47 harmless ones; on
+a sixth, with bge-m3 again
+([Verification](verification.md#a-sixth-held-out-set-preregistered)), AUC 0.93, 74% and 1
+of 61. Read a loss as "likely harmful,
 check with labels", not as a measured loss:
 
 - It misses small losses spread over the lower ranks: most truncation and quantization
@@ -241,6 +245,16 @@ check with labels", not as a measured loss:
   reference too; `collapse` finds those.
 - The reference must be made from the source texts, independently of the pipeline under
   test. A reference built from the same faulty export shares the fault.
+- It counts the agreed top hits a change loses, not the ones it gains, so it is not a verdict
+  on a new embedding model. A new model loses some agreed hits even when it finds more
+  elsewhere: on the preregistered sixth set it flagged 72 of 80 model swaps losing more than
+  0.02 nDCG@10, but also 5 of 27 swaps that improved it
+  ([Verification](verification.md#a-sixth-held-out-set-preregistered)). Use it to drop
+  candidates that lose many agreed hits, and decide with `--retrieval-confidence` (0.04% of
+  the harmful swaps passed, 0.07% of the harmless ones failed with 100 labeled queries). A
+  candidate from the reference's own family (a fine-tune of it) agrees with it by
+  construction and cannot be judged this way. A worked example:
+  [Changing the embedding model](case_model_change.md).
 
 ## Which rule failed the run
 

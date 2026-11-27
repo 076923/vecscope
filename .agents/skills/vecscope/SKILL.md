@@ -79,9 +79,16 @@ In CI:
   as "lost the top hits the reference agrees on: likely harmful, check with labels", and
   kept hits as "no sign of harm", never as proof. It misses small losses spread over lower
   ranks, about half of the lost-row faults (zero vectors; the findings catch them) and
-  duplicated rows (`collapse` does). On two preregistered held-out sets, with two different
-  reference models, it flagged 72% and 78% of drops above 0.02 and 2% of harmless changes,
+  duplicated rows (`collapse` does). On three preregistered held-out sets, with two different
+  reference models, it flagged 72% to 78% of drops above 0.02 and 2% of harmless changes,
   so no flag is not proof of no harm.
+  For a change of embedding model it is not a verdict: it counts lost agreed hits, not
+  gained ones, and a better model loses some too (on the sixth set 5 of 27 improving swaps
+  were flagged). Use the lost share to drop candidates that lose many agreed hits, and decide
+  the swap with labeled queries and `--retrieval-confidence 0.95` (0.04% of harmful swaps
+  passed, 0.07% of harmless ones failed, at 100 labeled queries). Never use a reference from
+  the candidate's family (e.g. a fine-tune of bge-m3 against bge-m3): it agrees by
+  construction.
   `reference_review` (above 0.03, below the tolerance; never fails) means "a small loss is
   possible": ask for labeled queries before adopting, do not call it a regression.
 - With `--reference-queries`, a hub finding (`hubness`, `query_hubness`, `antihubs`) still

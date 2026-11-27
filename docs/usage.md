@@ -290,7 +290,9 @@ are the ones that catch duplicated, zeroed and crowding rows. On the four held-o
 lowered the finding on 10 good and 17 bad pipelines and left 1 bad pipeline without a
 `fail`. On a fifth set, frozen before it was embedded
 ([Verification](verification.md#a-fifth-held-out-set-preregistered)), it lowered no good
-pipeline and 3 bad ones, all of which kept another `fail`.
+pipeline and 3 bad ones, all of which kept another `fail`; on a sixth
+([Verification](verification.md#a-sixth-held-out-set-preregistered)), 4 good pipelines and
+no bad one.
 
 Pick a reference with published scores on your language and domain. A reference that shares
 the fault (another model that does not cover the language) explains away a real problem.
@@ -317,7 +319,9 @@ On a fourth held-out set, frozen before it was embedded
 good pipelines at `fail` with the reference and kept all 38 bad ones at `fail`. The 2 left
 were `effective_rank`, which it does not lower. On a fifth set with another reference model,
 gte-multilingual-base, the two rules together cleared 4 of the 5 good pipelines at `fail` and
-kept all 17 bad ones at `fail`; the one left was a hub agreeing at 0.39.
+kept all 17 bad ones at `fail`; the one left was a hub agreeing at 0.39. On a sixth, with
+bge-m3 again, they cleared 5 of 10 and kept all 21 bad ones at `fail`; the 5 left were
+`collapse`, `ood_queries` and `query_gap`, which neither rule lowers.
 
 ## Use as a library
 
