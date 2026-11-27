@@ -1,0 +1,364 @@
+{
+ "check_lost_matches_stored": {
+  "faults": 595,
+  "mismatch": 0
+ },
+ "faults": {
+  "fourth": {
+   "n": 185,
+   "drop_over_002": 116,
+   "harmless": 48,
+   "shipped: lost share > 0.05, z > 2": {
+    "flagged_of_drop_over_002": 83,
+    "flagged_of_harmless": 1
+   },
+   "shipped and net drop > 0": {
+    "flagged_of_drop_over_002": 83,
+    "flagged_of_harmless": 1
+   },
+   "shipped and net z > 1": {
+    "flagged_of_drop_over_002": 83,
+    "flagged_of_harmless": 1
+   },
+   "shipped and net z > 2": {
+    "flagged_of_drop_over_002": 80,
+    "flagged_of_harmless": 0
+   },
+   "net drop > 0.03, net z > 2": {
+    "flagged_of_drop_over_002": 98,
+    "flagged_of_harmless": 0
+   }
+  },
+  "fifth": {
+   "n": 175,
+   "drop_over_002": 103,
+   "harmless": 47,
+   "shipped: lost share > 0.05, z > 2": {
+    "flagged_of_drop_over_002": 80,
+    "flagged_of_harmless": 1
+   },
+   "shipped and net drop > 0": {
+    "flagged_of_drop_over_002": 80,
+    "flagged_of_harmless": 1
+   },
+   "shipped and net z > 1": {
+    "flagged_of_drop_over_002": 80,
+    "flagged_of_harmless": 1
+   },
+   "shipped and net z > 2": {
+    "flagged_of_drop_over_002": 79,
+    "flagged_of_harmless": 0
+   },
+   "net drop > 0.03, net z > 2": {
+    "flagged_of_drop_over_002": 84,
+    "flagged_of_harmless": 0
+   }
+  },
+  "sixth": {
+   "n": 235,
+   "drop_over_002": 132,
+   "harmless": 68,
+   "shipped: lost share > 0.05, z > 2": {
+    "flagged_of_drop_over_002": 95,
+    "flagged_of_harmless": 1
+   },
+   "shipped and net drop > 0": {
+    "flagged_of_drop_over_002": 95,
+    "flagged_of_harmless": 1
+   },
+   "shipped and net z > 1": {
+    "flagged_of_drop_over_002": 95,
+    "flagged_of_harmless": 0
+   },
+   "shipped and net z > 2": {
+    "flagged_of_drop_over_002": 91,
+    "flagged_of_harmless": 0
+   },
+   "net drop > 0.03, net z > 2": {
+    "flagged_of_drop_over_002": 104,
+    "flagged_of_harmless": 1
+   }
+  }
+ },
+ "faults_all": {
+  "n": 595,
+  "drop_over_002": 351,
+  "harmless": 163,
+  "shipped: lost share > 0.05, z > 2": {
+   "flagged_of_drop_over_002": 258,
+   "flagged_of_harmless": 3
+  },
+  "shipped and net drop > 0": {
+   "flagged_of_drop_over_002": 258,
+   "flagged_of_harmless": 3
+  },
+  "shipped and net z > 1": {
+   "flagged_of_drop_over_002": 258,
+   "flagged_of_harmless": 2
+  },
+  "shipped and net z > 2": {
+   "flagged_of_drop_over_002": 250,
+   "flagged_of_harmless": 0
+  },
+  "net drop > 0.03, net z > 2": {
+   "flagged_of_drop_over_002": 286,
+   "flagged_of_harmless": 1
+  }
+ },
+ "changes": {
+  "all": {
+   "n": 1512,
+   "drop_over_002": 728,
+   "harmless": 760,
+   "shipped: lost share > 0.05, z > 2": {
+    "flagged_of_drop_over_002": 690,
+    "flagged_of_harmless": 319
+   },
+   "shipped and net drop > 0": {
+    "flagged_of_drop_over_002": 684,
+    "flagged_of_harmless": 82
+   },
+   "shipped and net z > 1": {
+    "flagged_of_drop_over_002": 679,
+    "flagged_of_harmless": 54
+   },
+   "shipped and net z > 2": {
+    "flagged_of_drop_over_002": 659,
+    "flagged_of_harmless": 15
+   },
+   "net drop > 0.03, net z > 2": {
+    "flagged_of_drop_over_002": 659,
+    "flagged_of_harmless": 16
+   }
+  },
+  "multilingual": {
+   "n": 630,
+   "drop_over_002": 112,
+   "harmless": 506,
+   "shipped: lost share > 0.05, z > 2": {
+    "flagged_of_drop_over_002": 87,
+    "flagged_of_harmless": 146
+   },
+   "shipped and net drop > 0": {
+    "flagged_of_drop_over_002": 84,
+    "flagged_of_harmless": 29
+   },
+   "shipped and net z > 1": {
+    "flagged_of_drop_over_002": 82,
+    "flagged_of_harmless": 15
+   },
+   "shipped and net z > 2": {
+    "flagged_of_drop_over_002": 77,
+    "flagged_of_harmless": 4
+   },
+   "net drop > 0.03, net z > 2": {
+    "flagged_of_drop_over_002": 77,
+    "flagged_of_harmless": 5
+   }
+  },
+  "by_baseline": {
+   "multilingual-e5-base": {
+    "n": 756,
+    "drop_over_002": 471,
+    "harmless": 265,
+    "shipped: lost share > 0.05, z > 2": {
+     "flagged_of_drop_over_002": 434,
+     "flagged_of_harmless": 94
+    },
+    "shipped and net drop > 0": {
+     "flagged_of_drop_over_002": 428,
+     "flagged_of_harmless": 52
+    },
+    "shipped and net z > 1": {
+     "flagged_of_drop_over_002": 424,
+     "flagged_of_harmless": 37
+    },
+    "shipped and net z > 2": {
+     "flagged_of_drop_over_002": 414,
+     "flagged_of_harmless": 12
+    },
+    "net drop > 0.03, net z > 2": {
+     "flagged_of_drop_over_002": 414,
+     "flagged_of_harmless": 13
+    }
+   },
+   "paraphrase-multilingual-MiniLM-L12-v2": {
+    "n": 756,
+    "drop_over_002": 257,
+    "harmless": 495,
+    "shipped: lost share > 0.05, z > 2": {
+     "flagged_of_drop_over_002": 256,
+     "flagged_of_harmless": 225
+    },
+    "shipped and net drop > 0": {
+     "flagged_of_drop_over_002": 256,
+     "flagged_of_harmless": 30
+    },
+    "shipped and net z > 1": {
+     "flagged_of_drop_over_002": 255,
+     "flagged_of_harmless": 17
+    },
+    "shipped and net z > 2": {
+     "flagged_of_drop_over_002": 245,
+     "flagged_of_harmless": 3
+    },
+    "net drop > 0.03, net z > 2": {
+     "flagged_of_drop_over_002": 245,
+     "flagged_of_harmless": 3
+    }
+   }
+  },
+  "by_set": {
+   "confirm": {
+    "n": 168,
+    "drop_over_002": 91,
+    "harmless": 72,
+    "shipped: lost share > 0.05, z > 2": {
+     "flagged_of_drop_over_002": 88,
+     "flagged_of_harmless": 35
+    },
+    "shipped and net drop > 0": {
+     "flagged_of_drop_over_002": 88,
+     "flagged_of_harmless": 9
+    },
+    "shipped and net z > 1": {
+     "flagged_of_drop_over_002": 88,
+     "flagged_of_harmless": 8
+    },
+    "shipped and net z > 2": {
+     "flagged_of_drop_over_002": 86,
+     "flagged_of_harmless": 3
+    },
+    "net drop > 0.03, net z > 2": {
+     "flagged_of_drop_over_002": 86,
+     "flagged_of_harmless": 4
+    }
+   },
+   "fifth": {
+    "n": 192,
+    "drop_over_002": 94,
+    "harmless": 97,
+    "shipped: lost share > 0.05, z > 2": {
+     "flagged_of_drop_over_002": 89,
+     "flagged_of_harmless": 37
+    },
+    "shipped and net drop > 0": {
+     "flagged_of_drop_over_002": 89,
+     "flagged_of_harmless": 7
+    },
+    "shipped and net z > 1": {
+     "flagged_of_drop_over_002": 89,
+     "flagged_of_harmless": 4
+    },
+    "shipped and net z > 2": {
+     "flagged_of_drop_over_002": 85,
+     "flagged_of_harmless": 1
+    },
+    "net drop > 0.03, net z > 2": {
+     "flagged_of_drop_over_002": 85,
+     "flagged_of_harmless": 1
+    }
+   },
+   "fourth": {
+    "n": 264,
+    "drop_over_002": 140,
+    "harmless": 122,
+    "shipped: lost share > 0.05, z > 2": {
+     "flagged_of_drop_over_002": 136,
+     "flagged_of_harmless": 40
+    },
+    "shipped and net drop > 0": {
+     "flagged_of_drop_over_002": 136,
+     "flagged_of_harmless": 7
+    },
+    "shipped and net z > 1": {
+     "flagged_of_drop_over_002": 136,
+     "flagged_of_harmless": 5
+    },
+    "shipped and net z > 2": {
+     "flagged_of_drop_over_002": 131,
+     "flagged_of_harmless": 2
+    },
+    "net drop > 0.03, net z > 2": {
+     "flagged_of_drop_over_002": 131,
+     "flagged_of_harmless": 2
+    }
+   },
+   "heldout": {
+    "n": 456,
+    "drop_over_002": 188,
+    "harmless": 257,
+    "shipped: lost share > 0.05, z > 2": {
+     "flagged_of_drop_over_002": 180,
+     "flagged_of_harmless": 138
+    },
+    "shipped and net drop > 0": {
+     "flagged_of_drop_over_002": 174,
+     "flagged_of_harmless": 39
+    },
+    "shipped and net z > 1": {
+     "flagged_of_drop_over_002": 170,
+     "flagged_of_harmless": 24
+    },
+    "shipped and net z > 2": {
+     "flagged_of_drop_over_002": 167,
+     "flagged_of_harmless": 7
+    },
+    "net drop > 0.03, net z > 2": {
+     "flagged_of_drop_over_002": 167,
+     "flagged_of_harmless": 7
+    }
+   },
+   "sixth": {
+    "n": 216,
+    "drop_over_002": 114,
+    "harmless": 101,
+    "shipped: lost share > 0.05, z > 2": {
+     "flagged_of_drop_over_002": 106,
+     "flagged_of_harmless": 39
+    },
+    "shipped and net drop > 0": {
+     "flagged_of_drop_over_002": 106,
+     "flagged_of_harmless": 10
+    },
+    "shipped and net z > 1": {
+     "flagged_of_drop_over_002": 105,
+     "flagged_of_harmless": 5
+    },
+    "shipped and net z > 2": {
+     "flagged_of_drop_over_002": 103,
+     "flagged_of_harmless": 0
+    },
+    "net drop > 0.03, net z > 2": {
+     "flagged_of_drop_over_002": 103,
+     "flagged_of_harmless": 0
+    }
+   },
+   "third": {
+    "n": 216,
+    "drop_over_002": 101,
+    "harmless": 111,
+    "shipped: lost share > 0.05, z > 2": {
+     "flagged_of_drop_over_002": 91,
+     "flagged_of_harmless": 30
+    },
+    "shipped and net drop > 0": {
+     "flagged_of_drop_over_002": 91,
+     "flagged_of_harmless": 10
+    },
+    "shipped and net z > 1": {
+     "flagged_of_drop_over_002": 91,
+     "flagged_of_harmless": 8
+    },
+    "shipped and net z > 2": {
+     "flagged_of_drop_over_002": 87,
+     "flagged_of_harmless": 2
+    },
+    "net drop > 0.03, net z > 2": {
+     "flagged_of_drop_over_002": 87,
+     "flagged_of_harmless": 2
+    }
+   }
+  }
+ }
+}

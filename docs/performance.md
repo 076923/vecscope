@@ -4,16 +4,16 @@
 
 ## Performance
 
-Exact k-NN is quadratic in the number of rows: doubling the rows roughly quadruples the time,
-and a full audit (`--sample 0`) of 100k rows takes minutes on a laptop.
+Exact k-NN is quadratic in the number of rows; a full audit (`--sample 0`) of 100k rows takes
+minutes on a laptop.
 
-The k-NN pass works in row blocks sized to keep its distance matrix near 1 GiB whatever the
-row count. The other passes need a few float32 copies of the matrix, so the peak grows with
-rows x dims at roughly four times the matrix size.
+The k-NN pass works in row blocks that keep its distance matrix near 1 GiB at any row count.
+The other passes need a few float32 copies of the matrix, so the peak grows with rows x dims
+at roughly four times the matrix size.
 
 Measured on an 8-vCPU AMD EPYC 7R13 with 8 BLAS threads (NumPy only, single process,
-clustered synthetic corpus, k=10). Memory is the peak the audit itself allocates; the input
-matrix comes on top. A three-run median in separate processes agreed with these single runs
+clustered synthetic corpus, k=10). Memory is the peak the audit itself allocates, on top of
+the input matrix. A three-run median in separate processes agreed with these single runs
 within 2%, and the OS peak memory within 0.04 GiB.
 
 | rows | dim | seconds | peak memory (input excluded) |
@@ -33,11 +33,11 @@ within 2%, and the OS peak memory within 0.04 GiB.
 - Time grows close to n² (3.5 to 3.9x per doubling from 50k up).
 - Memory is flat from 50k rows at 384 and 768 dims because the k-NN block shrinks with n,
   and steps up at 1,536 dims and at 200k rows.
-- The default 100k-row sample keeps any corpus near the 100k rows.
+- The default 100k-row sample keeps any corpus near the 100k-row cost.
 - `--queries` adds one more pass over the corpus per query batch, and `metric_mismatch` adds
   a second k-NN pass only when vector norms vary.
 
-To re-measure on your machine at the sizes you care about:
+To re-measure on your machine:
 
 ```bash
 python examples/benchmark_scale.py --rows 50000 100000 --dim 768   # the audit table above
@@ -53,8 +53,8 @@ Blocking bounds memory, not work: the exact pass still costs about n² × dim mu
 so a million rows at 768 dims is roughly 100 times the 100k-row figure.
 
 For corpora that size, audit the default sample (or several with `--sample-repeats`) and
-reserve `--sample 0` for the findings that need every row. A sampled audit is a statement
-about the sample. Which findings need every row:
+reserve `--sample 0` for the findings that need every row. A sampled audit describes the
+sample:
 
 | finding | what a sample gives | needs every row |
 |---|---|---|
@@ -70,8 +70,8 @@ A sampled audit therefore:
 
 - sets `evidence_scope` to `sampled` (`full` when every row was audited) and lists in
   `needs_full_audit` the findings whose verdict cannot stand for the corpus: the inconclusive
-  ones and, with `--sample-repeats`, the unstable ones. Anything consuming the JSON can gate
-  on these two keys without reading the per-finding caveats
+  ones and, with `--sample-repeats`, the unstable ones. A JSON consumer can gate on these two
+  keys alone
 - lists `inconclusive_findings` (the verdicts the table marks inconclusive)
 - flags them `INCONCLUSIVE (sampled)` in the text output and names them in the gate line
 - takes the collapse verdict from `details.estimated_full_share` (see below)
@@ -79,16 +79,15 @@ A sampled audit therefore:
 
 `estimated_full_share` is the sampled share divided by the sample fraction, or the share of
 rows with an exact copy counted over every row (`details.full_corpus_exact_copy_share`) when
-that is larger. Counting exact copies over the whole corpus is cheap (one digest per row), so
-rare copies the sample missed still count. Near-duplicates that are not exact copies are only
-seen in the sample.
+that is larger. Exact copies are cheap to count over the whole corpus (one digest per row), so
+rare copies the sample missed still count; other near-duplicates are only seen in the sample.
 
 The 200k-row figures come from the
 [verification](https://github.com/076923/vecscope/blob/main/docs/verification.md);
 `tests/test_regression_injection.py` checks the same properties at 6k rows on every run.
 
-Every number is exact for the rows it saw; vecscope never substitutes an approximate
-neighbor search for the exact one. The only approximation is the choice of rows.
+Every number is exact for the rows it saw: vecscope never uses an approximate neighbor
+search, and the only approximation is the choice of rows.
 
 ## How vecscope works
 
@@ -106,8 +105,6 @@ neighbor search for the exact one. The only approximation is the choice of rows.
 Query embeddings, if present, get their own exact search against the corpus for the
 query-side findings.
 
-Everything is deterministic: fixed seeds, exact neighbors, no learned components, no network.
-Two runs on the same file give the same JSON.
-
-Exact k-NN is quadratic in the number of rows, so inputs above 100,000 rows are audited on a
-seeded random sample unless you pass `--sample 0`.
+Fixed seeds, exact neighbors, no learned components and no network: two runs on the same file
+give the same JSON. Inputs above 100,000 rows are audited on a seeded random sample unless you
+pass `--sample 0`.

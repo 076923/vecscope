@@ -4,10 +4,204 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.14.0] - 2026-11-28
+
+### Added
+
+- A labeled gate judged against the noise of its queries: retrieval blocks keep each judged
+  query's values (`retrieval.per_query`; the MCP response only counts them), and
+  `--retrieval-confidence LEVEL` (MCP `retrieval_confidence`, Python
+  `diff_evidence(retrieval_confidence=...)`) pairs them by query row. A tolerance fails
+  (`retrieval_regressions`) when the drop is beyond it and real at that level, passes when the
+  interval stays within it, and is otherwise `retrieval_inconclusive` (exit 1, with
+  `retrieval_confidence_checks` and an estimate of the labeled queries needed);
+  `change_decision` is then `needs_review`. Designed on the first held-out set's faults: at
+  100 labeled queries 1% of harmful changes passed (8% with the mean alone) and 14% of
+  harmless ones failed (24%).
+- The top hits a pipeline and a reference model agree on, as a label-free sign of harm: with
+  `--reference` and `--result-sample`, the baseline stores per sampled query and row the
+  reference's first result (`result_sample.reference_first`) and how much of its top-k the
+  reference returns too (`result_sample.reference_overlap`). The diff gives
+  `result_agreement.<side>.reference_top_hit` (of the items whose baseline top-k held the
+  reference's first result, how many the new run lost, the share and z; only the baseline
+  needs the reference) and, with the reference on both runs,
+  `result_agreement.<side>.reference` (overlap before and after). `--reference-tolerance SHARE`
+  (MCP `reference_tolerance`) lists a lost share beyond it and beyond 2 standard errors in
+  `reference_regressions` (`reference_unchecked` when the baseline has no reference
+  results). Without a tolerance, `change_decision` says whether the agreed top hits were lost
+  (at 0.05). The first version, preregistered on the third held-out set, gated on the drop of
+  the whole overlap and flagged 44% of harmless faults (P5b failed); the agreed top hits were
+  then designed on the three held-out sets: AUC 0.91 between harmful and harmless faults
+  (overlap drop 0.86, changed share 0.51), 72% to 83% of drops above 0.02 flagged and 5% to
+  8% of harmless faults per set. The Action lists `inconclusive:<metric>` in
+  `retrieval-regressions`.
+- Retrieval agreement for hub findings: with queries and `--reference-queries`, the audit
+  measures the share of the pipeline's top-k the reference returns for the same 200 sampled
+  queries (`reference.agreement`), and a hub finding (`hubness`, `query_hubness`,
+  `antihubs`) still at `fail` after the reference rule reads `warn` at 0.40 or more
+  (`details.reference.verdict_before_agreement`, `TOLERATED BY RETRIEVAL AGREEMENT`). Designed
+  on 490 pipelines of the three held-out sets: AUC 0.999 between good and bad pipelines, no
+  bad pipeline at `fail` above 0.31, 9 of the 12 good pipelines left at `fail` cleared.
+- A review tier for small losses of agreed top hits: the diff lists in `reference_review`
+  a side whose lost share is above 0.03 and 2 standard errors but within the tolerance
+  (`REFERENCE_REVIEW`). It never fails a gate; the CLI shows `REVIEW`, the MCP summary and
+  the Action report say a small loss is possible, and `change_decision` asks for labels.
+  Designed on the four held-out sets: 80 of the 117 faults costing more than 0.02 that 0.05
+  let through were listed, and 29 of 244 harmless ones.
+- One step for `effective_rank` against a reference: at `fail` where the reference is at
+  `warn`, it reads `warn` (`PARTLY EXPLAINED BY THE ROWS`, listed in `reference.explained`).
+  The row-level findings keep the strict rule. Designed on the four held-out sets: lowered
+  on 10 good and 17 bad pipelines, 1 bad pipeline left without a `fail`.
+- `examples/validation/intervals.py`: 95% intervals for the counts of the preregistered sets
+  (Wilson for pipelines, a pipeline bootstrap for the injected faults), written to
+  `intervals_summary.json` for the fourth and fifth sets.
+- A sixth held-out set (nine public datasets, `role="sixth"`, bge-m3 as the reference,
+  faults injected into two corpora over 25k documents too, and a model change judged against
+  the full labels), frozen with its criteria in `examples/validation/preregistration_sixth.md`
+  before it was embedded, scored by `examples/validation/sixth.py` (`sixth_summary.json`). No
+  rule changed after the fifth set. Two predictions failed: P15c (the review tier listed 13 of
+  the 28 missed drops above 0.02, half needed) and P18a (on 108 model changes the agreed top
+  hits flagged 72 of 80 drops above 0.02 but also 5 of 27 improvements: the diff counts only
+  lost hits, and a new model loses some while finding more). P15a/b (AUC 0.932; 81 of 109
+  and 1 of 61 harmless), P15d, P17 (5 of 10 good pipelines cleared, 21 of 21 bad and 115 of
+  115 caught faults kept), P18b/c (labeled gate on model changes: 0.04% of harmful passed,
+  0.07% of harmless failed) and P19 passed; P16 (faults in the 72k and 81k corpora) was not
+  testable with 7 harmless faults.
+- `examples/validation/case_model_change.py` and the page
+  [Changing the embedding model](https://076923.github.io/vecscope/case_model_change/): the
+  sixth set's model changes on the XPQA product-answer sets, with the label-free verdict and
+  the labeled gate at 100 labeled queries for each candidate.
+
+- A fifth held-out set (eight public datasets, `role="fifth"`, gte-multilingual-base as the
+  reference, two larger corpora) frozen with its criteria in
+  `examples/validation/preregistration_fifth.md` before it was embedded, scored by
+  `examples/validation/fifth.py` (`fifth_summary.json`). Every prediction passed: P11 (agreed
+  top hits with gte-multilingual-base as the reference, AUC 0.928; at 0.05, 80 of 103 drops
+  above 0.02 and 1 of 47 harmless faults flagged); P12 (review tier: 12 of the 23 missed
+  drops above 0.02 and 3 of 47 harmless faults listed); P13 (the two lowering rules cleared
+  4 of 5 good pipelines at `fail`, kept 17 of 17 bad ones at `fail` and 94 of 94 caught
+  faults caught; the one-step rule lowered no good pipeline here); P14 (6 of 6 identical
+  reruns).
+- A fourth held-out set (eleven public datasets, `role="fourth"`) frozen with its criteria in
+  `examples/validation/preregistration_fourth.md` before it was embedded, scored by
+  `examples/validation/fourth.py`. Results (`fourth_summary.json`, docs/verification.md), all
+  passed: P8 (agreed top hits AUC 0.971 against 0.807 for the overlap drop; at 0.05, 83 of
+  116 faults above 0.02 flagged and 1 of 48 harmless ones, against 21 of 48 for the overlap
+  drop); P9 (retrieval agreement cleared 6 of 8 good pipelines at `fail` with the reference,
+  kept 38 of 38 bad ones at `fail` and lost none of the 100 harmful faults the findings
+  caught; the 2 left are `effective_rank`); P10 (6 of 6 identical reruns).
+- A third held-out set (nine public datasets, `role="third"`) frozen with its criteria in
+  `examples/validation/preregistration_third.md` before it was embedded, scored by
+  `examples/validation/third.py`. Results (`third_summary.json`, docs/verification.md): P1 passed (the
+  `query_hubness` chance rule cleared 21 of 21 good pipelines flagged by the thresholds alone
+  and kept 17 of 17 bad ones at `fail`); P5a passed at the edge (reference overlap AUC 0.802,
+  changed share 0.468); P5b failed (79% of faults above 0.02 flagged, but also 44% of
+  harmless ones, against a 35% limit); P6 passed (at 100 labeled queries harmful changes
+  passed 0.4% of the time against 3.9% with the mean, harmless ones failed 10.1% against
+  23.7%); P7 passed.
+- Judging findings against a reference model: `vecscope audit --reference ref.npy
+  [--reference-queries ref_q.npy]` (MCP `reference_path`, `reference_queries_path`; Python
+  `audit(reference_embeddings=..., reference_queries=...)`) audits the same rows embedded by a
+  second model with the same settings. A finding the reference reaches at the same level or
+  worse is attributed to the rows and reads ok; `details.reference` keeps the reference value,
+  its verdict and `verdict_without_reference`, the evidence carries a `reference` block with
+  the `explained` list, and the text output says `EXPLAINED BY THE ROWS`. Norms, rogue
+  dimensions, metric mismatch, ANN recall and query shift are never explained this way. Meant
+  for short or templated texts and narrow domains, where good models trip findings.
+- Label-free result change: `--result-sample M` (MCP `result_sample`, Python
+  `audit(result_sample=M)`) stores the exact top-k of M hash-chosen queries and corpus rows in
+  the evidence (`result_sample`); a baseline diff of two such runs carries `result_agreement`
+  (`changed_share`, `unchanged_items` per side). `--result-tolerance SHARE` (MCP
+  `result_tolerance`) fails the run when more changed (`result_regressions`) or a run has no
+  sample (`result_unchecked`). It measures change, not harm: on 594 injected faults it did not
+  separate harmful from harmless changes (AUC 0.58), so it gates pipelines meant to return the
+  same results. Without labels, `change_decision` cites the changed share.
+- `examples/validation/label_budget.py`: how many labeled queries a 0.01 nDCG tolerance needs
+  (100 caught 92% of harmful injected faults, 95 to 100% of drops above 0.02); documented in
+  "How many labeled queries" in docs/ci.md.
+- A second held-out set (seven public datasets, `role="confirm"` in registry.py) with its
+  predictions and pass criteria frozen in `examples/validation/preregistration.md` before it
+  was embedded, scored by `examples/validation/confirm.py`. Results
+  (`examples/validation/confirm_summary.json`, docs/verification.md): the query_hubness chance
+  rule changed no verdict (every dataset had 1,000+ queries) and passed without being tested;
+  the reference model cut flagged good pipelines from 34 to 14 of 36 and kept 34 of 34 bad at
+  fail, but left 6 of 6 good pipelines at fail, so prediction P2a (at most 75%) failed; 100
+  labeled queries caught 87% of harmful faults and 97% of drops above 0.02 (passed); every
+  injected fault changed the sampled top-k and identical re-runs changed none (passed).
+
+- Retrieval quality as a gate: `vecscope audit --baseline ... --qrels ...
+  --retrieval-tolerance ndcg_at_k=0.01` (repeatable; `recall_at_k`, `mrr_at_k`,
+  `hit_rate_at_k`, `duplicate_result_share`, `overlap_with_exact`, optionally prefixed `exact.`
+  or `ranked.`) exits 1 when a labeled retrieval metric drops by more than its tolerance
+  against the baseline, whatever the findings say. A tolerance that cannot be checked
+  (baseline without labels, different qrels or k, missing ranking) fails the run too, or exits
+  2 with `--require-comparable`. The baseline diff carries `retrieval_regressions`,
+  `retrieval_unchecked`, `retrieval_tolerances`, and `worsening` and `tolerance` on each
+  retrieval change; the `gate` block names both lists. Before this, retrieval changes were
+  printed but never failed a run.
+- MCP: `audit_embeddings(retrieval_tolerances={...})` with the same rules; the summary says
+  `RETRIEVAL WORSE` or `NOT CHECKED`.
+- Safe remediation: every baseline diff carries `change_decision` (`adopt`, `reject`,
+  `needs_review`, with reasons and a `watch` list). A change is adopted only when labeled
+  retrieval did not drop (any nDCG or recall drop, exact or ranked, or the
+  `--retrieval-tolerance` budget) and something improved; a change with no measured gain is
+  rejected; without comparable labels a person decides. Every plan step carries `adopt_when`:
+  transform a copy, keep the original, adopt on `adopt` only, stop after 3 changes for one
+  step that were not adopted. The MCP server counts them per baseline and first plan step
+  (`baseline_diff.attempts`) and says `STOP` in the summary at the limit. The CLI prints the
+  decision under the baseline diff. `tests/test_safe_remediation.py` fixes the cases: centering
+  a healthy corpus lowers nDCG and is rejected, a no-op is rejected, no labels needs review.
+- Agent cases 3 and 4 (`examples/agent_case.py --case healthy|misdirected`,
+  `docs/agent_case.md`): a healthy corpus with a request to center or whiten it, and a prompt
+  that blames corpus anisotropy when the queries come from another model. In two runs each,
+  Claude Code tried the change on copies, the re-audit rejected it on the labels (nDCG@10 0.713
+  to 0.690 and 0.637; 0.221 to 0.133) and the originals stayed in place.
+- `change_decision.still_not_ok` names the findings that are still not ok after an adopted
+  change: centering only the corpus of case 4 nudges nDCG@10 up while the query fault remains.
+- GitHub Action: `qrels` and `retrieval-tolerance` inputs, a `retrieval-regressions` output and
+  a retrieval table in the job summary. CI checks that a lost id mapping (the same rows
+  reordered: no finding moves) fails the job on retrieval alone.
+- Held-out validation on public data (`examples/validation/`, `docs/validation.md`): 19 public
+  datasets none of the thresholds was fitted on (XPQA in seven languages, Amazon ESCI us, es
+  and jp, MIRACL de, fr and hi, CodeSearchNet python, go and java, CoSQA, LegalBench terms of
+  service, TREC-COVID), each encoded with 14 public models. 54 of 67 bad pipelines (50% or
+  less of the best nDCG@10) end at `fail` and one has no flag; 26 of 114 good pipelines end at
+  `fail`, mostly through `effective_rank` and `collapse` on text under 200 characters. The
+  thresholds were not changed. `examples/validation/faults.py` injects six faults into the
+  good pipelines: the baseline diff catches most of what the absolute verdict misses
+  (truncation 62 of 63 against 7), and a lost id mapping is caught only by
+  `--retrieval-tolerance`. `examples/validation/calibrate_case.py` shows `vecscope calibrate`
+  proposing no threshold on XPQA ja, where no finding separates good from bad models.
+  `run.py --reaudit` audits the cached embeddings again after a change to vecscope.
 
 ### Changed
 
+- The agreed top hits are judged by their net drop. `result_agreement.<side>.reference_top_hit`
+  also gives `gained` (sampled items whose new top-k holds the reference's first result that
+  the baseline's missed), `net_drop` (lost minus gained over every compared item),
+  `net_standard_error` and `net_z`. `reference_regressions` and `reference_review` judge the
+  net drop: the default tolerance is 0.03 (was a lost share of 0.05) and the review share
+  0.015 (was 0.03). The lost share alone flagged model changes that improved retrieval (5 of
+  27 on the sixth held-out set, 35% to 45% on the design data of sets 1 to 6). Designed on
+  sets 1 to 6 by `examples/validation/net_design.py` (`net_design.json`), and tested on a
+  seventh held-out set frozen with its criteria in
+  `examples/validation/preregistration_seventh.md` before it was embedded, scored by
+  `examples/validation/seventh.py` (`seventh_summary.json`). On the seventh set it flagged
+  137 of 154 faults costing more than 0.02 nDCG@10 and 0 of 81 harmless ones (lost share:
+  123 and 1), and 116 of 133 model changes losing more than 0.02 and 1 of 85 harmless ones
+  (lost share: 123 and 28). The multilingual-candidate criterion failed: 11 of 23 large
+  losses flagged, against 60% required; it misses losses of 0.02 to 0.09 between models of
+  similar quality (1 of 13 flagged), as the lost share did. The labeled gate, the two lowering
+  rules and determinism passed.
+- `query_hubness` is judged against chance. With few queries over a large corpus the
+  k-occurrence skewness is high with no hub at all (a hub-free index gives
+  (1 - 2p) / sqrt(queries p (1 - p)), p = k/n: 4.8 for 300 queries over 70k documents, 18.4
+  for 50 over 171k), so it read `warn` or `fail` on every good held-out pipeline over 50k
+  documents. The finding now reports `details.null_skewness`, gives no verdict level that
+  chance reaches (`details.not_judged`, `NOT JUDGED` in the explanation and the CLI line,
+  "not judged" in the MCP summary) and says how many queries would judge it
+  (`details.queries_needed`). Thresholds are unchanged; on the data they were fitted on chance
+  stays near 1.1 to 1.3.
 - The README keeps the overview, quick start, findings table, a short MCP and CI setup and the
   FAQ (about 320 lines instead of 1,320). The rest moved unchanged to documentation pages, each
   with its Korean translation: `docs/usage.md` (queries and clusters, index sweep, compare,
@@ -17,6 +211,21 @@ All notable changes to this project are documented here. The format follows
   order, real embeddings, whether the findings predict retrieval quality, calibration) and
   `docs/performance.md` (performance, sampled audits, how vecscope works).
 - The tested clients now include GitHub Copilot in VS Code.
+
+### Changed (documentation)
+
+- For a change of embedding model, the docs and the skill now say to decide with labeled
+  queries and to read `reference_regressions` as a ranking of candidates, and not to use a
+  reference from the candidate's model family.
+- The documentation describes the current version only. The verification page reports the
+  preregistered held-out sets by current rule (agreed top hits, labeled gate, reference and
+  lowering rules, chance rule, result change, determinism) instead of set by set, and the
+  results of rules since replaced (whole-list overlap, lost share) stay in this changelog and
+  the preregistration files. The README, usage, CI, MCP and skill pages state each rule with
+  its held-out evidence, and the model-change case page gives the net drop on the XPQA rows.
+- The README and documentation pages are shorter: repeated caveats, restatements of tables
+  and per-section "not covered" lists are cut, and the verification page keeps one list of
+  limitations.
 
 ## [0.13.0] - 2026-11-10
 

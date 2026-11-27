@@ -27,31 +27,22 @@
 
 ---
 
-Agents build RAG pipelines, semantic search and recommendation retrieval every day, but they
-cannot see the embedding space they are searching.
-
-When retrieval goes wrong it rarely looks like a bug. It looks like:
+Agents build RAG pipelines, semantic search and recommendation retrieval, but cannot see the
+embedding space they search. Retrieval failures rarely look like bugs. They look like:
 
 - "the same three chunks come back for everything"
 - "every score is 0.8-something"
 - "top-k is full of copies"
 - "brute force finds it and HNSW does not"
 
-Each of those failures has a known, deterministic diagnostic in the literature. `vecscope`
-turns them into one command and one JSON:
+Each has a known, deterministic diagnostic. `vecscope` turns them into one command and one
+JSON: measurements, `ok` / `warn` / `fail` verdicts, and an explanation an agent can act on.
+It runs locally on NumPy, with no model or network, and reports the same numbers every time.
 
-- measurements
-- `ok` / `warn` / `fail` verdicts
-- an explanation an agent can act on
-
-It runs locally on NumPy, needs no model or network, and reports the same numbers every time.
-
-`vecscope` diagnoses the **vector search implementation**: the geometry the model produced,
-the hygiene of the corpus, the distance metric, the index and the query pipeline.
-
-It does not measure relevance. Whether the right documents come back for a question needs
-labeled queries, and a clean audit is evidence that search is not sabotaging retrieval, not
-proof that retrieval is good.
+`vecscope` diagnoses the **vector search implementation**: the model's geometry, corpus
+hygiene, the distance metric, the index and the query pipeline. It does not measure
+relevance, which needs labeled queries: a clean audit shows search is not sabotaging
+retrieval, not that retrieval is good.
 
 ## Quick start
 
@@ -63,8 +54,7 @@ pip install vecscope
 
 ### 2. Get a file of embeddings
 
-`vecscope` reads a file with one embedding vector per row: the `(n, dim)` array a model's
-`encode` returns, saved as `.npy`, `.parquet`, `.jsonl`, `.json` or `.csv`
+`vecscope` reads one embedding per row: the `(n, dim)` array a model's `encode` returns, saved as `.npy`, `.parquet`, `.jsonl`, `.json` or `.csv`
 ([all formats](https://076923.github.io/vecscope/usage/#input-formats)).
 
 ```python
@@ -116,12 +106,11 @@ vecscope x.y.z  n=3000 dim=128 k=10  verdict=FAIL
 
 ### 4. Read the result
 
-- The first line gives the overall `verdict`: the worst verdict among the findings.
-- Each finding shows the measured value, the range that would be `ok`, and a sentence saying
-  what the number means for retrieval. Findings that are not `ok` add a `try:` line with the
-  smallest change to test first.
-- The exit code is `1` on `FAIL`, so the same command works as a CI gate.
-- Add `--json` to get the same evidence as JSON for an agent or a script.
+- The first line gives the overall `verdict`: the worst among the findings.
+- Each finding shows the measured value, the `ok` range, and what the number means for
+  retrieval. Findings that are not `ok` add a `try:` line with the smallest change to test first.
+- The exit code is `1` on `FAIL`, so the command works as a CI gate.
+- `--json` prints the same evidence as JSON for an agent or a script.
 
 ## What vecscope measures
 
@@ -129,40 +118,37 @@ vecscope x.y.z  n=3000 dim=128 k=10  verdict=FAIL
 | --- | --- | --- | --- | --- | --- |
 | `hubness` | skewness of the k-occurrence distribution | < 2.0 | 2.0 to 4.0 | ≥ 4.0 | a few items appear in everyone's k-NN list and will top every query |
 | `antihubs` | share of items never retrieved as a neighbor, above the random baseline e^-k | < 5% | 5 to 20% | ≥ 20% | part of the corpus is unreachable through k-NN |
-| `anisotropy` | mean cosine of random pairs | < 0.85 | 0.85 to 0.95 | ≥ 0.95 | vectors crowd into a narrow cone, so scores compress into a band; good retrievers sit well below this without losing nDCG, so only extreme values are flagged |
+| `anisotropy` | mean cosine of random pairs | < 0.85 | 0.85 to 0.95 | ≥ 0.95 | vectors crowd into a narrow cone and scores compress into a band; good retrievers sit well below this without losing nDCG, so only extreme values are flagged |
 | `effective_rank` | participation ratio of the covariance spectrum / attainable rank (dim, or rows − 1 when rows do not exceed dims) | ≥ 0.10 | 0.05 to 0.10 | < 0.05 | most dimensions carry nothing |
 | `collapse` | share of rows with a neighbor at cosine ≥ 0.99 or an exact copy (zero vectors included); details give the duplicate groups and sample pairs | < 2% | 2 to 10% | ≥ 10% | top-k is spent on copies of the same item |
-| `ann_recall` | recall@k of ANN neighbors vs exact k-NN, counted by distance so that exact ties (duplicates) are interchangeable; the tie slack is 1e-6 + 2e-6 x distance, two to three times float32 rounding | ≥ 0.95 | 0.85 to 0.95 | < 0.85 | the index, not the model, is losing results |
+| `ann_recall` | recall@k of ANN neighbors vs exact k-NN, counted by distance so exact ties (duplicates) are interchangeable; tie slack 1e-6 + 2e-6 x distance, two to three times float32 rounding | ≥ 0.95 | 0.85 to 0.95 | < 0.85 | the index, not the model, is losing results |
 | `rogue_dimensions` | variance of the largest dimension as a multiple of the uniform 1/dim share | < 10x | 10 to 50x | ≥ 50x | a few coordinates decide every cosine score |
 | `norms` | coefficient of variation of vector norms | < 0.10 | 0.10 to 0.30 | ≥ 0.30 | inner-product search favors long vectors; zero vectors are reported too |
 | `metric_mismatch` | top-k overlap between cosine and inner product | ≥ 0.90 | 0.70 to 0.90 | < 0.70 | the index metric changes which results come back |
 | `distance_concentration` | relative contrast (random distance / nearest-neighbor distance) divided by that of isotropic noise at the same dimension and row count | ≥ 1.4 | 1.1 to 1.4 | < 1.1 | the nearest neighbor is barely closer than a random item; 1.0 is pure noise |
 | `outliers` | share of items with an abnormally far nearest neighbor | < 1% | 1 to 5% | ≥ 5% | junk, empty or foreign items; ids are listed in `details` |
 | `connectivity` | share of items in small k-NN graph islands | < 1% | 1 to 10% | ≥ 10% | self-contained groups too small to be clusters; HNSW attaches them badly or never reaches them |
-| `query_gap` | median query-to-corpus nearest distance divided by the median corpus-to-corpus nearest distance | < 2.6 | 2.6 to 3.0 | ≥ 3.0 | queries and corpus do not share a space, typically queries embedded by a different model (5 to 10). Pipelines that reproduce published nDCG@10 sit at 0.94 to 2.52; a missing query prefix does not reliably move it |
+| `query_gap` | median query-to-corpus nearest distance divided by the median corpus-to-corpus nearest distance | < 2.6 | 2.6 to 3.0 | ≥ 3.0 | queries and corpus do not share a space, typically queries embedded by a different model (5 to 10). Pipelines reproducing published nDCG@10 sit at 0.94 to 2.52; a missing query prefix does not reliably move it |
 | `query_shift` | share of queries farther from the corpus than the median + 3 MAD of a reference query set (needs a baseline) | < 20% | 20 to 30% | ≥ 30% | the query pipeline moved since the reference: another model or version, or traffic on topics the corpus does not cover. Healthy query sets score 0 to 9% |
-| `ood_queries` | deprecated, read `query_gap`: share of queries farther from the corpus than 99% of corpus items are from each other | < 50% | 50 to 80% | ≥ 80% | same question as `query_gap`, but it counts the normal distance between short queries and long passages too (good models score 0 to 65% on BEIR) and false-alarmed on 4 of 18 reproduced pipelines |
-| `query_hubness` | skewness of corpus k-occurrence over query results | < 4.0 | 4.0 to 10.0 | ≥ 10.0 | the same few items answer most queries; the value tracks nDCG@10 across models (Spearman −0.5 to −0.9), wrong-language models score 11 to 30. It grows with corpus size: good English models score 1.5 to 3.4 up to 26k documents and 4.0 to 4.8 on 58k, so on large corpora compare against a baseline |
+| `ood_queries` | deprecated, read `query_gap`: share of queries farther from the corpus than 99% of corpus items are from each other | < 50% | 50 to 80% | ≥ 80% | same question as `query_gap`, but it also counts the normal distance between short queries and long passages (good models score 0 to 65% on BEIR) and false-alarms on 4 of 18 reproduced pipelines |
+| `query_hubness` | skewness of corpus k-occurrence over query results | < 4.0 | 4.0 to 10.0 | ≥ 10.0 | the same few items answer most queries; tracks nDCG@10 across models (Spearman −0.5 to −0.9), wrong-language models score 11 to 30. Few queries over a large corpus raise it with no hub: a hub-free index scores (1−2p)/√(queries·p(1−p)), p = k/documents (`details.null_skewness`), and a level chance alone reaches is not judged (`details.not_judged`, with the queries needed) |
 
-Every finding in the JSON carries its `healthy_range`, `warn_at` and `fail_at`, plus a `details`
-block with the raw numbers. For `anisotropy` that block includes the cosine the same vectors
-would have after centering, so the agent can see whether centering alone fixes the problem.
+Every finding in the JSON carries `healthy_range`, `warn_at`, `fail_at` and a `details` block
+with the raw numbers. For `anisotropy` it includes the cosine after centering, which shows
+whether centering alone fixes the problem.
 
 Some findings appear only when you pass their inputs:
 
 - `ann_recall`: an ANN neighbor file with `--ann`
 - `query_gap`, `query_hubness` and `ood_queries`: query embeddings with `--queries`
-- `query_shift`: query embeddings, and `--baseline` also pointing at an earlier audit run with
-  queries
+- `query_shift`: query embeddings, plus `--baseline` pointing at an audit run with queries
 
-Each finding also carries `likely_causes`, `suggested_action` and `verify_by`. They are
-hypotheses, not prescriptions:
-
-- apply the smallest change
-- re-audit
-- compare retrieval on real queries before adopting it
-
-The [agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) spells out
+Each finding also carries `likely_causes`, `suggested_action` and `verify_by`: hypotheses, not
+prescriptions. Apply the smallest change to a copy, re-audit the copy with the original as
+baseline, and adopt it only when `baseline_diff.change_decision` says `adopt` (labeled
+retrieval did not drop and something improved). Without labels the decision is
+`needs_review`, and a person decides. The
+[agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) spells out
 that loop.
 
 ### Thresholds
@@ -172,12 +158,24 @@ The thresholds are defaults:
 - calibrated on [seven public models](https://076923.github.io/vecscope/quality/#real-embeddings)
 - re-checked against 19 models on nine labeled datasets in two languages
   ([verification](https://github.com/076923/vecscope/blob/main/docs/verification.md))
+- measured, unchanged, on 19 held-out public datasets with 14 models and on six injected
+  faults ([held-out validation](https://076923.github.io/vecscope/validation/)): 54 of 67 bad
+  pipelines end at `fail`, but so do 26 of 114 good ones, mostly on text under 200
+  characters. The baseline diff catches faults the absolute verdict misses, so gate on the
+  baseline and on [retrieval tolerances](https://076923.github.io/vecscope/ci/)
 
-They are a starting point for diagnosis, not a universal quality bar. Embedding spaces
-differ by model, language, domain and dimensionality, so a `warn` on a good model is normal
-and a clean audit does not guarantee good search.
+They are a starting point for diagnosis, not a universal quality bar: spaces differ by model,
+language, domain and dimensionality, so a `warn` on a good model is normal.
 
-Override any pair per run, or derive them from your own data with
+On short or templated texts and narrow domains, pass the same rows embedded by a second good
+public model as `--reference`: findings that model also reaches are attributed to the rows and
+read ok ([reference model](https://076923.github.io/vecscope/usage/#short-texts-and-narrow-domains-a-reference-model)).
+With queries, a hub finding still at `fail` drops to `warn` when the reference returns at
+least 40% of the pipeline's top results for the same queries; any other `fail` is the model's
+own, and labeled queries decide its cost. On preregistered held-out data these rules cleared
+15 of 21 good pipelines at `fail` and kept all 66 bad ones at `fail`.
+
+Override any pair per run, or derive them from your data with
 [`vecscope calibrate`](https://076923.github.io/vecscope/quality/#calibrating-thresholds-to-your-domain):
 
 ```bash
@@ -185,8 +183,8 @@ vecscope audit vectors.npy --thresholds my_thresholds.json
 # my_thresholds.json: {"anisotropy.mean_random_cosine": [0.4, 0.7], "hubness.skewness": [2.5, 5]}
 ```
 
-The keys are listed in `src/vecscope/evidence.py` (`THRESHOLDS`) and echoed in every JSON
-result under `thresholds`.
+The keys are in `src/vecscope/evidence.py` (`THRESHOLDS`) and echoed in every JSON result
+under `thresholds`.
 
 ## Use with an agent
 
@@ -206,9 +204,8 @@ which finding to fix first.
 ```
 
 The server reads only the directories named with `--allow-dir` (without it, the directory it
-was started in). [Use with an agent](https://076923.github.io/vecscope/mcp/) has the setup for Cursor, Codex and
-VS Code, the tools and their responses, what the server may read, and the clients it was
-tested with. The [agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) tells the agent what to do about each verdict.
+was started in). [Use with an agent](https://076923.github.io/vecscope/mcp/) covers Cursor, Codex
+and VS Code setup, the tools and tested clients. The [agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md) tells the agent what to do about each verdict.
 
 ## Use in CI
 
@@ -220,6 +217,32 @@ vecscope audit embeddings.npy --json > baseline.json          # once, reviewed a
 vecscope audit embeddings.npy --baseline baseline.json        # on every rebuild
 ```
 
+Findings cannot see every break: a reindex that loses the id mapping leaves them unchanged.
+With labeled queries, also gate on retrieval quality so an nDCG drop fails the build:
+
+```bash
+vecscope audit embeddings.npy --queries q.npy --qrels qrels.json --baseline baseline.json \
+  --retrieval-tolerance ndcg_at_k=0.01
+```
+
+About 100 labeled queries catch nearly every injected fault that costs more than two nDCG
+points. Three more gates ([CI](https://076923.github.io/vecscope/ci/)):
+
+- `--retrieval-confidence 0.95` judges a labeled drop against the noise of the labeled
+  queries: fail, pass or inconclusive.
+- `--result-sample 500 --result-tolerance 0` gates a pipeline that must return the same
+  results (a re-index, a refactor) on the results themselves. It measures change, not harm.
+- `--reference-tolerance 0.03` needs no labels: with a reference model on the baseline, it
+  flags a change whose net drop (lost minus gained) of the top hits the pipeline and the
+  reference agreed on exceeds 0.03. On a preregistered unseen set it flagged 89% of injected
+  faults costing more than 0.02 nDCG@10 and none of 81 harmless ones; `reference_review`
+  (above 0.015) lists smaller drops. A flag means "check with labels"; no flag is no proof.
+
+To change the embedding model, decide with labeled queries: without labels, 12 of 13 small
+losses between multilingual models of similar quality went unflagged
+([Changing the embedding model](https://076923.github.io/vecscope/case_model_change/)). How
+each rule was tested: [Verification](https://076923.github.io/vecscope/verification/).
+
 On GitHub the same gate is an Action:
 
 ```yaml
@@ -230,47 +253,39 @@ On GitHub the same gate is an Action:
     sample: "0"
 ```
 
-[Use in CI](https://076923.github.io/vecscope/ci/) covers tolerances for slow drift, which rule failed a run, and the
-Action's inputs and outputs.
+[Use in CI](https://076923.github.io/vecscope/ci/) covers drift tolerances, the retrieval and
+result gates, which rule failed a run, and the Action's inputs and outputs.
 
 ## FAQ
 
 <details>
 <summary><strong>Does it send my vectors anywhere?</strong></summary>
 
-No. `vecscope` computes everything with NumPy on your machine. It never loads a model or opens
-a network connection.
+No. Everything runs with NumPy on your machine; it never loads a model or opens a network
+connection.
 
 </details>
 
 <details>
 <summary><strong>How large a matrix can it handle?</strong></summary>
 
-Exact k-NN is quadratic in the number of rows. By default `vecscope` audits a seeded random
-sample of 100,000 rows when the input is larger, and says so in the output (`sampled: true`,
-`n_total`).
+Exact k-NN is quadratic in the number of rows, so by default an input larger than 100,000 rows
+is audited on a seeded random sample of that size, and the output says so (`sampled: true`,
+`n_total`). A sample can miss rare clusters, small islands and a handful of outliers. Row ids
+in `details` (`sample_ids`, `sample_pairs`, the cluster report) always refer to rows of the
+input file. `--sample 0` audits everything; see
+[performance](https://076923.github.io/vecscope/performance/#performance) for the cost.
 
-A sampled result describes the sample, not the whole corpus: rare clusters, small islands and
-a handful of outliers can be missed.
-
-Row ids in `details` (`sample_ids`, `sample_pairs`, the cluster report) always refer to rows
-of the input file, also when sampled. Use `--sample 0` to audit everything; see
-[performance](https://076923.github.io/vecscope/performance/#performance) for what that costs.
-
-To see how much the sample itself moves a number, pass `--sample-repeats 3` (MCP:
-`sample_repeats`). vecscope then audits three independent seeded samples and attaches
+`--sample-repeats 3` (MCP: `sample_repeats`) audits three independent seeded samples, adds
 `value_range` (minimum to maximum across samples) and `verdict_stable` to every finding, and
-lists `unstable_findings` at the top level.
+lists `unstable_findings` at the top level. Read a verdict that flips between samples as
+borderline, not as a property of the corpus. The cost is three audits. `value_range` is the
+spread between samples, not an interval that contains the full-corpus value: even a very
+stable finding can sit a little outside it.
 
-A finding whose verdict flips between samples should be read as borderline, not as a property
-of the corpus. The cost is three audits.
-
-`value_range` is the spread between samples, not an interval that contains the full-corpus
-value: hubness is a lower bound on every sample, and even a very stable finding can sit a
-little outside the range of three samples.
-
-Not every finding means the same thing on a sample: hubness is understated, outliers
-overcounted, islands mostly invisible. The [performance](https://076923.github.io/vecscope/performance/#performance) table says what each
+Findings also mean different things on a sample: hubness is understated (a lower bound on
+every sample), outliers overcounted, islands mostly invisible. The
+[performance](https://076923.github.io/vecscope/performance/#performance) table says what each
 finding can stand for and which verdicts a sampled audit marks `inconclusive`.
 
 </details>
@@ -280,18 +295,17 @@ finding can stand for and which verdicts a sampled audit marks `inconclusive`.
 
 Not necessarily. Many popular text embedding models are strongly anisotropic by construction.
 
-The finding tells you that raw cosine scores are compressed into a narrow band; centering or
-whitening the vectors, or re-ranking, usually restores discrimination. The `details` block
-reports the cosine after centering so you can see whether that is enough. The verdict is
-evidence for the agent, not a grade for the model.
+The finding says raw cosine scores are compressed into a narrow band; centering, whitening or
+re-ranking usually restores discrimination, and `details` reports the cosine after centering.
+The verdict is evidence for the agent, not a grade for the model.
 
 </details>
 
 <details>
 <summary><strong>Which agents can use it?</strong></summary>
 
-Any agent that supports local MCP servers, and any agent that can run a shell command and read
-JSON. The skill file describes both paths.
+Any agent that supports local MCP servers or can run a shell command and read JSON. The skill
+file describes both paths.
 
 </details>
 
@@ -309,14 +323,15 @@ JSON. The skill file describes both paths.
 - [Agent skill](https://github.com/076923/vecscope/blob/main/.agents/skills/vecscope/SKILL.md): when to run the audit and what to do with each verdict
 - [Retrieval-quality tables](https://github.com/076923/vecscope/blob/main/docs/retrieval_quality.md): every finding against nDCG@10 on labeled data
 - [Verification](https://github.com/076923/vecscope/blob/main/docs/verification.md): exactness, recall scoring, the sampling claims, the query findings, interventions, agent integration, and 19 models on 9 labeled datasets
+- [Held-out validation](https://076923.github.io/vecscope/validation/): false positives and misses on 19 public datasets by language, document length, corpus size and domain, and what catches six injected faults
 - [Agent cases](https://github.com/076923/vecscope/blob/main/docs/agent_case.md): an agent finding and fixing two ingestion faults, and a mis-tuned IVF index, over MCP, with the tool calls and numbers
 - [Examples](https://github.com/076923/vecscope/tree/main/examples/): synthetic matrices, the calibration script and the retrieval-quality study
 - [Changelog](https://github.com/076923/vecscope/blob/main/CHANGELOG.md)
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](https://github.com/076923/vecscope/blob/main/CONTRIBUTING.md) for how to run
-the tests and what a good change looks like. Security reports go through
+Issues and pull requests are welcome. [CONTRIBUTING.md](https://github.com/076923/vecscope/blob/main/CONTRIBUTING.md)
+covers running the tests and what a good change looks like; security reports go through
 [SECURITY.md](https://github.com/076923/vecscope/blob/main/SECURITY.md).
 
 ## License

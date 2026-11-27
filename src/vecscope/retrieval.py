@@ -7,7 +7,9 @@ by the finding it was meant to fix *and* by retrieval quality:
 
 - ndcg_at_k, recall_at_k, mrr_at_k, hit_rate_at_k over the judged queries, those with at
   least one relevant (grade > 0) judgment; the others are counted in unscored_queries, since
-  nDCG and recall are undefined without a relevant document
+  nDCG and recall are undefined without a relevant document. ``per_query`` keeps each judged
+  query's values, so a baseline diff can say whether a drop is beyond the noise of the
+  labeled set (``diff_evidence(retrieval_confidence=...)``)
 - duplicate_result_share: share of top-k slots taken by a near-duplicate of a higher-ranked
   result, over every query (what deduplication should lower)
 - for a supplied ranking, overlap_with_exact: share of its top-k that exact search also
@@ -165,7 +167,7 @@ def _scores(ranked: np.ndarray, qrels: dict, k: int, judged: list[int]) -> dict:
         "recall_at_k": float(np.mean(recall)),
         "mrr_at_k": float(np.mean(rr)),
         "hit_rate_at_k": float(np.mean(hit)),
-    }
+    }, {"ndcg_at_k": ndcg, "recall_at_k": recall, "mrr_at_k": rr, "hit_rate_at_k": hit}
 
 
 def _duplicate_share(c: np.ndarray, ranked: np.ndarray, k: int, near_dup_cos: float) -> float:
@@ -209,6 +211,7 @@ def evaluate_retrieval(
         raise ValueError("qrels has no relevant (grade > 0) judgment")
     c = normalize(corpus)
     exact, _ = query_knn(c, queries, k)
+    exact_means, exact_per_query = _scores(exact, qrels, k, judged)
     out = {
         "k": k,
         "n_queries": int(m),
@@ -217,10 +220,12 @@ def evaluate_retrieval(
         "qrels_fingerprint": qrels_fingerprint(qrels),
         "near_dup_cos": float(near_dup_cos),
         "exact": {
-            **_scores(exact, qrels, k, judged),
+            **exact_means,
             "duplicate_result_share": _duplicate_share(c, exact, k, near_dup_cos),
         },
         "ranked": None,
+        # per judged query, in the order of query_rows, so a baseline diff can pair them
+        "per_query": {"query_rows": judged, "exact": exact_per_query, "ranked": None},
     }
     if ranked is not None:
         r = np.asarray(ranked)
@@ -234,8 +239,9 @@ def evaluate_retrieval(
             raise ValueError(f"ranked contains row {int(r.max())} but the corpus has {n} rows")
         r = r[:, :k].astype(np.int64)
         overlap = np.mean([np.intersect1d(a[a >= 0], b).size / k for a, b in zip(r, exact)])
+        ranked_means, out["per_query"]["ranked"] = _scores(r, qrels, k, judged)
         out["ranked"] = {
-            **_scores(r, qrels, k, judged),
+            **ranked_means,
             "duplicate_result_share": _duplicate_share(c, r, k, near_dup_cos),
             "overlap_with_exact": float(overlap),
         }

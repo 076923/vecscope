@@ -127,3 +127,13 @@ def test_diagnose_change_reverify_over_stdio(tmp_path):
         assert all(
             c["delta"] >= -1e-9 for c in d["retrieval_changes"] if c["metric"] == "ndcg_at_k"
         )
+        # the tool's own decision agrees: labels on both runs, nothing lost, something fixed
+        assert d["change_decision"]["decision"] == "adopt", d["change_decision"]
+        assert d["attempts"] == {
+            "step": prev["plan"][0]["group"],
+            "not_adopted": 0,
+            "limit": 3,
+            "stop": False,
+        }
+        assert "change decision: ADOPT" in rep["summary"]
+    assert all("adopt_when" in s for r in reports for s in r["plan"])

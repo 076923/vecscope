@@ -9,7 +9,11 @@
   than almost every corpus item is from its own nearest neighbor. It mixes the normal
   query/passage distance into the verdict; query_gap replaces it.
 - query_hubness: skewness of how often each corpus item appears in query top-k lists. High
-  values mean the same few items answer everything.
+  values mean the same few items answer everything. With few queries over a large corpus most
+  items appear zero times and the skewness is high even when no item is a hub: if every query
+  drew its k results uniformly at random, an item's count would be Binomial(n_queries, k/n)
+  with skewness (1 - 2p) / sqrt(n_queries p (1 - p)), p = k/n (``null_skewness``). 300
+  queries over 70k items give 4.8, 50 over 171k give 18.4, whatever the embeddings are.
 - coverage (details): share of corpus items that any query reaches in its top-k.
 """
 
@@ -70,8 +74,12 @@ def query_audit(
     nk = np.bincount(idx.ravel(), minlength=n_corpus).astype(np.float64)
     std = nk.std()
     skew = float(((nk - nk.mean()) ** 3).mean() / std**3) if std > 0 else 0.0
+    n_q, k_eff = queries.shape[0], idx.shape[1]
+    p = k_eff / n_corpus if n_corpus else 0.0
+    null_skew = (1 - 2 * p) / np.sqrt(n_q * p * (1 - p)) if 0 < p < 1 and n_q else 0.0
     out = {
         "n_queries": int(queries.shape[0]),
+        "n_corpus": int(n_corpus),
         "k": int(idx.shape[1]),
         "ood_query_ratio": float(ood.mean()),
         "ood_cutoff_distance": cutoff,
@@ -82,6 +90,7 @@ def query_audit(
         "corpus_has_distinct_neighbors": bool(corpus_nn.size),
         "ood_sample_ids": [int(i) for i in worst if ood[i]],
         "query_hubness_skewness": skew,
+        "null_skewness": float(null_skew),
         "max_query_k_occurrence": int(nk.max()),
         "coverage": float((nk > 0).mean()),
     }

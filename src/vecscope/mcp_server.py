@@ -91,6 +91,34 @@ _RECENT_MAX = 32
 _RECENT_LOCK = threading.Lock()
 
 
+# rejected or unreviewed changes per (baseline corpus, first plan step), counted by the
+# distinct corpus each re-audit saw, so an agent that keeps trying fixes for one step is told
+# to stop; held in memory only
+_ATTEMPTS: dict[tuple[str, str], set[str]] = {}
+
+
+def _count_attempt(base: dict, ev: dict, decision: str) -> dict | None:
+    """Record a re-audit against ``base`` that did not end in 'adopt' and report how many
+    such changes were tried for the baseline's first plan step."""
+    from vecscope.plan import ATTEMPT_LIMIT
+
+    plan = base.get("plan") or []
+    if not plan or not isinstance(plan[0], dict):
+        return None
+    key = (str(base.get("corpus_fingerprint") or _audit_id(base)), str(plan[0].get("group")))
+    with _RECENT_LOCK:
+        tried = _ATTEMPTS.setdefault(key, set())
+        if decision != "adopt":
+            tried.add(str(ev.get("corpus_fingerprint") or _audit_id(ev)))
+        n = len(tried)
+    return {
+        "step": key[1],
+        "not_adopted": n,
+        "limit": ATTEMPT_LIMIT,
+        "stop": n >= ATTEMPT_LIMIT,
+    }
+
+
 def _audit_id(ev: dict) -> str:
     """Content hash of the evidence: the same input and settings give the same id."""
     blob = json.dumps(ev, sort_keys=True, ensure_ascii=False, default=str).encode()
@@ -390,8 +418,10 @@ Workflow: (1) call audit_embeddings and report the failing findings with their v
 ranges verbatim; (2) follow the response's plan, which groups the non-ok findings by shared
 cause in fix order, one step at a time; (3) apply that step's first_change, applying any
 vector transform to queries too; (4) re-audit with baseline set to the earlier audit_id
-and qrels_path on both runs when labels exist; judge the change by baseline_diff, the step's
-re_measure numbers and retrieval.ndcg_at_k; (5) adopt only confirmed improvements. Thresholds are calibrated defaults, not a universal
+and, when labels exist, qrels_path on both runs and retrieval_tolerances such as
+{"ndcg_at_k": 0.01}; judge the change by baseline_diff (retrieval_regressions and
+retrieval_unchecked block it), the step's re_measure numbers and retrieval.ndcg_at_k;
+(5) adopt only confirmed improvements. Thresholds are calibrated defaults, not a universal
 bar: a warn on a good model is common, and neither a fail nor all-ok is a statement about
 relevance; say so. Use sweep_index before choosing HNSW/IVF parameters, and
 compare_embeddings when two models embedded the same items (or the same model before and
@@ -443,6 +473,30 @@ def _summary(ev: dict) -> str:
             f"; inconclusive on this sample (not evidence of health): "
             f"{', '.join(ev['inconclusive_findings'])}"
         )
+    unjudged = [
+        f"{f['name']} at {'/'.join(f['details']['not_judged'])}"
+        for f in ev["findings"]
+        if (f.get("details") or {}).get("not_judged")
+    ]
+    if unjudged:
+        head += (
+            "; not judged, too few queries for the corpus size (not evidence of health): "
+            + ", ".join(unjudged)
+        )
+    explained = (ev.get("reference") or {}).get("explained")
+    if explained:
+        head += (
+            "; explained by the rows (the reference model reaches them too, so they read "
+            "ok; an effective_rank at fail where the reference is at warn reads warn): "
+            f"{', '.join(explained)}"
+        )
+    tolerated = ((ev.get("reference") or {}).get("agreement") or {}).get("tolerated")
+    if tolerated:
+        head += (
+            "; lowered from fail to warn because results agree with the reference model's "
+            f"({ev['reference']['agreement']['queries']:.0%} of top results shared): "
+            + ", ".join(tolerated)
+        )
     if ev.get("needs_full_audit"):
         head += f"; needs a full audit (sample=0) to settle: {', '.join(ev['needs_full_audit'])}"
     if not bad:
@@ -468,6 +522,58 @@ def _summary(ev: dict) -> str:
         for c in d.get("retrieval_changes") or []:
             if c["metric"] == "ndcg_at_k":
                 head += f", {c['ranking']} nDCG {c['baseline_value']:.3f} -> {c['value']:.3f}"
+        if d.get("value_regressions"):
+            head += f", beyond tolerance: {', '.join(d['value_regressions'])}"
+        if d.get("retrieval_regressions"):
+            head += f", RETRIEVAL WORSE beyond tolerance: {', '.join(d['retrieval_regressions'])}"
+        if d.get("retrieval_inconclusive"):
+            cc = d.get("retrieval_confidence_checks") or {}
+            head += ", retrieval INCONCLUSIVE (label more queries): " + ", ".join(
+                f"{k} drop {cc[k]['mean_drop']:.4f} in [{cc[k]['low']:.4f}, {cc[k]['high']:.4f}]"
+                + (f", about {cc[k]['queries_needed']} queries" if cc[k]["queries_needed"] else "")
+                for k in d["retrieval_inconclusive"]
+            )
+        if d.get("retrieval_unchecked"):
+            head += (
+                f", retrieval tolerance NOT CHECKED: {', '.join(d['retrieval_unchecked'])} "
+                "(needs the same qrels and k on both runs)"
+            )
+        elif d.get("retrieval_changes") and not d.get("retrieval_comparable"):
+            head += " (retrieval: different qrels or k, not comparable)"
+        for side, r in (d.get("result_agreement") or {}).items():
+            head += f", {side} results changed {r['changed_share']:.1%}"
+            if "reference_top_hit" in r:
+                hit = r["reference_top_hit"]
+                head += (
+                    f" (top hits agreed with the reference lost: {hit['lost']} of "
+                    f"{hit['agreed']}, gained {hit['gained']}, net drop "
+                    f"{hit['net_drop']:+.1%}, z {hit['net_z']:.1f})"
+                )
+        if d.get("reference_regressions"):
+            head += (
+                ", AGREED TOP HITS LOST beyond tolerance (likely harmful, check with labels): "
+                + ", ".join(d["reference_regressions"])
+            )
+        if d.get("reference_review"):
+            head += (
+                ", a few agreed top hits lost (below the tolerance; a small loss is possible, "
+                "check with labels): " + ", ".join(d["reference_review"])
+            )
+        if d.get("reference_unchecked"):
+            head += ", reference tolerance NOT CHECKED (the baseline has no reference results)"
+        if d.get("result_regressions"):
+            head += f", RESULTS CHANGED beyond tolerance: {', '.join(d['result_regressions'])}"
+        if d.get("result_unchecked"):
+            head += ", result tolerance NOT CHECKED (the baseline has no result_sample)"
+        cd = d.get("change_decision")
+        if cd:
+            head += f"; change decision: {cd['decision'].upper()} ({'; '.join(cd['reasons'])})"
+        a = d.get("attempts")
+        if a and a["stop"]:
+            head += (
+                f"; STOP: {a['not_adopted']} changes for step {a['step']} were not adopted "
+                f"(limit {a['limit']}); report to the person instead of trying another"
+            )
         if not d["comparable"]:
             head += " (settings differ from the baseline: not comparable)"
     if ev.get("query_reference_note"):
@@ -493,6 +599,13 @@ def audit_embeddings(
     ann_from_source: bool = False,
     baseline: str | None = None,
     tolerances: dict | None = None,
+    retrieval_tolerances: dict | None = None,
+    reference_path: str | None = None,
+    reference_queries_path: str | None = None,
+    result_sample: int = 0,
+    result_tolerance: float | None = None,
+    retrieval_confidence: float | None = None,
+    reference_tolerance: float | None = None,
 ) -> dict:
     """Audit an embedding file: hubness, anisotropy, collapse, rogue dimensions, norms,
     metric mismatch, distance concentration, outliers, k-NN graph islands, and optionally
@@ -538,6 +651,43 @@ def audit_embeddings(
     supplies the reference for query_shift, but only when it was audited on the same corpus
     or an unchanged prefix of it (`query_reference_note` says when it was skipped). `tolerances` maps a finding to the worsening it
     may accumulate, e.g. {"collapse": 0.01}; beyond it the finding is a value regression.
+    `retrieval_tolerances` (needs `baseline` and `qrels_path`) maps a retrieval metric to the
+    drop it may take, e.g. {"ndcg_at_k": 0.01} (prefix exact. or ranked. for one ranking);
+    beyond it `baseline_diff.retrieval_regressions` names it whatever the findings say, and
+    `retrieval_unchecked` names tolerances that could not be checked (no retrieval on the
+    baseline, different qrels or k). Treat either as "do not adopt this change".
+    `reference_path`: the same rows embedded by another, independently good public model
+    (any dim; `reference_queries_path` the same queries). A finding the reference reaches
+    too is attributed to the rows and reads ok, with `details.reference` holding the
+    reference value and the verdict without it; `reference.explained` lists them (an
+    effective_rank at fail where the reference is at warn is lowered to warn only). With
+    queries on both, a hub finding (hubness, query_hubness, antihubs) still at fail is
+    lowered to warn when the reference returns at least 40% of this pipeline's top results
+    for the same queries (`reference.agreement`): the hubs are real but do not keep it from
+    finding what the reference finds. Use it on
+    short or templated texts and narrow domains, where good models trip findings; never
+    with a reference that may share the fault (another model that does not cover the
+    language).
+    `result_sample` > 0 keeps the exact top-k of that many sampled queries and rows with the
+    audit (in this session's memory; the response only counts them), so a later call with
+    this `audit_id` as `baseline` reports `baseline_diff.result_agreement`: the share of
+    those results that changed. It measures change, not harm. `result_tolerance` (needs
+    `baseline`) is the share allowed to change, 0 for a re-index or refactor that must
+    return the same results; beyond it `result_regressions` names the side.
+    With `reference_path` (and `reference_queries_path`) on the baseline, it keeps the
+    reference's first result for every sampled item, and the diff reports
+    `result_agreement.<side>.reference_top_hit`: of the items whose baseline top-k held that
+    result (a top hit both models agree on), how many the new run lost, how many items it
+    gained (the reference's first result now in a top-k that missed it) and the net drop
+    over all compared items. A net loss is likely harmful; none is no sign of harm.
+    `reference_tolerance` (e.g. 0.03, needs `baseline`) lists a net drop beyond it and
+    beyond 2 standard errors in `reference_regressions`; a new model can lose some agreed
+    hits and still gain more. It is a proxy for labels, not a measured loss.
+    `retrieval_confidence` (e.g. 0.95, with `retrieval_tolerances`) judges each tolerance
+    against the noise of the labeled queries, paired per query: `retrieval_regressions` only
+    when the drop is real and beyond the tolerance, `retrieval_inconclusive` (with
+    `retrieval_confidence_checks.<metric>.queries_needed`) when the labeled set cannot tell;
+    report inconclusive as "label more queries", never as a pass.
     `verbose=False` drops details, causes, actions and explanations of findings that are ok
     and the thresholds table; it saves most when most findings are ok.
 
@@ -582,8 +732,30 @@ def audit_embeddings(
             )
             ranked = _neighbors(ranked_path, "ranked_path")
             q = _vectors(queries_path, "queries_path") if queries_path else None
-            if tolerances is not None and baseline is None:
-                raise ValueError("tolerances need baseline")
+            ref = _vectors(reference_path, "reference_path") if reference_path else None
+            ref_q = (
+                _vectors(reference_queries_path, "reference_queries_path")
+                if reference_queries_path
+                else None
+            )
+            if (
+                tolerances is not None
+                or retrieval_tolerances is not None
+                or result_tolerance is not None
+                or reference_tolerance is not None
+            ) and baseline is None:
+                raise ValueError(
+                    "tolerances, retrieval_tolerances, result_tolerance and reference_tolerance "
+                    "need baseline"
+                )
+            if retrieval_confidence is not None and not retrieval_tolerances:
+                raise ValueError("retrieval_confidence needs retrieval_tolerances")
+            if reference_tolerance is not None and not result_sample:
+                raise ValueError("reference_tolerance needs result_sample on this call")
+            if result_tolerance is not None and not result_sample:
+                raise ValueError("result_tolerance needs result_sample on this call")
+            if retrieval_tolerances and qrels is None:
+                raise ValueError("retrieval_tolerances need qrels_path (and queries_path)")
             base = _load_baseline(baseline) if baseline else None
             qbase, note = None, None
             if query_baseline_path:
@@ -614,6 +786,9 @@ def audit_embeddings(
                 query_baseline=qbase,
                 qrels=qrels,
                 ranked=ranked,
+                reference_embeddings=ref,
+                reference_queries=ref_q,
+                result_sample=result_sample,
             )
             if src is not None:
                 annotate(ev, src)
@@ -621,13 +796,46 @@ def audit_embeddings(
             audit_id = _audit_id(ev)
             _remember(audit_id, ev)
             if base is not None:
-                ev["baseline_diff"] = diff_evidence(ev, base, tolerances=tolerances)
+                ev["baseline_diff"] = diff_evidence(
+                    ev,
+                    base,
+                    tolerances=tolerances,
+                    retrieval_tolerances=retrieval_tolerances,
+                    result_tolerance=result_tolerance,
+                    retrieval_confidence=retrieval_confidence,
+                    reference_tolerance=reference_tolerance,
+                )
+                attempts = _count_attempt(
+                    base, ev, ev["baseline_diff"]["change_decision"]["decision"]
+                )
+                if attempts is not None:
+                    ev["baseline_diff"]["attempts"] = attempts
             if note:
                 ev["query_reference_note"] = note
         except _USER_ERRORS as e:
             raise _user_error(e) from e
         summary = _summary(ev)
         call["outcome"] = ev["verdict"]
+        if ev.get("result_sample"):
+            rs = ev["result_sample"]
+            ev = {
+                **ev,
+                "result_sample": {
+                    "kept_for_baseline": True,
+                    "k": rs["k"],
+                    "rows": len(rs["rows"]),
+                    "queries": len(rs.get("queries") or []),
+                },
+            }
+        if (ev.get("retrieval") or {}).get("per_query"):
+            pq = ev["retrieval"]["per_query"]
+            ev = {
+                **ev,
+                "retrieval": {
+                    **ev["retrieval"],
+                    "per_query": {"kept_for_baseline": True, "queries": len(pq["query_rows"])},
+                },
+            }
         if not verbose:
             ev = {**ev, "findings": [dict(f) for f in ev["findings"]]}
             ev.pop("thresholds", None)

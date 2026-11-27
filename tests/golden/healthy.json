@@ -414,6 +414,8 @@
  "source": {},
  "knn_cache": {},
  "corpus_fingerprint": "6d78947722b4f57be8526e47739692e85a631b6b7e8a26a9de0b3762cad2ed1e",
+ "reference": {},
+ "result_sample": {},
  "schema_version": 1,
  "verdict": "ok"
 }

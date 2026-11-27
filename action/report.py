@@ -36,7 +36,11 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError):
         evidence = None
     if not isinstance(evidence, dict):
-        _write("GITHUB_OUTPUT", f"verdict=error\nexit-code={code}\nregressions=\nevidence={path}\n")
+        _write(
+            "GITHUB_OUTPUT",
+            f"verdict=error\nexit-code={code}\nregressions=\nretrieval-regressions=\n"
+            f"evidence={path}\n",
+        )
         _write(
             "GITHUB_STEP_SUMMARY",
             f"## vecscope audit: error\n\n`vecscope audit` exited {code} without evidence "
@@ -47,10 +51,16 @@ def main(argv: list[str]) -> int:
     gate = evidence.get("gate") or {}
     names = (gate.get("verdict_regressions") or []) + (gate.get("value_regressions") or [])
     regressions = list(dict.fromkeys(names))
+    retrieval = (
+        list(gate.get("retrieval_regressions") or [])
+        + [f"unchecked:{k}" for k in gate.get("retrieval_unchecked") or []]
+        + [f"inconclusive:{k}" for k in gate.get("retrieval_inconclusive") or []]
+    )
     verdict = evidence.get("verdict", "unknown")
     _write(
         "GITHUB_OUTPUT",
-        f"verdict={verdict}\nexit-code={code}\nregressions={','.join(regressions)}\nevidence={path}\n",
+        f"verdict={verdict}\nexit-code={code}\nregressions={','.join(regressions)}\n"
+        f"retrieval-regressions={','.join(retrieval)}\nevidence={path}\n",
     )
 
     lines = [
@@ -79,6 +89,54 @@ def main(argv: list[str]) -> int:
             )
         if regressions:
             lines.append("Regressions: " + ", ".join(regressions))
+        changes = diff.get("retrieval_changes") or []
+        if changes:
+            note = "" if diff.get("retrieval_comparable") else " (different qrels or k)"
+            lines += [
+                "",
+                f"Retrieval vs baseline{note}:",
+                "",
+                "| ranking | metric | baseline | value | delta | tolerance |",
+                "|---|---|---|---|---|---|",
+            ]
+            bad = set(diff.get("retrieval_regressions") or [])
+            for c in changes:
+                t = c.get("tolerance")
+                key = f"{c.get('ranking')}.{c.get('metric')}"
+                lines.append(
+                    f"| {_cell(c.get('ranking'))} | {_cell(c.get('metric'))} "
+                    f"| {_value(c.get('baseline_value'))} | {_value(c.get('value'))} "
+                    f"| {_value(c.get('delta'))} "
+                    f"| {'' if t is None else _value(t)}{' **exceeded**' if key in bad else ''} |"
+                )
+        if diff.get("retrieval_unchecked"):
+            lines.append(
+                "\nRetrieval tolerances not checked: " + ", ".join(diff["retrieval_unchecked"])
+            )
+        checks = diff.get("retrieval_confidence_checks") or {}
+        for key in diff.get("retrieval_inconclusive") or []:
+            c = checks.get(key) or {}
+            lines.append(
+                f"\nRetrieval inconclusive (label more queries, not broken): {_cell(key)} drop "
+                f"{_value(c.get('mean_drop'))} in [{_value(c.get('low'))}, {_value(c.get('high'))}]"
+                + (
+                    f", about {c['queries_needed']} labeled queries"
+                    if c.get("queries_needed")
+                    else ""
+                )
+            )
+    if isinstance(diff, dict) and diff.get("reference_regressions"):
+        lines.append(
+            "\nTop hits agreed with the reference model were lost, net of those gained, beyond the "
+            "tolerance (likely harmful, check with labels): "
+            + ", ".join(_cell(s) for s in diff["reference_regressions"])
+        )
+    if isinstance(diff, dict) and diff.get("reference_review"):
+        lines.append(
+            "\nA few top hits agreed with the reference model were lost on balance, below the tolerance "
+            "(not a failure; a small loss is possible, check with labels): "
+            + ", ".join(_cell(s) for s in diff["reference_review"])
+        )
     lines += ["", f"Full evidence: `{path}`", ""]
     _write("GITHUB_STEP_SUMMARY", "\n".join(lines))
     return 0

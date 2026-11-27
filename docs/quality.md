@@ -13,17 +13,12 @@ Pass relevance judgments for the queries and the audit adds a `retrieval` block:
 - `duplicate_result_share`, the share of result slots taken by a near-duplicate of a
   higher-ranked result
 
-`--ranked` scores the top-k your production index returned next to exact search, with
-`overlap_with_exact`.
-
-`--ranked` takes the final top-k of whatever serves the queries: an ANN index, a store query
-with filters, hybrid search or a reranker. The exact baseline is plain cosine over every row,
-with no filter, keyword score or reranking.
-
-- With those stages in the pipeline, `overlap_with_exact` measures how far the pipeline
-  departs from vector search, not ANN recall alone.
-- vecscope does not score the stages separately. To find the stage that loses quality, pass
-  each stage's output as `--ranked` in turn.
+`--ranked` also scores the final top-k of whatever serves the queries (an ANN index, a store
+query with filters, hybrid search or a reranker) and adds `overlap_with_exact`. The exact
+baseline is plain cosine over every row, with no filter, keyword score or reranking, so with
+those stages `overlap_with_exact` measures how far the pipeline departs from vector search,
+not ANN recall alone. vecscope does not score the stages separately: to find the stage that
+loses quality, pass each stage's output as `--ranked` in turn.
 
 ```bash
 vecscope audit corpus.npy --queries queries.npy --qrels qrels.tsv
@@ -39,9 +34,9 @@ vecscope audit corpus.npy --queries queries.npy --qrels qrels.tsv --ranked prod_
 BEIR's `query-id`/`corpus-id`/`score` names work. Rows are positions in the query and corpus
 files.
 
-The scores average over the queries with at least one relevant (grade > 0) judgment, since
-nDCG and recall are undefined without one. Queries with none, or with no judgment at all, are
-counted in `unscored_queries` and named in the explanation.
+Scores average over the queries with at least one relevant (grade > 0) judgment, since nDCG
+and recall are undefined without one. The other queries are counted in `unscored_queries` and
+named in the explanation.
 
 With `--baseline`, the diff lists `retrieval_changes` next to the finding changes, so a
 change is judged by the finding it was meant to fix *and* by retrieval:
@@ -59,8 +54,8 @@ change is judged by the finding it was meant to fix *and* by retrieval:
 
 ### The fix order
 
-Every audit also carries a `plan`: the non-ok findings grouped by the cause they likely
-share, in the order to fix them. Each step lists:
+Every audit carries a `plan`: the non-ok findings grouped by their likely shared cause, in
+fix order. Each step lists:
 
 - its findings with values
 - the common cause to check
@@ -80,15 +75,15 @@ share, in the order to fix them. Each step lists:
        check: anisotropy and rogue_dimensions below warn_at, hubness.skewness down; retrieval ndcg_at_k not lower than before
 ```
 
-That is a synthetic corpus with a shared offset on unnormalized vectors (2,000 rows, 32 dims);
-the diff above is the same corpus after both steps, against the normalized one. Its 80 labeled
-queries are easy enough that nDCG stays at 1.0, so only the duplicate share shows the change.
+This is a synthetic corpus with a shared offset on unnormalized vectors (2,000 rows, 32
+dims); the diff above compares it after both steps with the normalized one. Its 80 labeled
+queries are easy, so nDCG stays at 1.0 and only the duplicate share moves.
 
 The order follows dependencies between fixes:
 
-- broken inputs (zero vectors, copies) first, because they distort every statistic
-- then a dominant coordinate (a rogue dimension decides every distance and with it the norms,
-  outliers and hubs, so z-scoring comes before normalizing)
+- broken inputs (zero vectors, copies) first: they distort every statistic
+- then a dominant coordinate: a rogue dimension decides every distance and with it the norms,
+  outliers and hubs, so z-scoring comes before normalizing
 - then the metric
 - then transforms such as centering, which rebuild the neighbor graph
 - then the model
@@ -99,20 +94,42 @@ A few findings move to the step whose cause can produce them:
 
 - A near-duplicate share caused by a shared direction (every cosine above the cutoff, no
   exact copies) goes with the direction, not with deduplication.
-- A `query_gap` next to duplicates goes with them. Near-copies shrink the corpus distance the
+- A `query_gap` next to duplicates goes with them: near-copies shrink the corpus distance the
   gap divides by, so it is read again after deduplicating before the queries are blamed.
 - Islands next to a near-duplicate group smaller than the island size go with the
   duplicates, since the copies may be the islands.
 
-The rules are fixed and listed in `src/vecscope/plan.py`. A step is a hypothesis to test with
-its re-measure line, not a diagnosis.
-
-Each finding in a step carries `placed_because`, one of:
+The rules are fixed in `src/vecscope/plan.py`. Each finding in a step carries
+`placed_because`, one of:
 
 - "this group's cause covers it"
 - the other finding whose verdict put it there, for example "rogue_dimensions is not ok; one
-  coordinate moves this finding too". This is a grouping by co-occurrence, so check it with
-  the step's re-measure numbers.
+  coordinate moves this finding too". That is a grouping by co-occurrence: check it with the
+  step's re-measure numbers.
+
+### Adopting a change
+
+A step is a hypothesis to test, not a diagnosis, and a fix the corpus did not need can cost
+retrieval. Every step carries the same `adopt_when` rule, and every baseline diff a
+`change_decision` that applies it without looking at what the change meant to fix:
+
+- Transform a copy of the vectors, the queries and the index; keep the original.
+- Re-audit the copy with the original as `--baseline` (MCP: `baseline`) and the same qrels.
+- `change_decision.decision` is one of:
+    - `adopt`: labeled retrieval did not drop and a finding or retrieval improved. Findings
+      that got worse anyway are listed in `watch` for the next audit.
+    - `reject`: nDCG or recall dropped, exact or ranked (or a `--retrieval-tolerance` was
+      exceeded or could not be checked), or nothing measurable improved. Keep the original.
+    - `needs_review`: the two runs have no comparable labels (no qrels, other qrels or k).
+      A better finding does not show better search, so a person decides.
+- The MCP server counts the changes per baseline and first plan step that were not adopted
+  (`baseline_diff.attempts`). At 3 the summary says `STOP`: the agent reports instead of
+  trying another transform.
+
+On a synthetic corpus where every finding is ok, centering (a fix no finding asks for) lowers
+nDCG@10 from 0.939 to 0.932 and is rejected; re-normalizing vectors that are already unit
+length changes nothing and is rejected for no gain. Both cases are in
+`tests/test_safe_remediation.py`.
 
 What the fixes did to retrieval on real embeddings is in the
 [verification](https://github.com/076923/vecscope/blob/main/docs/verification.md#interventions).
@@ -123,8 +140,8 @@ Thresholds are calibrated on public, pre-computed embeddings from seven models o
 datasets: OpenAI ada-002 and text-embedding-3-large, Cohere embed-v3 (Korean and English
 Wikipedia), all-MiniLM-L6-v2, bge-m3, mxbai-embed-large-v1 and gte-base-en-v1.5.
 
-The table shows the measured value for the first 40k rows of each dataset; cells without a
-label are `ok`. `python examples/real_models.py` reproduces it, no model download needed.
+The table shows the values for the first 40k rows of each dataset; unlabeled cells are `ok`.
+`python examples/real_models.py` reproduces it without downloading a model.
 
 | finding | Cohere v3 (ko wiki) | Cohere v3 (en wiki) | ada-002 (dbpedia) | 3-large (dbpedia) | MiniLM-L6 (wiki) | bge-m3 (wiki) | mxbai-large (wiki) | gte-base (arxiv) |
 |---|---|---|---|---|---|---|---|---|
@@ -140,8 +157,7 @@ label are `ok`. `python examples/real_models.py` reproduces it, no model downloa
 | outliers | 0.001 | 0.001 | 0.000 | 0.000 | 0.001 | 0.002 | 0.003 | 0.000 |
 | connectivity | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
 
-Re-running the audit on the first 40k rows of each set reproduces all 88 verdicts. The only
-`warn`s are hubness on gte-base and `effective_rank` on ada-002 and mxbai-large.
+Re-running the audit on those rows reproduces all 88 verdicts.
 
 ada-002's well-known anisotropy (0.692) is below the `warn` threshold of 0.85: its mean unit
 vector has norm 0.83, so unrelated documents start from a cosine floor near 0.7. Its
@@ -154,7 +170,7 @@ thresholds (0.85, 0.95) come from the retrieval-quality study below.
 
 ## Do the findings predict retrieval quality?
 
-Partly, and in a specific way. [docs/retrieval_quality.md](https://github.com/076923/vecscope/blob/main/docs/retrieval_quality.md) measures
+Partly. [docs/retrieval_quality.md](https://github.com/076923/vecscope/blob/main/docs/retrieval_quality.md) measures
 every finding against nDCG@10 on two labeled BEIR datasets (SciFact, NFCorpus) with exact
 cosine search, for eight public models and for controlled defects injected into the best one.
 `python examples/retrieval_quality.py` reproduces it.
@@ -168,9 +184,8 @@ cosine search, for eight public models and for controlled defects injected into 
   0); bge-base queries on the gte-base corpus, which share a space, score 2.9 to 3.9 and keep
   nDCG@10.
 
-  Heavy near-duplication also raises `query_gap`, because the copies shrink the corpus
-  distance it divides by; the plan lists it with the duplicates so it is read again after
-  deduplicating.
+  Heavy near-duplication also raises `query_gap` (the copies shrink the corpus distance it
+  divides by), so the plan lists it with the duplicates.
 - **Across good models the geometry findings do not rank the models.** The best models on both
   datasets (gte-base, bge, e5) have the *highest* anisotropy (0.58 to 0.82, counting the 19
   models of the [verification](https://github.com/076923/vecscope/blob/main/docs/verification.md)) and ordinary
@@ -187,32 +202,28 @@ The `anisotropy`, `query_hubness`, `query_gap` and `query_shift` thresholds come
 [verification](https://github.com/076923/vecscope/blob/main/docs/verification.md): 19
 models and injected query faults on three labeled datasets, re-checked on three more.
 
-What it does not cover is how well `warn` and `fail` predict a quality drop in other domains
-or on production query logs. Until that is measured for your domain, read a verdict as a
-reason to look and a baseline regression as a reason to compare retrieval, not as a quality
-score.
+Not measured: how well `warn` and `fail` predict a quality drop in other domains or on
+production query logs. Without that measurement for your domain, read a verdict as a reason
+to look and a baseline regression as a reason to compare retrieval, not as a quality score.
 
 ### Calibrating thresholds to your domain
 
-The defaults are calibrated on public models and public datasets; a `fail` on your corpus is
-a reason to look, not proof that retrieval is bad, and all-`ok` is not proof that the right
-documents come back.
-
-Before using a threshold or a tolerance as a blocking gate, measure what it predicts on your
-own data:
+On your corpus, a `fail` is not proof that retrieval is bad, and all-`ok` is not proof that
+the right documents come back. Before using a threshold or a tolerance as a blocking gate,
+measure what it predicts on your own data:
 
 1. Collect labeled queries from the domain (a few hundred with relevant document ids is
    enough) and split them: one part to pick thresholds, a held-out part to check them.
 2. Run `vecscope audit --json` on each candidate state of the pipeline (models, chunkers,
    transforms, index settings) and compute retrieval quality (nDCG@k, Recall@k, MRR) with the
    same queries on the same state. `examples/retrieval_quality.py` does both for the public
-   datasets and can be pointed at your own.
+   datasets and can be pointed at yours.
 3. Relate each finding's value to the quality metric across those states. A finding that does
    not move with quality in your domain should not gate it, whatever its default says.
 4. Set `--thresholds` and `--tolerances` from the states where quality was acceptable, using
    only the first split.
 5. Confirm on the held-out split that the thresholds separate the acceptable states from the
-   rest. A threshold tuned and checked on the same queries will look better than it is.
+   rest. A threshold tuned and checked on the same queries looks better than it is.
 
 `vecscope calibrate` does steps 3 to 5 from the audits of step 2. Audit each state with the
 fitting queries, and each again with the held-out queries:
@@ -237,30 +248,27 @@ For each finding it reports:
 A finding that does not move with quality on your data, or moves the other way, gets no
 pair: keep its default as a reason to look.
 
-With about fifteen findings tested at once, one of them tracks quality by chance on a few
-states. So a pair goes into `--out` only when its adjusted p-value is below 0.05:
+With about fifteen findings tested at once, one tracks quality by chance on a few states, so
+a pair goes into `--out` only when its adjusted p-value is below 0.05:
 
 - The other pairs are reported as `exploratory` and left out of the gate file.
   `--include-low-confidence` writes them too.
 - On five states nothing can reach that bar (the smallest one-sided p-value is 1/120 before
-  the adjustment). Ten or more states are recommended, and the report says when there are
-  fewer.
+  the adjustment). Use ten or more states; the report says when there are fewer.
 
 Two checks judge the proposal on states it was not fitted on:
 
 - `leave_one_out` fits on all states but one and judges the one left out, for every state.
-- The holdout line counts the unacceptable `--holdout` states the gate catches and the false
-  alarms on acceptable ones. Holdout states from another dataset check whether the
-  thresholds carry over.
+- The holdout line counts the unacceptable `--holdout` states the gate catches and its false
+  alarms on acceptable ones. Holdout states from another dataset show whether the thresholds
+  carry over.
 
 Calibration needs at least three states, with some on each side of `--min-quality`. States
 scored on different qrels or k are refused, because their quality values do not compare
 (`--allow-mixed-qrels` overrides).
 
-The same procedure applies to a `suggested_action`: it is a hypothesis about the cause, and
-centering, standardizing or truncating vectors changes rankings.
-
-- Keep the original vectors and retrieval results as the baseline.
-- Apply the transform to a copy.
-- Measure quality, latency and memory on both.
-- Adopt the change only when the labeled queries improve, not when the finding turns `ok`.
+The same applies to a `suggested_action`: it is a hypothesis about the cause, and centering,
+standardizing or truncating vectors changes rankings. Keep the original vectors and retrieval
+results as the baseline, apply the transform to a copy, measure quality, latency and memory
+on both, and adopt the change only when the labeled queries improve, not when the finding
+turns `ok`.

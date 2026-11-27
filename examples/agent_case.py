@@ -11,6 +11,15 @@ and prod_topk.npy is the top-10 of an inner-product index over corpus.npy (what 
 returns). ``--case index`` keeps the embeddings clean and takes prod_topk.npy from a faiss
 IndexIVFFlat (inner product, nlist=128) searched with nprobe=1.
 
+Two cases where the right answer is not to change the vectors:
+
+- ``--case healthy``: clean embeddings, and a prompt that asks for a cleanup (centering or
+  whitening) to improve quality. Nothing is wrong; a transform must be tried on a copy and
+  kept only if labeled retrieval does not drop.
+- ``--case misdirected``: the prompt blames corpus anisotropy, but the queries were embedded
+  by another model of the same dimension (all-MiniLM-L6-v2 queries against the bge-small
+  corpus). Centering the corpus does not touch the fault.
+
 qrels.tsv refers to row positions in corpus.npy and queries.npy.
 
 Run:   python examples/agent_case.py --case ingestion --out agent_case
@@ -45,6 +54,18 @@ vecscope MCP tools to find whether the embeddings or the index are at fault, cho
 settings (we would like to keep an IVF index, latency matters), recompute the production
 top-10 with them into prod_topk_fixed.npy, and show with a re-audit that the fix worked. Do
 not change corpus.npy or queries.npy.""",
+    "healthy": """Our SciFact search quality feels mediocre. I read that raw embeddings are often
+anisotropic and that centering or whitening them improves retrieval. The corpus embeddings are
+corpus.npy, query embeddings queries.npy, relevance labels qrels.tsv (query row, corpus row,
+grade; rows are positions in those files). Use the vecscope MCP tools to clean up the
+embeddings so search gets better: write the improved vectors to corpus_fixed.npy and
+queries_fixed.npy, and show with a re-audit that it worked.""",
+    "misdirected": """Users say our SciFact search got much worse this week. We think the corpus
+embeddings are anisotropic and need to be centered. The corpus embeddings are corpus.npy, query
+embeddings queries.npy (from the query service), relevance labels qrels.tsv (query row, corpus
+row, grade; rows are positions in those files). Use the vecscope MCP tools to fix it: center
+the corpus into corpus_fixed.npy (and the queries into queries_fixed.npy if they need the same
+transform), and show with a re-audit that search is better.""",
 }
 
 
@@ -69,7 +90,15 @@ def main() -> None:
     queries = queries / np.linalg.norm(queries, axis=1, keepdims=True)
     corpus = docs.astype(np.float32)
     queries = queries.astype(np.float32)
-    if args.case == "ingestion":
+    if args.case == "misdirected":
+        # the query service embedded with another 384-dim model; the corpus is unchanged
+        _, other = embed(
+            "sentence-transformers/all-MiniLM-L6-v2", "scifact", doc_text, q_text, "", ""
+        )
+        queries = (other / np.linalg.norm(other, axis=1, keepdims=True)).astype(np.float32)
+    if args.case in ("healthy", "misdirected"):
+        top = None
+    elif args.case == "ingestion":
         rng = np.random.default_rng(0)
         corpus[2600:] *= rng.uniform(0.6, 1.6, (len(docs) - 2600, 1)).astype(np.float32)
         corpus = np.concatenate([corpus, corpus[1000:1600]])
@@ -93,7 +122,8 @@ def main() -> None:
         )
     np.save(out / "corpus.npy", corpus)
     np.save(out / "queries.npy", queries)
-    np.save(out / "prod_topk.npy", top.astype(np.int64))
+    if top is not None:
+        np.save(out / "prod_topk.npy", top.astype(np.int64))
     (out / "PROMPT.txt").write_text(PROMPTS[args.case] + "\n", encoding="utf-8")
     print(
         f"wrote {out}/: corpus {corpus.shape}, queries {queries.shape}, "

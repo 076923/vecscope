@@ -1,0 +1,722 @@
+[
+ {
+  "dataset": "xpqa-it",
+  "candidate": "KURE-v1",
+  "languages": "multi",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.766,
+  "ndcg_change": 0.063,
+  "lost_share": 0.0,
+  "reference_regressions": false,
+  "reference_review": false,
+  "gained": 19,
+  "net_drop": -0.095,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.0,
+   "inconclusive": 0.04,
+   "pass": 0.96
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "multilingual-e5-large",
+  "languages": "multi",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.743,
+  "ndcg_change": 0.04,
+  "lost_share": 0.022,
+  "reference_regressions": false,
+  "reference_review": false,
+  "gained": 8,
+  "net_drop": -0.02,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.0,
+   "inconclusive": 0.215,
+   "pass": 0.785
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "Qwen3-Embedding-0.6B",
+  "languages": "multi",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.715,
+  "ndcg_change": 0.012,
+  "lost_share": 0.05,
+  "reference_regressions": false,
+  "reference_review": true,
+  "gained": 11,
+  "net_drop": -0.01,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.03,
+   "inconclusive": 0.69,
+   "pass": 0.28
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "gte-multilingual-base",
+  "languages": "multi",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.692,
+  "ndcg_change": -0.011,
+  "lost_share": 0.066,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 7,
+  "net_drop": 0.025,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.075,
+   "inconclusive": 0.88,
+   "pass": 0.045
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "bge-base-en-v1.5",
+  "languages": "en",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.636,
+  "ndcg_change": -0.067,
+  "lost_share": 0.155,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 7,
+  "net_drop": 0.105,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.67,
+   "inconclusive": 0.33,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "gte-base",
+  "languages": "en",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.63,
+  "ndcg_change": -0.073,
+  "lost_share": 0.155,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 4,
+  "net_drop": 0.12,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.74,
+   "inconclusive": 0.26,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "bge-small-en-v1.5",
+  "languages": "en",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.602,
+  "ndcg_change": -0.101,
+  "lost_share": 0.204,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 8,
+  "net_drop": 0.145,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.95,
+   "inconclusive": 0.05,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "e5-base-v2",
+  "languages": "en",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.578,
+  "ndcg_change": -0.125,
+  "lost_share": 0.188,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 4,
+  "net_drop": 0.15,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.99,
+   "inconclusive": 0.01,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "all-MiniLM-L6-v2",
+  "languages": "en",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.546,
+  "ndcg_change": -0.157,
+  "lost_share": 0.304,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 5,
+  "net_drop": 0.25,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "all-mpnet-base-v2",
+  "languages": "en",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.541,
+  "ndcg_change": -0.162,
+  "lost_share": 0.265,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 4,
+  "net_drop": 0.22,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "paraphrase-multilingual-MiniLM-L12-v2",
+  "languages": "multi",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.516,
+  "ndcg_change": -0.187,
+  "lost_share": 0.227,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 5,
+  "net_drop": 0.18,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-it",
+  "candidate": "glove.6B.300d",
+  "languages": "en",
+  "baseline_ndcg": 0.703,
+  "candidate_ndcg": 0.233,
+  "ndcg_change": -0.47,
+  "lost_share": 0.707,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 2,
+  "net_drop": 0.63,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "KURE-v1",
+  "languages": "multi",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.518,
+  "ndcg_change": 0.038,
+  "lost_share": 0.0,
+  "reference_regressions": false,
+  "reference_review": false,
+  "gained": 39,
+  "net_drop": -0.195,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.0,
+   "inconclusive": 0.415,
+   "pass": 0.585
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "multilingual-e5-large",
+  "languages": "multi",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.51,
+  "ndcg_change": 0.03,
+  "lost_share": 0.064,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 12,
+  "net_drop": -0.01,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.0,
+   "inconclusive": 0.44,
+   "pass": 0.56
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "Qwen3-Embedding-0.6B",
+  "languages": "multi",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.437,
+  "ndcg_change": -0.043,
+  "lost_share": 0.178,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 19,
+  "net_drop": 0.045,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.52,
+   "inconclusive": 0.48,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "gte-multilingual-base",
+  "languages": "multi",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.433,
+  "ndcg_change": -0.047,
+  "lost_share": 0.153,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 19,
+  "net_drop": 0.025,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.505,
+   "inconclusive": 0.495,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "e5-base-v2",
+  "languages": "en",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.349,
+  "ndcg_change": -0.132,
+  "lost_share": 0.318,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 13,
+  "net_drop": 0.185,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.995,
+   "inconclusive": 0.005,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "gte-base",
+  "languages": "en",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.339,
+  "ndcg_change": -0.141,
+  "lost_share": 0.344,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 14,
+  "net_drop": 0.2,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.995,
+   "inconclusive": 0.005,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "bge-base-en-v1.5",
+  "languages": "en",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.31,
+  "ndcg_change": -0.17,
+  "lost_share": 0.382,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 16,
+  "net_drop": 0.22,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "bge-small-en-v1.5",
+  "languages": "en",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.303,
+  "ndcg_change": -0.177,
+  "lost_share": 0.382,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 8,
+  "net_drop": 0.26,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "paraphrase-multilingual-MiniLM-L12-v2",
+  "languages": "multi",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.284,
+  "ndcg_change": -0.196,
+  "lost_share": 0.344,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 11,
+  "net_drop": 0.215,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "all-mpnet-base-v2",
+  "languages": "en",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.237,
+  "ndcg_change": -0.244,
+  "lost_share": 0.465,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 8,
+  "net_drop": 0.325,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "all-MiniLM-L6-v2",
+  "languages": "en",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.223,
+  "ndcg_change": -0.257,
+  "lost_share": 0.465,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 7,
+  "net_drop": 0.33,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pl",
+  "candidate": "glove.6B.300d",
+  "languages": "en",
+  "baseline_ndcg": 0.48,
+  "candidate_ndcg": 0.093,
+  "ndcg_change": -0.387,
+  "lost_share": 0.79,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 5,
+  "net_drop": 0.595,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "KURE-v1",
+  "languages": "multi",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.496,
+  "ndcg_change": 0.048,
+  "lost_share": 0.006,
+  "reference_regressions": false,
+  "reference_review": false,
+  "gained": 41,
+  "net_drop": -0.2,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.0,
+   "inconclusive": 0.225,
+   "pass": 0.775
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "Qwen3-Embedding-0.6B",
+  "languages": "multi",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.482,
+  "ndcg_change": 0.034,
+  "lost_share": 0.064,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 25,
+  "net_drop": -0.075,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.0,
+   "inconclusive": 0.55,
+   "pass": 0.45
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "gte-multilingual-base",
+  "languages": "multi",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.475,
+  "ndcg_change": 0.027,
+  "lost_share": 0.057,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 17,
+  "net_drop": -0.04,
+  "net_regressions": false,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.0,
+   "inconclusive": 0.6,
+   "pass": 0.4
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "multilingual-e5-large",
+  "languages": "multi",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.411,
+  "ndcg_change": -0.037,
+  "lost_share": 0.127,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 6,
+  "net_drop": 0.07,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.49,
+   "inconclusive": 0.5,
+   "pass": 0.01
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "gte-base",
+  "languages": "en",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.386,
+  "ndcg_change": -0.062,
+  "lost_share": 0.229,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 16,
+  "net_drop": 0.1,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.585,
+   "inconclusive": 0.415,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "e5-base-v2",
+  "languages": "en",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.378,
+  "ndcg_change": -0.07,
+  "lost_share": 0.178,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 9,
+  "net_drop": 0.095,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.825,
+   "inconclusive": 0.175,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "bge-small-en-v1.5",
+  "languages": "en",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.374,
+  "ndcg_change": -0.074,
+  "lost_share": 0.261,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 17,
+  "net_drop": 0.12,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.725,
+   "inconclusive": 0.275,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "bge-base-en-v1.5",
+  "languages": "en",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.372,
+  "ndcg_change": -0.076,
+  "lost_share": 0.261,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 14,
+  "net_drop": 0.135,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.77,
+   "inconclusive": 0.23,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "all-mpnet-base-v2",
+  "languages": "en",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.335,
+  "ndcg_change": -0.113,
+  "lost_share": 0.306,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 18,
+  "net_drop": 0.15,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.975,
+   "inconclusive": 0.025,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "paraphrase-multilingual-MiniLM-L12-v2",
+  "languages": "multi",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.323,
+  "ndcg_change": -0.125,
+  "lost_share": 0.242,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 14,
+  "net_drop": 0.12,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.98,
+   "inconclusive": 0.02,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "all-MiniLM-L6-v2",
+  "languages": "en",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.32,
+  "ndcg_change": -0.128,
+  "lost_share": 0.299,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 13,
+  "net_drop": 0.17,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 0.975,
+   "inconclusive": 0.025,
+   "pass": 0.0
+  }
+ },
+ {
+  "dataset": "xpqa-pt",
+  "candidate": "glove.6B.300d",
+  "languages": "en",
+  "baseline_ndcg": 0.448,
+  "candidate_ndcg": 0.126,
+  "ndcg_change": -0.322,
+  "lost_share": 0.745,
+  "reference_regressions": true,
+  "reference_review": false,
+  "gained": 2,
+  "net_drop": 0.575,
+  "net_regressions": true,
+  "net_review": false,
+  "labeled_gate": {
+   "fail": 1.0,
+   "inconclusive": 0.0,
+   "pass": 0.0
+  }
+ }
+]

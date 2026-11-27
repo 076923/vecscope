@@ -237,6 +237,19 @@ _REASON = {
 }
 
 
+# rejected or unreviewed changes for one step before the agent stops and reports
+ATTEMPT_LIMIT = 3
+# how any step's change is tried and kept; the same for every step
+ADOPT_WHEN = (
+    "apply first_change to a copy of the vectors (and of the queries and the index), never to "
+    "the original; re-audit the copy with the original as baseline and the same qrels; adopt "
+    "only when baseline_diff.change_decision.decision is 'adopt'. 'reject' means keep the "
+    "original; 'needs_review' (no labels on both runs) means a person decides. After "
+    f"{ATTEMPT_LIMIT} changes for one step that were not adopted, stop and report instead of "
+    "trying another"
+)
+
+
 def _bad(f: dict, *names: str) -> bool:
     return any(n in f and f[n]["verdict"] != "ok" for n in names)
 
@@ -282,6 +295,7 @@ def build_plan(findings: list[dict], retrieval: dict | None = None) -> list[dict
                 "re_measure": verify
                 + ("" if retrieval else "; pass --qrels to measure retrieval quality as well"),
                 "why_this_order": why,
+                "adopt_when": ADOPT_WHEN,
                 "only_inconclusive": not conclusive,
             }
         )
@@ -324,6 +338,7 @@ def build_plan(findings: list[dict], retrieval: dict | None = None) -> list[dict
                 "first_change": by[n].get("suggested_action", ""),
                 "re_measure": by[n].get("verify_by", ""),
                 "why_this_order": "no shared cause with the findings above",
+                "adopt_when": ADOPT_WHEN,
                 "only_inconclusive": bool(by[n].get("inconclusive")),
             }
         )
